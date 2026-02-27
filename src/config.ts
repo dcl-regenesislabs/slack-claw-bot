@@ -11,31 +11,24 @@ export interface Config {
   repoAliases: Record<string, string>;
   maxConcurrentAgents: number;
   maxQueueSize: number;
+  upstashRedisUrl?: string;
+  upstashRedisToken?: string;
 }
 
 export function loadConfig(): Config {
-  const slackBotToken = requireEnv("SLACK_BOT_TOKEN");
-  const slackAppToken = requireEnv("SLACK_APP_TOKEN");
-  const githubToken = requireEnv("GITHUB_TOKEN");
-  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-  const anthropicOAuthRefreshToken = process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN;
-  const model = process.env.MODEL;
-  const defaultRepos = parseCommaSeparated(process.env.DEFAULT_REPOS);
-  const repoAliases = parseAliases(process.env.REPO_ALIASES);
-  const maxConcurrentAgents = parseInt(process.env.MAX_CONCURRENT_AGENTS || "3", 10);
-  const maxQueueSize = parseInt(process.env.MAX_QUEUE_SIZE || "10", 10);
-
   return {
-    slackBotToken,
-    slackAppToken,
-    githubToken,
-    anthropicApiKey,
-    anthropicOAuthRefreshToken,
-    model,
-    defaultRepos,
-    repoAliases,
-    maxConcurrentAgents,
-    maxQueueSize,
+    slackBotToken: requireEnv("SLACK_BOT_TOKEN"),
+    slackAppToken: requireEnv("SLACK_APP_TOKEN"),
+    githubToken: requireEnv("GITHUB_TOKEN"),
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
+    model: process.env.MODEL,
+    defaultRepos: parseCommaSeparated(process.env.DEFAULT_REPOS),
+    repoAliases: parseAliases(process.env.REPO_ALIASES),
+    maxConcurrentAgents: parseInt(process.env.MAX_CONCURRENT_AGENTS || "3", 10),
+    maxQueueSize: parseInt(process.env.MAX_QUEUE_SIZE || "10", 10),
+    upstashRedisUrl: process.env.UPSTASH_REDIS_REST_URL,
+    upstashRedisToken: process.env.UPSTASH_REDIS_REST_TOKEN,
   };
 }
 
