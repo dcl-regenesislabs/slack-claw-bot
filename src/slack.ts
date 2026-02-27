@@ -29,7 +29,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     console.log(`[slack] Triggered by ${userName} in #${channelName}: ${text}`);
 
     if (config.logChannelId) {
-      postAuditLog(client, config.logChannelId, event, channelName, text)
+      postAuditLog(client, config.logChannelId, event, text)
         .catch((err) => console.error("[slack] Failed to post log message:", err));
     }
 
@@ -131,7 +131,6 @@ async function postAuditLog(
   client: WebClient,
   logChannelId: string,
   event: { channel: string; ts: string; user?: string },
-  channelName: string,
   text: string,
 ): Promise<void> {
   const { permalink } = await client.chat.getPermalink({
@@ -140,7 +139,7 @@ async function postAuditLog(
   });
   await client.chat.postMessage({
     channel: logChannelId,
-    text: `*<@${event.user}>* in *#${channelName}*: ${text}\n<${permalink}|View message>`,
+    text: `*<@${event.user}>* in <#${event.channel}>: ${text}\n<${permalink}|View message>`,
   });
 }
 
