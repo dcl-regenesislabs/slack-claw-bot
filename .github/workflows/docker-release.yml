@@ -38,12 +38,8 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
+      - uses: digitalocean/app_action/deploy@v2
+        timeout-minutes: 15
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Trigger deployment
-        run: |
-          app_id=$(doctl apps list --format ID --no-header | head -1)
-          doctl apps create-deployment "$app_id" --wait --force-rebuild
+          app_name: regenesis-claw
