@@ -32,7 +32,6 @@ interface AgentConfig {
 
 export interface RunOptions {
   threadContent: string;
-  repo?: string;
   dryRun?: boolean;
   events?: EventEmitter;
   sessionId?: string;
@@ -135,7 +134,7 @@ export async function runAgent(options: RunOptions): Promise<string> {
     throw new Error("Agent not initialized — call initAgent() first");
   }
 
-  const { threadContent, repo, dryRun, events, sessionId } = options;
+  const { threadContent, dryRun, events, sessionId } = options;
   const sessionManager = createSessionManager(sessionId);
 
   const systemPrompt = readFileSync(
@@ -172,7 +171,7 @@ export async function runAgent(options: RunOptions): Promise<string> {
   });
 
   try {
-    const prompt = buildPrompt(threadContent, repo, dryRun);
+    const prompt = buildPrompt(threadContent, dryRun);
 
     if (events) {
       subscribeToTextDeltas(session, events);
@@ -211,20 +210,12 @@ function createSessionManager(sessionId?: string): SessionManager {
   return SessionManager.open(join(sessionsDir, `${sessionId}.jsonl`));
 }
 
-function buildPrompt(threadContent: string, repo?: string, dryRun?: boolean): string {
-  const parts: string[] = [];
+function buildPrompt(threadContent: string, dryRun?: boolean): string {
+  const dryRunNotice = dryRun
+    ? "IMPORTANT: Do not execute any commands. Just describe what you would do.\n\n"
+    : "";
 
-  if (dryRun) {
-    parts.push("IMPORTANT: Do not execute any commands. Just describe what you would do.\n");
-  }
-  if (repo) {
-    parts.push(`Target repository: \`${repo}\``);
-  }
-
-  parts.push("## Slack Thread\n");
-  parts.push(`<slack-thread>\n${threadContent}\n</slack-thread>`);
-
-  return parts.join("\n");
+  return `${dryRunNotice}## Slack Thread\n\n<slack-thread>\n${threadContent}\n</slack-thread>`;
 }
 
 function subscribeToTextDeltas(session: any, events: EventEmitter): void {

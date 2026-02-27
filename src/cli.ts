@@ -9,7 +9,6 @@ if (!apiKey) {
   process.exit(1);
 }
 
-const repo = process.argv[2];
 const dryRun = process.argv.includes("--dry-run");
 
 initAgent({
@@ -19,7 +18,6 @@ initAgent({
 });
 
 console.log("CLI test mode");
-if (repo) console.log(`Target repo: ${repo}`);
 if (dryRun) console.log("Dry run enabled — agent will not execute commands");
 console.log("Type your message (multi-line: end with an empty line):\n");
 
@@ -48,7 +46,7 @@ async function handleInput(threadContent: string) {
   });
 
   try {
-    await runAgent({ threadContent, repo, dryRun, events });
+    await runAgent({ threadContent, dryRun, events });
     console.log("\n\n--- Done ---\n");
   } catch (err) {
     console.error("Error:", err instanceof Error ? err.message : err);

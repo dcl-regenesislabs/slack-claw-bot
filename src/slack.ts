@@ -4,8 +4,6 @@ import type { Config } from "./config.js";
 import { runAgent, syncAuth } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
 
-const REPO_PATTERN = /(?:^|\s)([\w.-]+\/[\w.-]+)(?:\s|$)/;
-
 const nameCache = new Map<string, string>();
 
 export async function startSlackBot(config: Config): Promise<void> {
@@ -20,7 +18,6 @@ export async function startSlackBot(config: Config): Promise<void> {
   app.event("app_mention", async ({ event, client, say }) => {
     const threadTs = event.thread_ts || event.ts;
     const text = event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
-    const repo = parseRepo(text, config.defaultRepos, config.repoAliases);
 
     const [userName, channelName] = await Promise.all([
       event.user ? resolveUserName(client, event.user) : Promise.resolve("unknown"),
@@ -44,7 +41,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       await react("rl-bonk-doge");
 
       const threadContent = await fetchThread(client, event.channel, threadTs);
-      const response = await runAgent({ threadContent, repo, sessionId: threadTs });
+      const response = await runAgent({ threadContent, sessionId: threadTs });
       await syncAuth();
 
       await unreact("rl-bonk-doge");
@@ -78,23 +75,6 @@ export async function startSlackBot(config: Config): Promise<void> {
 
   await app.start();
   console.log("Slack bot is running");
-}
-
-function parseRepo(
-  text: string,
-  defaultRepos: string[],
-  repoAliases: Record<string, string>,
-): string | undefined {
-  const lowerText = text.toLowerCase();
-  for (const [alias, repo] of Object.entries(repoAliases)) {
-    if (lowerText.includes(alias)) return repo;
-  }
-
-  const match = text.match(REPO_PATTERN);
-  if (match) return match[1];
-
-  if (defaultRepos.length === 1) return defaultRepos[0];
-  return undefined;
 }
 
 async function cachedLookup(
