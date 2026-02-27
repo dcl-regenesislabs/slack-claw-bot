@@ -17,7 +17,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectDir = join(__dirname, "..");
 
 interface AgentConfig {
-  anthropicApiKey: string;
+  anthropicApiKey?: string;
+  anthropicOAuthRefreshToken?: string;
   githubToken?: string;
   model?: string;
 }
@@ -38,8 +39,19 @@ export function initAgent(config: AgentConfig): void {
     process.env.GITHUB_TOKEN = config.githubToken;
   }
 
-  authStorage = AuthStorage.inMemory();
-  authStorage.setRuntimeApiKey("anthropic", config.anthropicApiKey);
+  if (config.anthropicOAuthRefreshToken) {
+    authStorage = AuthStorage.inMemory({
+      anthropic: {
+        type: "oauth",
+        refresh: config.anthropicOAuthRefreshToken,
+        access: "",
+        expires: 0,
+      },
+    });
+  } else if (config.anthropicApiKey) {
+    authStorage = AuthStorage.inMemory();
+    authStorage.setRuntimeApiKey("anthropic", config.anthropicApiKey);
+  }
   modelId = config.model || "claude-sonnet-4-5";
 }
 
