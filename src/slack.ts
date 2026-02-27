@@ -1,7 +1,7 @@
 import { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
-import { runAgent } from "./agent.js";
+import { runAgent, syncAuth } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
 
 const REPO_PATTERN = /(?:^|\s)([\w.-]+\/[\w.-]+)(?:\s|$)/;
@@ -40,6 +40,7 @@ export async function startSlackBot(config: Config): Promise<void> {
 
       const threadContent = await fetchThread(client, event.channel, threadTs);
       const response = await runAgent({ threadContent, repo, sessionId: threadTs });
+      await syncAuth();
 
       await unreact("rl-bonk-doge");
       if (response) {
