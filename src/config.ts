@@ -13,6 +13,7 @@ export interface Config {
   maxQueueSize: number;
   upstashRedisUrl?: string;
   upstashRedisToken?: string;
+  logChannelId?: string;
 }
 
 export function loadConfig(): Config {
@@ -29,6 +30,7 @@ export function loadConfig(): Config {
     maxQueueSize: parseInt(process.env.MAX_QUEUE_SIZE || "10", 10),
     upstashRedisUrl: process.env.UPSTASH_REDIS_REST_URL,
     upstashRedisToken: process.env.UPSTASH_REDIS_REST_TOKEN,
+    logChannelId: process.env.LOG_CHANNEL_ID,
   };
 }
 
