@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini github-cli
 
 WORKDIR /app
 
