@@ -5,6 +5,7 @@ export interface Config {
   slackAppToken: string;
   githubToken: string;
   anthropicApiKey?: string;
+  anthropicOAuthRefreshToken?: string;
   model?: string;
   defaultRepos: string[];
   repoAliases: Record<string, string>;
@@ -17,6 +18,7 @@ export function loadConfig(): Config {
   const slackAppToken = requireEnv("SLACK_APP_TOKEN");
   const githubToken = requireEnv("GITHUB_TOKEN");
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  const anthropicOAuthRefreshToken = process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN;
   const model = process.env.MODEL;
   const defaultRepos = parseCommaSeparated(process.env.DEFAULT_REPOS);
   const repoAliases = parseAliases(process.env.REPO_ALIASES);
@@ -28,6 +30,7 @@ export function loadConfig(): Config {
     slackAppToken,
     githubToken,
     anthropicApiKey,
+    anthropicOAuthRefreshToken,
     model,
     defaultRepos,
     repoAliases,
