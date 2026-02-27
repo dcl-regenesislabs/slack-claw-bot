@@ -100,7 +100,10 @@ export async function runAgent(options: RunOptions): Promise<string> {
     console.log("[agent] messages in session:", messageCount);
     for (const msg of session.messages) {
       const content = "content" in msg ? JSON.stringify(msg.content)?.slice(0, 200) : "N/A";
-      console.log(`[agent]   role=${msg.role} content=${content}`);
+      const extra = msg.role === "assistant"
+        ? ` stopReason=${(msg as any).stopReason} error=${(msg as any).errorMessage ?? "none"}`
+        : "";
+      console.log(`[agent]   role=${msg.role}${extra} content=${content}`);
     }
 
     logUsage(session.messages);
