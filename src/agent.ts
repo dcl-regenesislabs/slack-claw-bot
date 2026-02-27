@@ -83,7 +83,7 @@ async function initOAuthAgent(config: AgentConfig): Promise<void> {
   if (!seeded) {
     console.log("[agent] Seeding auth from ANTHROPIC_OAUTH_REFRESH_TOKEN env var");
     const seed = JSON.stringify({
-      anthropic: { refreshToken: config.anthropicOAuthRefreshToken },
+      anthropic: { type: "oauth", refresh: config.anthropicOAuthRefreshToken, access: "", expires: 0 },
     });
     writeFileSync(authPath, seed, "utf-8");
   }
