@@ -89,7 +89,9 @@ async function initOAuthAgent(config: AgentConfig): Promise<void> {
   }
 
   authStorage = AuthStorage.create(authPath);
-  lastAuthSnapshot = readFileSync(authPath, "utf-8");
+  if (seeded) {
+    lastAuthSnapshot = readFileSync(authPath, "utf-8");
+  }
 }
 
 export async function syncAuth(): Promise<void> {
