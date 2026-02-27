@@ -92,10 +92,22 @@ export async function runAgent(options: RunOptions): Promise<string> {
     }
 
     console.log("[agent] running prompt...");
+    console.log("[agent] prompt:", prompt.slice(0, 200));
+    console.log("[agent] model:", modelId);
     await session.prompt(prompt);
+
+    const messageCount = session.messages.length;
+    console.log("[agent] messages in session:", messageCount);
+    for (const msg of session.messages) {
+      const content = "content" in msg ? JSON.stringify(msg.content)?.slice(0, 200) : "N/A";
+      console.log(`[agent]   role=${msg.role} content=${content}`);
+    }
+
     logUsage(session.messages);
 
-    return session.getLastAssistantText() || "";
+    const result = session.getLastAssistantText() || "";
+    console.log("[agent] result length:", result.length);
+    return result;
   } finally {
     session.dispose();
   }
