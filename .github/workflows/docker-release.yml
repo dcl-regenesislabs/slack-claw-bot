@@ -9,6 +9,7 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 permissions:
+  contents: read
   packages: write
 
 jobs:
