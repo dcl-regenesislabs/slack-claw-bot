@@ -8,7 +8,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Searches for related issues and PRs
 - Triages and labels issues
 - Summarizes threads and answers questions about repositories
-- Supports targeting repos by alias (e.g. `@bot mobile create an issue`)
+- Knows common repository aliases via a built-in skill (e.g. `@bot create an issue in mobile`)
 
 ## Prerequisites
 
@@ -48,8 +48,6 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `SLACK_APP_TOKEN` | Yes | App-level token for Socket Mode (`xapp-...`) |
 | `GITHUB_TOKEN` | Yes | GitHub PAT for `gh` CLI |
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
-| `DEFAULT_REPOS` | No | Comma-separated default repositories |
-| `REPO_ALIASES` | No | Alias mappings (`alias:org/repo,...`) |
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
 | `MAX_QUEUE_SIZE` | No | Max queued requests (default: 10) |
 
@@ -75,5 +73,5 @@ src/
   health.ts         Health check endpoint
 prompts/
   system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, github, triage)
+skills/             Agent skill definitions (create-issue, github, repos, triage)
 ```
