@@ -12,6 +12,7 @@ import {
   createBashTool,
   createReadTool,
 } from "@mariozechner/pi-coding-agent";
+import { buildPrompt } from "./prompt.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectDir = join(__dirname, "..");
@@ -66,20 +67,12 @@ async function initOAuthAgent(config: AgentConfig): Promise<void> {
     redisConfig = { url: config.upstashRedisUrl, token: config.upstashRedisToken };
   }
 
-  let seeded = false;
+  const stored = redisConfig ? await redisGet(redisConfig) : null;
 
-  // Try loading from Redis first
-  if (redisConfig) {
-    const stored = await redisGet(redisConfig);
-    if (stored) {
-      console.log("[agent] Loaded auth state from Redis");
-      writeFileSync(authPath, stored, "utf-8");
-      seeded = true;
-    }
-  }
-
-  // Fall back to env var
-  if (!seeded) {
+  if (stored) {
+    console.log("[agent] Loaded auth state from Redis");
+    writeFileSync(authPath, stored, "utf-8");
+  } else {
     console.log("[agent] Seeding auth from ANTHROPIC_OAUTH_REFRESH_TOKEN env var");
     const seed = JSON.stringify({
       anthropic: { type: "oauth", refresh: config.anthropicOAuthRefreshToken, access: "", expires: 0 },
@@ -88,7 +81,7 @@ async function initOAuthAgent(config: AgentConfig): Promise<void> {
   }
 
   authStorage = AuthStorage.create(authPath);
-  if (seeded) {
+  if (stored) {
     lastAuthSnapshot = readFileSync(authPath, "utf-8");
   }
 }
@@ -185,7 +178,7 @@ export async function runAgent(options: RunOptions): Promise<string> {
     const messageCount = session.messages.length;
     console.log("[agent] messages in session:", messageCount);
     for (const msg of session.messages) {
-      const content = "content" in msg ? JSON.stringify(msg.content)?.slice(0, 200) : "N/A";
+      const content = "content" in msg ? JSON.stringify(msg.content).slice(0, 200) : "N/A";
       const extra = msg.role === "assistant"
         ? ` stopReason=${(msg as any).stopReason} error=${(msg as any).errorMessage ?? "none"}`
         : "";
@@ -208,14 +201,6 @@ function createSessionManager(sessionId?: string): SessionManager {
   const sessionsDir = join(projectDir, "sessions");
   mkdirSync(sessionsDir, { recursive: true });
   return SessionManager.open(join(sessionsDir, `${sessionId}.jsonl`));
-}
-
-function buildPrompt(threadContent: string, dryRun?: boolean): string {
-  const dryRunNotice = dryRun
-    ? "IMPORTANT: Do not execute any commands. Just describe what you would do.\n\n"
-    : "";
-
-  return `${dryRunNotice}## Slack Thread\n\n<slack-thread>\n${threadContent}\n</slack-thread>`;
 }
 
 function subscribeToTextDeltas(session: any, events: EventEmitter): void {

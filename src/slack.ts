@@ -37,7 +37,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       return client.reactions.remove({ channel: event.channel, timestamp: event.ts, name });
     }
 
-    const result = scheduler.submit(threadTs, async () => {
+    const submission = scheduler.submit(threadTs, async () => {
       await react("rl-bonk-doge");
 
       const threadContent = await fetchThread(client, event.channel, threadTs);
@@ -54,17 +54,17 @@ export async function startSlackBot(config: Config): Promise<void> {
       }
     });
 
-    if (result === "thread-busy") {
+    if (submission === "thread-busy") {
       await say({ text: "I'm still working on your previous request in this thread.", thread_ts: threadTs });
       return;
     }
 
-    if (result === "queue-full") {
+    if (submission === "queue-full") {
       await say({ text: "I'm handling too many requests right now. Please try again in a moment.", thread_ts: threadTs });
       return;
     }
 
-    result.done.catch(async (err) => {
+    submission.done.catch(async (err) => {
       const message = err instanceof Error ? err.message : "Unknown error occurred";
       console.error("[slack] Agent error:", err);
       await unreact("rl-bonk-doge");
@@ -123,7 +123,7 @@ async function postAuditLog(
   });
 }
 
-function markdownToMrkdwn(text: string): string {
+export function markdownToMrkdwn(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, "*$1*")
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>");
@@ -134,13 +134,13 @@ async function fetchThread(
   channel: string,
   threadTs: string,
 ): Promise<string> {
-  const result = await client.conversations.replies({
+  const reply = await client.conversations.replies({
     channel,
     ts: threadTs,
     limit: 200,
   });
 
-  const messages = result.messages || [];
+  const messages = reply.messages || [];
 
   const uniqueUserIds = [...new Set(
     messages.map((m) => m.user).filter((id): id is string => Boolean(id)),

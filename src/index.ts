@@ -5,7 +5,9 @@ import { startHealthServer } from "./health.js";
 
 const config = loadConfig();
 
-startHealthServer();
+if (config.healthPort) {
+  startHealthServer(config.healthPort);
+}
 
 await initAgent({
   anthropicApiKey: config.anthropicApiKey,

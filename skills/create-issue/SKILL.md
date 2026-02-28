@@ -17,12 +17,26 @@ description: Create a GitHub issue from a Slack thread conversation. Analyzes th
    gh issue create --repo {repo} --title "..." --body "..."
    ```
 
-## Issue Body Structure
+## Suggested Issue Sections
 
-- **Description**: Clear summary of the request/problem from the thread
-- **Context**: Key decisions or details from the conversation
-- **Related Issues**: Links to related issues found in step 2
-- **Source**: Note that this was created from a Slack thread
+These are not mandatory — use your judgment based on the content:
+
+- **Description** — clear summary of the request or problem
+- **Steps to Reproduce** — if it's a bug and the thread includes repro steps
+- **Expected Behavior** — if it's a bug, what should happen instead
+- **Context** — key decisions, details, or constraints from the conversation
+- **Related Issues** — links to related issues found in step 2
+
+For bugs, try to include the platform (Android, iOS, desktop, VR) and app version if mentioned in the thread, but don't enforce a strict template — just capture what's useful.
+
+## Labels
+
+- Always add the `claw-created` label to every issue created by this bot
+- When creating issues in `decentraland/godot-explorer`, apply relevant labels from the mobile-project skill (type, platform, severity)
+- Add labels via the `--label` flag:
+  ```
+  gh issue create --repo {repo} --title "..." --body "..." --label "bug,Android,claw-created"
+  ```
 
 ## Guidelines
 
