@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { AgentScheduler, type SubmitResult } from "./concurrency.js";
+import { AgentScheduler, type SubmitResult } from "../src/concurrency.js";
 
 function accepted(result: SubmitResult): asserts result is { status: "accepted"; done: Promise<void> } {
   assert.ok(typeof result === "object" && result.status === "accepted");

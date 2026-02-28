@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { markdownToMrkdwn } from "./slack.js";
+import { markdownToMrkdwn } from "../src/slack.js";
 
 describe("markdownToMrkdwn", () => {
   it("converts bold markdown to mrkdwn", () => {

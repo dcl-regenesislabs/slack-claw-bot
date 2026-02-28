@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildPrompt } from "./prompt.js";
+import { buildPrompt } from "../src/prompt.js";
 
 describe("buildPrompt", () => {
   it("wraps content in slack-thread tags", () => {
