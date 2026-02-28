@@ -15,7 +15,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Node.js 20+
 - A [Slack app](https://api.slack.com/apps) configured for Socket Mode with an `app_mention` event subscription
 - GitHub personal access token
-- Anthropic OAuth refresh token
+- Anthropic API key
 
 ## Setup
 
@@ -49,7 +49,8 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `SLACK_BOT_TOKEN` | Yes | Bot token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | Yes | App-level token for Socket Mode (`xapp-...`) |
 | `GITHUB_TOKEN` | Yes | GitHub PAT for `gh` CLI |
-| `ANTHROPIC_OAUTH_REFRESH_TOKEN` | No* | Anthropic OAuth refresh token (see Auth section) |
+| `ANTHROPIC_API_KEY` | * | Anthropic API key (provide this or OAuth token) |
+| `ANTHROPIC_OAUTH_REFRESH_TOKEN` | * | OAuth refresh token (alternative to API key) |
 | `MODEL` | No | Model override (default: `claude-sonnet-4-5`) |
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
 | `MAX_QUEUE_SIZE` | No | Max queued requests (default: 10) |
@@ -58,30 +59,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 
-*\*Required for first-time setup if no `.auth.json` exists yet.*
-
-### Authentication (OAuth)
-
-All Anthropic auth uses OAuth — there is no API key path. The OAuth flow works like this:
-
-1. A **refresh token** is exchanged for a short-lived **access token** on each API call.
-2. The SDK may **rotate the refresh token** after use, so the original token becomes invalid.
-3. The current auth state (refresh + access + expiry) is persisted in `.auth.json`.
-
-**Getting started:**
-
-- **First run** — set `ANTHROPIC_OAUTH_REFRESH_TOKEN` in `.env`. The bot writes `.auth.json` on startup and uses that going forward.
-- **Existing session** — copy `.auth.json` from another pi-agent or OpenDCL session into the project root. No env var needed.
-- **CLI** — works if `.auth.json` exists (`npm run cli`). No env var needed.
-
-**Why `.auth.json` matters:** because refresh tokens rotate on use, the file is the source of truth. The env var is only a seed for first-time setup.
-
-**Why Redis:** container restarts lose the file, so the original env var token may already be expired. When Upstash Redis is configured (`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`):
-
-1. **On startup** — the bot loads the latest auth state from Redis instead of the env var.
-2. **After each rotation** — the bot syncs the new state back to Redis.
-
-This keeps the bot resilient to restarts without manual token re-provisioning.
+\* One of `ANTHROPIC_API_KEY` or `ANTHROPIC_OAUTH_REFRESH_TOKEN` is required.
 
 ## Docker
 

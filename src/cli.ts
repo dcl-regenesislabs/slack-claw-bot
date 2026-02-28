@@ -3,11 +3,17 @@ import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
 import { initAgent, runAgent } from "./agent.js";
 
+const apiKey = process.env.ANTHROPIC_API_KEY;
+if (!apiKey) {
+  console.error("ANTHROPIC_API_KEY is required");
+  process.exit(1);
+}
+
 const dryRun = process.argv.includes("--dry-run");
 const positionalArgs = process.argv.slice(2).filter((a) => a !== "--dry-run");
 
 await initAgent({
-  anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
+  anthropicApiKey: apiKey,
   githubToken: process.env.GITHUB_TOKEN,
   model: process.env.MODEL,
 });

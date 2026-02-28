@@ -10,6 +10,7 @@ if (config.healthPort) {
 }
 
 await initAgent({
+  anthropicApiKey: config.anthropicApiKey,
   anthropicOAuthRefreshToken: config.anthropicOAuthRefreshToken,
   githubToken: config.githubToken,
   model: config.model,
