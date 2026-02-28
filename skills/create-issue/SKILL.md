@@ -9,11 +9,11 @@ description: Create a GitHub issue from a Slack thread conversation. Analyzes th
 
 1. **Analyze the thread** — identify the core request, problem, or feature
 2. **Search related issues** — find existing issues that may be related:
-   ```
+   ```bash
    gh issue list --repo {repo} --search "<keywords>" --limit 10 --json number,title,url,state
    ```
 3. **Create the issue**:
-   ```
+   ```bash
    gh issue create --repo {repo} --title "..." --body "..."
    ```
 
@@ -29,14 +29,16 @@ These are not mandatory — use your judgment based on the content:
 
 For bugs, try to include the platform (Android, iOS, desktop, VR) and app version if mentioned in the thread, but don't enforce a strict template — just capture what's useful.
 
-## Labels
+## Labels and Assignees
+
+Set labels and assignees at creation time rather than editing after:
+```bash
+gh issue create --repo {repo} --title "..." --body "..." --label "bug,Android,claw-created" --assignee "username"
+```
 
 - Always add the `claw-created` label to every issue created by this bot
 - When creating issues in `decentraland/godot-explorer`, apply relevant labels from the mobile-project skill (type, platform, severity)
-- Add labels via the `--label` flag:
-  ```
-  gh issue create --repo {repo} --title "..." --body "..." --label "bug,Android,claw-created"
-  ```
+- If the thread mentions who should work on the issue, assign them via `--assignee`
 
 ## Guidelines
 
