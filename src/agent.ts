@@ -23,7 +23,6 @@ interface RedisConfig {
 }
 
 interface AgentConfig {
-  anthropicApiKey?: string;
   anthropicOAuthRefreshToken?: string;
   githubToken?: string;
   model?: string;
@@ -52,17 +51,6 @@ export async function initAgent(config: AgentConfig): Promise<void> {
 
   modelId = config.model || "claude-sonnet-4-5";
 
-  if (config.anthropicOAuthRefreshToken) {
-    await initOAuthAgent(config);
-  } else if (config.anthropicApiKey) {
-    authStorage = AuthStorage.inMemory();
-    authStorage.setRuntimeApiKey("anthropic", config.anthropicApiKey);
-  } else {
-    throw new Error("Either ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_REFRESH_TOKEN is required");
-  }
-}
-
-async function initOAuthAgent(config: AgentConfig): Promise<void> {
   if (config.upstashRedisUrl && config.upstashRedisToken) {
     redisConfig = { url: config.upstashRedisUrl, token: config.upstashRedisToken };
   }
@@ -72,18 +60,22 @@ async function initOAuthAgent(config: AgentConfig): Promise<void> {
   if (stored) {
     console.log("[agent] Loaded auth state from Redis");
     writeFileSync(authPath, stored, "utf-8");
-  } else {
+    lastAuthSnapshot = stored;
+  } else if (config.anthropicOAuthRefreshToken) {
     console.log("[agent] Seeding auth from ANTHROPIC_OAUTH_REFRESH_TOKEN env var");
     const seed = JSON.stringify({
       anthropic: { type: "oauth", refresh: config.anthropicOAuthRefreshToken, access: "", expires: 0 },
     });
     writeFileSync(authPath, seed, "utf-8");
+  } else if (existsSync(authPath)) {
+    console.log("[agent] Using existing .auth.json");
+  } else {
+    throw new Error(
+      "No auth available. Set ANTHROPIC_OAUTH_REFRESH_TOKEN or place a valid .auth.json in the project root."
+    );
   }
 
   authStorage = AuthStorage.create(authPath);
-  if (stored) {
-    lastAuthSnapshot = readFileSync(authPath, "utf-8");
-  }
 }
 
 export async function syncAuth(): Promise<void> {
