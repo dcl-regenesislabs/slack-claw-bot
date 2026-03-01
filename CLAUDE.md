@@ -27,8 +27,9 @@ src/
 ```
 
 - **Agent SDK**: uses `@mariozechner/pi-coding-agent` (pi-agent) to run Claude with tool use
+  - Agent tools: `createCodingTools(cwd)` provides bash, read, edit, and write tools
 - **Concurrency**: bounded agent pool (`MAX_CONCURRENT_AGENTS`) with a queue (`MAX_QUEUE_SIZE`)
-- **Skills**: prompt-based tool definitions in `skills/` (create-issue, github, mobile-project, pr-review, repos, triage)
+- **Skills**: prompt-based tool definitions in `skills/` (create-issue, create-pr, github, mobile-project, pr-review, repos, triage)
 - **System prompt**: `prompts/system.md`
 
 ## Auth — OAuth only, never API keys
