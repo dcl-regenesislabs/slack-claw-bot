@@ -61,14 +61,14 @@ export async function initAgent(config: AgentConfig): Promise<void> {
     console.log("[agent] Loaded auth state from Redis");
     writeFileSync(authPath, stored, "utf-8");
     lastAuthSnapshot = stored;
+  } else if (existsSync(authPath)) {
+    console.log("[agent] Using existing .auth.json");
   } else if (config.anthropicOAuthRefreshToken) {
     console.log("[agent] Seeding auth from ANTHROPIC_OAUTH_REFRESH_TOKEN env var");
     const seed = JSON.stringify({
       anthropic: { type: "oauth", refresh: config.anthropicOAuthRefreshToken, access: "", expires: 0 },
     });
     writeFileSync(authPath, seed, "utf-8");
-  } else if (existsSync(authPath)) {
-    console.log("[agent] Using existing .auth.json");
   } else {
     throw new Error(
       "No auth available. Set ANTHROPIC_OAUTH_REFRESH_TOKEN or place a valid .auth.json in the project root."
