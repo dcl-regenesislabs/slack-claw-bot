@@ -9,8 +9,7 @@ import {
   DefaultResourceLoader,
   AuthStorage,
   ModelRegistry,
-  createBashTool,
-  createReadTool,
+  createCodingTools,
 } from "@mariozechner/pi-coding-agent";
 import { buildPrompt } from "./prompt.js";
 
@@ -152,7 +151,7 @@ export async function runAgent(options: RunOptions): Promise<string> {
     sessionManager,
     settingsManager: SettingsManager.inMemory(),
     resourceLoader,
-    tools: [createBashTool(cwd), createReadTool(cwd)],
+    tools: createCodingTools(cwd),
   });
 
   try {
