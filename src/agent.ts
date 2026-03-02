@@ -36,6 +36,12 @@ export interface RunOptions {
   sessionId?: string;
 }
 
+export interface RunResult {
+  text: string;
+  cost: number;
+  tokens: number;
+}
+
 let authStorage: AuthStorage | null = null;
 let modelId: string;
 
@@ -113,7 +119,7 @@ async function redisSet(cfg: RedisConfig, value: string): Promise<void> {
   }
 }
 
-export async function runAgent(options: RunOptions): Promise<string> {
+export async function runAgent(options: RunOptions): Promise<RunResult> {
   if (!authStorage) {
     throw new Error("Agent not initialized — call initAgent() first");
   }
@@ -176,11 +182,12 @@ export async function runAgent(options: RunOptions): Promise<string> {
       console.log(`[agent]   role=${msg.role}${extra} content=${content}`);
     }
 
-    logUsage(session.messages);
+    const { cost, tokens } = computeUsage(session.messages);
+    console.log(`[agent] done — ${tokens} tokens, $${cost.toFixed(4)}`);
 
-    const result = session.getLastAssistantText() || "";
-    console.log("[agent] result length:", result.length);
-    return result;
+    const text = session.getLastAssistantText() || "";
+    console.log("[agent] result length:", text.length);
+    return { text, cost, tokens };
   } finally {
     session.dispose();
   }
@@ -205,16 +212,16 @@ function subscribeToTextDeltas(session: any, events: EventEmitter): void {
   });
 }
 
-function logUsage(messages: any[]): void {
-  let totalCost = 0;
-  let totalTokens = 0;
+function computeUsage(messages: any[]): { cost: number; tokens: number } {
+  let cost = 0;
+  let tokens = 0;
 
   for (const msg of messages) {
     if (msg.role === "assistant" && msg.usage) {
-      totalCost += msg.usage.cost?.total ?? 0;
-      totalTokens += msg.usage.totalTokens ?? 0;
+      cost += msg.usage.cost?.total ?? 0;
+      tokens += msg.usage.totalTokens ?? 0;
     }
   }
 
-  console.log(`[agent] done — ${totalTokens} tokens, $${totalCost.toFixed(4)}`);
+  return { cost, tokens };
 }
