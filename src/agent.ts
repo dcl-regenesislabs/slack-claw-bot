@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
@@ -33,7 +33,6 @@ export interface RunOptions {
   threadContent: string;
   dryRun?: boolean;
   events?: EventEmitter;
-  sessionId?: string;
 }
 
 export interface RunResult {
@@ -124,8 +123,8 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     throw new Error("Agent not initialized — call initAgent() first");
   }
 
-  const { threadContent, dryRun, events, sessionId } = options;
-  const sessionManager = createSessionManager(sessionId);
+  const { threadContent, dryRun, events } = options;
+  const sessionManager = SessionManager.inMemory();
 
   const systemPrompt = readFileSync(
     join(projectDir, "prompts/system.md"),
@@ -191,14 +190,6 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   } finally {
     session.dispose();
   }
-}
-
-function createSessionManager(sessionId?: string): SessionManager {
-  if (!sessionId) return SessionManager.inMemory();
-
-  const sessionsDir = join(projectDir, "sessions");
-  mkdirSync(sessionsDir, { recursive: true });
-  return SessionManager.open(join(sessionsDir, `${sessionId}.jsonl`));
 }
 
 function subscribeToTextDeltas(session: any, events: EventEmitter): void {
