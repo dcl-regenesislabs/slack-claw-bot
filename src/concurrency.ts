@@ -1,18 +1,15 @@
 export type SubmitResult =
   | "thread-busy"
-  | "queue-full"
-  | { status: "accepted"; done: Promise<void> };
+  | { status: "accepted"; done: Promise<void>; queued: boolean };
 
 export class AgentScheduler {
   private activeThreads = new Set<string>();
   private running = 0;
   private waitQueue: Array<() => void> = [];
   private maxConcurrent: number;
-  private maxQueue: number;
 
-  constructor(maxConcurrent = 3, maxQueue = 10) {
+  constructor(maxConcurrent = 3) {
     this.maxConcurrent = maxConcurrent;
-    this.maxQueue = maxQueue;
   }
 
   submit(threadId: string, work: () => Promise<void>): SubmitResult {
@@ -20,14 +17,11 @@ export class AgentScheduler {
       return "thread-busy";
     }
 
-    if (this.running >= this.maxConcurrent && this.waitQueue.length >= this.maxQueue) {
-      return "queue-full";
-    }
-
+    const queued = this.running >= this.maxConcurrent;
     this.activeThreads.add(threadId);
     const done = this.execute(threadId, work);
 
-    return { status: "accepted", done };
+    return { status: "accepted", done, queued };
   }
 
   private async execute(threadId: string, work: () => Promise<void>): Promise<void> {
