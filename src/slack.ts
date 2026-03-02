@@ -25,11 +25,6 @@ export async function startSlackBot(config: Config): Promise<void> {
     ]);
     console.log(`[slack] Triggered by ${userName} in #${channelName}: ${text}`);
 
-    if (config.logChannelId) {
-      postAuditLog(client, config.logChannelId, event, text)
-        .catch((err) => console.error("[slack] Failed to post log message:", err));
-    }
-
     function react(name: string): Promise<unknown> {
       return client.reactions.add({ channel: event.channel, timestamp: event.ts, name });
     }
@@ -54,8 +49,8 @@ export async function startSlackBot(config: Config): Promise<void> {
       }
 
       if (config.logChannelId) {
-        postCompletionAuditLog(client, config.logChannelId, event, cost, tokens)
-          .catch((err) => console.error("[slack] Failed to post completion log:", err));
+        postAuditLog(client, config.logChannelId, event, text, { status: "ok", cost, tokens })
+          .catch((err) => console.error("[slack] Failed to post audit log:", err));
       }
     });
 
@@ -75,6 +70,11 @@ export async function startSlackBot(config: Config): Promise<void> {
       await unreact("rl-bonk-doge");
       await react("x");
       await say({ text: `Something went wrong: ${message}`, thread_ts: threadTs });
+
+      if (config.logChannelId) {
+        postAuditLog(client, config.logChannelId, event, text, { status: "error", error: message })
+          .catch((e) => console.error("[slack] Failed to post audit log:", e));
+      }
     });
   });
 
@@ -112,32 +112,28 @@ function resolveChannelName(client: WebClient, channelId: string): Promise<strin
   });
 }
 
+type AuditOutcome =
+  | { status: "ok"; cost: number; tokens: number }
+  | { status: "error"; error: string };
+
 async function postAuditLog(
   client: WebClient,
   logChannelId: string,
   event: { channel: string; ts: string; user?: string },
   text: string,
+  outcome: AuditOutcome,
 ): Promise<void> {
   const { permalink } = await client.chat.getPermalink({
     channel: event.channel,
     message_ts: event.ts,
   });
+  const detail = outcome.status === "ok"
+    ? `$${outcome.cost.toFixed(4)} (${outcome.tokens} tokens)`
+    : `error: ${outcome.error}`;
+  const icon = outcome.status === "ok" ? "✅" : "❌";
   await client.chat.postMessage({
     channel: logChannelId,
-    text: `*<@${event.user}>* in <#${event.channel}>: ${text}\n<${permalink}|View message>`,
-  });
-}
-
-async function postCompletionAuditLog(
-  client: WebClient,
-  logChannelId: string,
-  event: { channel: string; user?: string },
-  cost: number,
-  tokens: number,
-): Promise<void> {
-  await client.chat.postMessage({
-    channel: logChannelId,
-    text: `✅ <@${event.user}> in <#${event.channel}> — $${cost.toFixed(4)} (${tokens} tokens)`,
+    text: `${icon} <@${event.user}> in <#${event.channel}>: ${text} — ${detail}\n<${permalink}|View message>`,
   });
 }
 
