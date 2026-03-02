@@ -41,7 +41,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       await react("rl-bonk-doge");
 
       const threadContent = await fetchThread(client, event.channel, threadTs);
-      const response = await runAgent({ threadContent, sessionId: threadTs });
+      const { text: response, cost, tokens } = await runAgent({ threadContent, sessionId: threadTs });
       await syncAuth();
 
       await unreact("rl-bonk-doge");
@@ -51,6 +51,11 @@ export async function startSlackBot(config: Config): Promise<void> {
       } else {
         await react("warning");
         await say({ text: "I wasn't able to produce a response.", thread_ts: threadTs });
+      }
+
+      if (config.logChannelId) {
+        postCompletionAuditLog(client, config.logChannelId, event, cost, tokens)
+          .catch((err) => console.error("[slack] Failed to post completion log:", err));
       }
     });
 
@@ -120,6 +125,19 @@ async function postAuditLog(
   await client.chat.postMessage({
     channel: logChannelId,
     text: `*<@${event.user}>* in <#${event.channel}>: ${text}\n<${permalink}|View message>`,
+  });
+}
+
+async function postCompletionAuditLog(
+  client: WebClient,
+  logChannelId: string,
+  event: { channel: string; user?: string },
+  cost: number,
+  tokens: number,
+): Promise<void> {
+  await client.chat.postMessage({
+    channel: logChannelId,
+    text: `✅ <@${event.user}> in <#${event.channel}> — $${cost.toFixed(4)} (${tokens} tokens)`,
   });
 }
 
