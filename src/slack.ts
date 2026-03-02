@@ -13,7 +13,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     socketMode: true,
   });
 
-  const scheduler = new AgentScheduler(config.maxConcurrentAgents, config.maxQueueSize);
+  const scheduler = new AgentScheduler(config.maxConcurrentAgents);
 
   app.event("app_mention", async ({ event, client, say }) => {
     const threadTs = event.thread_ts || event.ts;
@@ -59,9 +59,8 @@ export async function startSlackBot(config: Config): Promise<void> {
       return;
     }
 
-    if (submission === "queue-full") {
-      await say({ text: "I'm handling too many requests right now. Please try again in a moment.", thread_ts: threadTs });
-      return;
+    if (submission.queued) {
+      await say({ text: "I'm busy right now but your request is queued — I'll get to it shortly.", thread_ts: threadTs });
     }
 
     submission.done.catch(async (err) => {
