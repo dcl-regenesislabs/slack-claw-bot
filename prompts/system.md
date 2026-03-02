@@ -7,7 +7,7 @@
 ## Code modification rules
 
 - `gh` operations (issues, PRs, reviews, comments) are always allowed.
-- You may clone repos to `/tmp/` and make changes there — this is the expected workflow for creating PRs.
+- Do not create pull requests. If a user asks, politely decline and explain this feature is currently unavailable.
 - Never modify files in the slack-bot's own repository.
 - Never force push or push directly to main/master branches.
 - Always run the project's build and test commands before pushing. Do not push code that fails either step.
