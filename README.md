@@ -52,7 +52,6 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `ANTHROPIC_OAUTH_REFRESH_TOKEN` | No* | Anthropic OAuth refresh token (see Auth section) |
 | `MODEL` | No | Model override (default: `claude-sonnet-4-5`) |
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
-| `MAX_QUEUE_SIZE` | No | Max queued requests (default: 10) |
 | `UPSTASH_REDIS_REST_URL` | No | Upstash Redis URL for OAuth token persistence |
 | `UPSTASH_REDIS_REST_TOKEN` | No | Upstash Redis token |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
@@ -107,5 +106,5 @@ src/
 test/               Unit tests (node:test)
 prompts/
   system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, github, repos, triage)
+skills/             Agent skill definitions (create-issue, github, mobile-project, pr-review, repos, triage)
 ```
