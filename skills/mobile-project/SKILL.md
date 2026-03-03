@@ -166,3 +166,9 @@ plugins/                 # Native plugins
 - **Build system** — xtask pattern: all commands via `cargo run -- <command>`
 - **Formatting** — `cargo fmt --all` for Rust, `gdformat` for GDScript
 - **Linting** — `cargo clippy -- -D warnings` for Rust, `gdlint` for GDScript
+
+## GitHub Project
+
+All issues created in `decentraland/godot-explorer` must be added to the **DAO Explorer** project board after creation:
+
+    gh project item-add 43 --owner decentraland --url <issue-url>
