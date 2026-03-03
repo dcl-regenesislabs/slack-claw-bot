@@ -46,4 +46,5 @@ gh issue create --repo {repo} --title "..." --body "..." --label "bug,Android,cl
 - Don't include every message — synthesize the key points
 - Include relevant code snippets or error messages from the thread
 - If participants disagreed, note the different perspectives
+- Include "Requested by {name} via Slack" as the last line of the issue body, using the name from the "Triggered by" metadata. Omit if no "Triggered by" is present.
 - Always output the created issue URL as the last line, prefixed with `ISSUE_URL:`

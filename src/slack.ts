@@ -36,7 +36,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       await react("rl-bonk-doge");
 
       const threadContent = await fetchThread(client, event.channel, threadTs);
-      const { text: response, cost, tokens } = await runAgent({ threadContent });
+      const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName });
       await syncAuth();
 
       await unreact("rl-bonk-doge");

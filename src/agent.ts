@@ -32,6 +32,7 @@ interface AgentConfig {
 export interface RunOptions {
   threadContent: string;
   dryRun?: boolean;
+  triggeredBy?: string;
   events?: EventEmitter;
 }
 
@@ -123,7 +124,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     throw new Error("Agent not initialized — call initAgent() first");
   }
 
-  const { threadContent, dryRun, events } = options;
+  const { threadContent, dryRun, triggeredBy, events } = options;
   const sessionManager = SessionManager.inMemory();
 
   const systemPrompt = readFileSync(
@@ -160,7 +161,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   });
 
   try {
-    const prompt = buildPrompt(threadContent, dryRun);
+    const prompt = buildPrompt(threadContent, dryRun, triggeredBy);
 
     if (events) {
       subscribeToTextDeltas(session, events);
