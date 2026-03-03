@@ -28,4 +28,14 @@ describe("buildPrompt", () => {
     const result = buildPrompt(content);
     assert.ok(result.includes(content));
   });
+
+  it("includes triggeredBy when provided", () => {
+    const result = buildPrompt("hello", false, "Alice");
+    assert.ok(result.includes("Triggered by: Alice"));
+  });
+
+  it("omits triggeredBy when not provided", () => {
+    const result = buildPrompt("hello");
+    assert.ok(!result.includes("Triggered by:"));
+  });
 });
