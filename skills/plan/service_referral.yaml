@@ -1,0 +1,10 @@
+name: referral
+layer: feature_servers
+desc: Referral system frontend and backend
+github: "https://github.com/decentraland/referral"
+owner: null
+lib_deps: [schemas, urn-resolver]
+
+calls: []
+
+called_by: []

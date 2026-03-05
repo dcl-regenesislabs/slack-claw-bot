@@ -1,0 +1,1331 @@
+name: asset-bundle-registry
+layer: content
+desc: Registry service for asset bundles management
+github: "https://github.com/decentraland/asset-bundle-registry"
+owner: null
+lib_deps: [schemas, platform-crypto-middleware]
+
+calls:
+  - catalyst(HTTP): Fetches profiles and scene entities via catalyst-client
+  - worlds-content-server(HTTP): Retrieves world information
+
+called_by: []
+
+# ─── DETAILED DOCS (api spec, full context, readme) ───────────
+openapi: |
+  openapi: 3.1.0
+  info:
+    title: Asset Bundle Registry API
+    description: |
+      ## Overview
+      
+      The Asset Bundle Registry is a proxy service that manages the availability of converted Unity Asset Bundles for Decentraland content. It acts as an intermediary between the Unity Client and the content network hosted in the Catalyst servers.
+      
+      ### What are Unity Asset Bundles?
+      
+      Unity Asset Bundles are optimized, pre-compiled packages of 3D assets used in Decentraland to improve performance in WebGL builds. Instead of loading raw GLTF models at runtime, scenes and wearables are converted into Asset Bundles by the Asset Bundle Converter service, which loads scene assets, re-imports GLTF models, and packages them into optimized bundles stored on a CDN.
+      
+      ### How the Registry Works
+      
+      The Asset Bundle Registry acts as an intelligent proxy between clients and the Catalyst content servers:
+      
+      1. **Content Upload**: When new content (scenes, wearables, etc.) is uploaded to a Catalyst server, it triggers the Asset Bundle Converter to process the assets.
+      
+      2. **Availability Management**: While the new content is being converted (which can take time), the registry continues to serve the **previous version** of the asset bundle for that pointer.
+      
+      3. **Seamless Transitions**: This ensures that when clients request a scene or wearable, there is always something to display in-world, preventing broken experiences during content updates.
+      
+      4. **Pointer-based Queries**: Clients query the registry by pointers (e.g., scene coordinates like "-53,71" or wearable URNs) to get the latest **available** and **ready** asset bundle, not necessarily the latest uploaded content.
+      
+      ### Key Features
+      
+      - **Always Available**: Returns the most recent successfully converted asset bundle
+      - **Processing Status**: Track conversion progress of new content
+      - **Multi-version Support**: Handles different Asset Bundle versions (v4, v5, etc.) based on Unity version and material changes
+      - **Queue Monitoring**: Provides visibility into conversion queue status
+      
+      The registry works in conjunction with the Asset Bundle Converter service and the Catalyst content servers to provide a reliable, performant content delivery system for Decentraland.
+    version: 1.0.0
+    contact:
+      name: Decentraland
+      url: https://decentraland.org
+    license:
+      name: Apache 2.0
+      url: https://www.apache.org/licenses/LICENSE-2.0.html
+    x-api-id: asset-bundle-registry-api
+  servers:
+    - url: https://asset-bundle-registry.decentraland.org
+      description: Production server
+    - url: /
+      description: Local/relative path
+  security: []
+  tags:
+    - name: Health
+      description: Service health and monitoring endpoints
+    - name: Entities
+      description: Entity management and asset bundle queries
+    - name: Profiles
+      description: User profile retrieval and metadata endpoints
+    - name: Queues
+      description: Processing queue status and monitoring
+    - name: Admin
+      description: Administrative endpoints (requires bearer token authentication)
+  paths:
+    /status:
+      get:
+        tags:
+          - Health
+        summary: Get service health status
+        description: |
+          Returns the health status of the Asset Bundle Registry service, including connectivity to dependent services 
+          (database, cache, queues) and overall system readiness.
+        operationId: getStatus
+        security: []
+        responses:
+          '200':
+            description: Service health status
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Status'
+          '400':
+            description: Bad request
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+    /entities/active:
+      post:
+        tags:
+          - Entities
+        summary: Get active entities by pointers
+        description: |
+          Returns the currently active (ready-to-use) entities for the given pointers. This is the primary endpoint 
+          for clients to query which asset bundles are available for display.
+          
+          **Pointers** are unique identifiers for content locations:
+          - For scenes: coordinates like "-53,71" or "-100,-50"
+          - For wearables: URNs like "urn:decentraland:matic:collections-v2:0x..."
+          
+          The response includes entities with their associated asset bundle content that are **ready for use**. 
+          If new content is currently being processed for a pointer, this endpoint will return the previous 
+          successfully converted version, ensuring clients always have something to render.
+        operationId: getActiveEntities
+        security: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveEntitiesRequest'
+        responses:
+          '200':
+            description: List of active entities
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/DbEntity'
+          '400':
+            description: Bad request
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+    /entities/status/{id}:
+      get:
+        tags:
+          - Entities
+        summary: Get entity status by ID
+        description: |
+          Returns the current processing status of a specific entity by its ID (typically a content identifier/CID).
+          
+          Use this endpoint to check whether an entity has been successfully converted to an asset bundle, 
+          is currently being processed, or is inactive.
+          
+          **Status values:**
+          - `active`: Entity has been successfully converted and is ready for use
+          - `processing`: Entity is currently being converted by the Asset Bundle Converter
+          - `inactive`: Entity conversion failed or the entity is no longer active
+        operationId: getEntityStatus
+        security: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: Entity ID (content identifier/CID)
+        responses:
+          '200':
+            description: Entity status
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/EntityStatus'
+          '404':
+            description: Entity not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+    /entities/status:
+      get:
+        tags:
+          - Entities
+        summary: Get multiple entities status
+        description: |
+          Returns the processing status of multiple entities in a single request. This endpoint requires 
+          authenticated access via Decentraland's signed fetch mechanism.
+          
+          Useful for batch checking the conversion status of multiple pieces of content (scenes, wearables, etc.) 
+          to determine which are ready for use and which are still being processed.
+        operationId: getEntitiesStatus
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: ids
+            in: query
+            required: true
+            schema:
+              type: array
+              items:
+                type: string
+            description: Comma-separated list of entity IDs (content identifiers/CIDs)
+        responses:
+          '200':
+            description: List of entity statuses
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/EntityStatus'
+          '401':
+            description: Unauthorized - invalid signed fetch
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+          '403':
+            description: Forbidden - invalid metadata
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+    /entities/versions:
+      post:
+        tags:
+          - Entities
+        summary: Get entity versions by pointers
+        description: |
+          Returns the version information and bundle status for entities at the given pointers.
+          This endpoint is useful for checking which asset bundle versions are available for specific
+          content locations and their conversion status across different platforms.
+  
+          Unlike `/entities/active` which returns full entity data, this endpoint focuses on version
+          metadata and bundle availability status, making it lighter for version checking use cases.
+        operationId: getEntityVersions
+        security: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionsRequest'
+        responses:
+          '200':
+            description: List of entity version information
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/EntityVersionInfo'
+          '400':
+            description: Bad request - no pointers provided
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+    /queues/status:
+      get:
+        tags:
+          - Queues
+        summary: Get queue status information
+        description: |
+          Returns status information about the internal processing queues that handle asset bundle conversion requests.
+          
+          This endpoint provides visibility into:
+          - Number of entities pending conversion
+          - Number of entities currently being processed
+          - Number of successfully completed conversions
+          - Number of failed conversions
+          
+          Useful for monitoring system load and identifying potential bottlenecks in the asset bundle conversion pipeline.
+        operationId: getQueuesStatus
+        security: []
+        responses:
+          '200':
+            description: Queue status information
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/QueueStatus'
+          '400':
+            description: Bad request
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+    /profiles:
+      post:
+        tags:
+          - Profiles
+        summary: Get profiles by addresses
+        description: |
+          Returns validated Catalyst profiles for the given Ethereum addresses. Profiles include
+          avatar information, names, wearables, and snapshot URLs.
+  
+          The service maintains a multi-layer cache (memory and database) for fast profile retrieval
+          and periodically validates profile ownership to ensure data freshness.
+  
+          Profile snapshots (face and body images) are returned as URLs pointing to the profile
+          images CDN rather than content hashes.
+        operationId: getProfiles
+        security: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfilesRequest'
+        responses:
+          '200':
+            description: List of profiles
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ProfileDTO'
+    /profiles/metadata:
+      post:
+        tags:
+          - Profiles
+        summary: Get profile metadata by addresses
+        description: |
+          Returns lightweight metadata for profiles at the given Ethereum addresses.
+          This endpoint returns only essential profile information (name, claimed name status,
+          thumbnail URL) without full avatar details, making it suitable for displaying
+          profile cards or lists.
+        operationId: getProfilesMetadata
+        security: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfilesRequest'
+        responses:
+          '200':
+            description: List of profile metadata
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ProfileMetadataDTO'
+    /registry:
+      post:
+        tags:
+          - Admin
+        summary: Create or update registry entries
+        description: |
+          Administrative endpoint for manually creating or updating registry entries.
+          This endpoint fetches entity data from Catalyst and asset bundle status from
+          the CDN to populate the registry.
+  
+          Use this endpoint to manually trigger registry updates for specific entities
+          that may have been missed by the event-driven pipeline.
+        operationId: createRegistry
+        security:
+          - BearerAuth: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryRequest'
+        responses:
+          '200':
+            description: Registry operation result
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/RegistryResponse'
+          '400':
+            description: Bad request - no entity IDs provided
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+          '401':
+            description: Unauthorized - missing or invalid bearer token
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+    /flush-cache:
+      delete:
+        tags:
+          - Admin
+        summary: Flush internal caches
+        description: |
+          Administrative endpoint for flushing internal job caches. This clears
+          cached job status information stored in Redis/memory.
+  
+  
+          Use this endpoint to reset cache state when troubleshooting or after
+          manual database modifications.
+        operationId: flushCache
+        security:
+          - BearerAuth: []
+        responses:
+          '200':
+            description: Cache flush result
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/FlushCacheResponse'
+          '401':
+            description: Unauthorized - missing or invalid bearer token
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+  components:
+    securitySchemes:
+      SignedFetch:
+        type: http
+        scheme: bearer
+        description: |
+          Signed fetch authentication using @dcl/platform-crypto-middleware (ADR-44).
+          Requires auth chain headers (x-identity, x-signature, x-timestamp) for signature validation.
+          See http://adr.decentraland.org/adr/ADR-44 for details.
+      BearerAuth:
+        type: http
+        scheme: bearer
+        description: |
+          Bearer token authentication for administrative endpoints. The token must match
+          the `API_ADMIN_TOKEN` environment variable configured on the server.
+    schemas:
+      Status:
+        type: object
+        description: Health status response indicating the operational state of the service and its dependencies
+        properties:
+          status:
+            type: string
+            description: |
+              Overall health status of the service (e.g., "ok", "healthy", "degraded"). 
+              This indicates whether the service is operational and able to serve asset bundle requests.
+          timestamp:
+            type: string
+            format: date-time
+            description: ISO 8601 timestamp when the status was checked
+        required:
+          - status
+      ActiveEntitiesRequest:
+        type: object
+        properties:
+          pointers:
+            type: array
+            items:
+              type: string
+            description: |
+              List of pointers to query for active entities. Pointers are unique identifiers for content locations:
+              - Scene coordinates (e.g., "-53,71", "0,0")
+              - Wearable URNs (e.g., "urn:decentraland:matic:collections-v2:0xabc...")
+        required:
+          - pointers
+      DbEntity:
+        type: object
+        description: |
+          Represents a Decentraland entity (scene, wearable, etc.) with its converted asset bundle information. 
+          This is the primary data structure returned when querying for active entities.
+        properties:
+          id:
+            type: string
+            description: Unique entity identifier (content identifier/CID from Catalyst)
+          type:
+            type: string
+            description: |
+              Entity type indicating the kind of content:
+              - `scene`: A Decentraland scene/parcel
+              - `wearable`: An avatar wearable item
+              - `profile`: A user profile
+              - `emote`: An avatar emote/animation
+          pointers:
+            type: array
+            items:
+              type: string
+            description: |
+              List of pointers where this entity is active. For scenes, these are coordinates (e.g., "-53,71"). 
+              For wearables, these are URNs identifying the item.
+          timestamp:
+            type: number
+            description: Unix timestamp (milliseconds) indicating when this entity was deployed to Catalyst
+          content:
+            type: array
+            items:
+              $ref: '#/components/schemas/Content'
+            description: |
+              Array of content files associated with this entity, including the converted asset bundle files. 
+              Each content item includes the file path and its hash for retrieval from the CDN.
+          metadata:
+            type: object
+            additionalProperties: true
+            description: |
+              Entity-specific metadata (structure varies by entity type):
+              - For scenes: includes display name, spawn points, parcels, etc.
+              - For wearables: includes name, description, category, rarity, etc.
+        required:
+          - id
+          - type
+          - pointers
+          - timestamp
+      Content:
+        type: object
+        description: Represents a content file associated with an entity, including converted asset bundles
+        properties:
+          file:
+            type: string
+            description: |
+              Relative file path of the content within the entity (e.g., "scene.json", "thumbnail.png", 
+              or converted asset bundle file names)
+          hash:
+            type: string
+            description: |
+              Content identifier (CID) hash of the file, used to retrieve the actual file from the Catalyst 
+              content server or Asset Bundle CDN
+        required:
+          - file
+          - hash
+      EntityStatus:
+        type: object
+        description: Represents the current processing and availability status of an entity's asset bundle conversion
+        properties:
+          entityId:
+            type: string
+            description: Unique entity identifier (content identifier/CID)
+          complete:
+            type: boolean
+            description: Whether asset bundles are fully converted for all required platforms (Windows and Mac)
+          catalyst:
+            type: string
+            enum: [pending, complete, failed]
+            description: Status of the entity in Catalyst (always 'complete' if entity exists in registry)
+          assetBundles:
+            $ref: '#/components/schemas/PlatformStatus'
+          lods:
+            $ref: '#/components/schemas/PlatformStatus'
+            description: LOD generation status per platform.
+        required:
+          - entityId
+          - complete
+          - catalyst
+          - assetBundles
+      PlatformStatus:
+        type: object
+        description: Conversion status per platform (Windows and Mac)
+        properties:
+          mac:
+            type: string
+            enum: [pending, complete, failed]
+            description: Conversion status for Mac platform
+          windows:
+            type: string
+            enum: [pending, complete, failed]
+            description: Conversion status for Windows platform
+        required:
+          - mac
+          - windows
+      QueueStatus:
+        type: object
+        description: Status of pending conversion jobs organized by platform
+        properties:
+          windowsPendingJobs:
+            type: array
+            items:
+              type: string
+            description: List of entity IDs with pending Windows asset bundle conversions
+          macPendingJobs:
+            type: array
+            items:
+              type: string
+            description: List of entity IDs with pending Mac asset bundle conversions
+          webglPendingJobs:
+            type: array
+            items:
+              type: string
+            description: List of entity IDs with pending WebGL asset bundle conversions
+        required:
+          - windowsPendingJobs
+          - macPendingJobs
+          - webglPendingJobs
+      VersionsRequest:
+        type: object
+        properties:
+          pointers:
+            type: array
+            items:
+              type: string
+            description: List of pointers to query for version information
+        required:
+          - pointers
+      EntityVersionInfo:
+        type: object
+        description: Version and bundle status information for an entity
+        properties:
+          pointers:
+            type: array
+            items:
+              type: string
+            description: List of pointers where this entity is active
+          versions:
+            $ref: '#/components/schemas/Versions'
+          bundles:
+            $ref: '#/components/schemas/Bundles'
+          status:
+            type: string
+            enum: [complete, pending, failed, obsolete, fallback]
+            description: Current status of the entity in the registry
+        required:
+          - pointers
+          - bundles
+      Versions:
+        type: object
+        description: Asset bundle version information per platform
+        properties:
+          assets:
+            type: object
+            properties:
+              windows:
+                $ref: '#/components/schemas/VersionInfo'
+              mac:
+                $ref: '#/components/schemas/VersionInfo'
+              webgl:
+                $ref: '#/components/schemas/VersionInfo'
+      VersionInfo:
+        type: object
+        description: Version details for a specific platform
+        properties:
+          version:
+            type: string
+            description: Asset bundle version string (e.g., "v4", "v5")
+          buildDate:
+            type: string
+            description: Build date of the asset bundle
+      Bundles:
+        type: object
+        description: Bundle conversion status for assets and LODs across platforms
+        properties:
+          assets:
+            $ref: '#/components/schemas/BundlePlatformStatus'
+          lods:
+            $ref: '#/components/schemas/BundlePlatformStatus'
+        required:
+          - assets
+          - lods
+      BundlePlatformStatus:
+        type: object
+        description: Conversion status for each platform
+        properties:
+          windows:
+            type: string
+            enum: [pending, complete, failed]
+          mac:
+            type: string
+            enum: [pending, complete, failed]
+          webgl:
+            type: string
+            enum: [pending, complete, failed]
+        required:
+          - windows
+          - mac
+          - webgl
+      ProfilesRequest:
+        type: object
+        properties:
+          ids:
+            type: array
+            items:
+              type: string
+            description: List of Ethereum addresses to fetch profiles for
+        required:
+          - ids
+      ProfileDTO:
+        type: object
+        description: Profile data transfer object with avatar information
+        properties:
+          timestamp:
+            type: number
+            description: Unix timestamp (milliseconds) when the profile was deployed
+          avatars:
+            type: array
+            items:
+              $ref: '#/components/schemas/Avatar'
+            description: List of avatar configurations for this profile
+        required:
+          - timestamp
+          - avatars
+      Avatar:
+        type: object
+        description: Avatar configuration including appearance and wearables
+        properties:
+          userId:
+            type: string
+            description: User's Ethereum address
+          name:
+            type: string
+            description: Display name for the avatar
+          hasClaimedName:
+            type: boolean
+            description: Whether the user has claimed a unique Decentraland name
+          description:
+            type: string
+            description: User-provided description
+          avatar:
+            type: object
+            description: Avatar appearance configuration
+            properties:
+              bodyShape:
+                type: string
+                description: Body shape URN
+              wearables:
+                type: array
+                items:
+                  type: string
+                description: List of equipped wearable URNs
+              emotes:
+                type: array
+                items:
+                  type: object
+                description: List of equipped emotes
+              snapshots:
+                type: object
+                properties:
+                  face256:
+                    type: string
+                    description: URL to face snapshot image
+                  body:
+                    type: string
+                    description: URL to body snapshot image
+              eyes:
+                type: object
+                description: Eye color configuration
+              hair:
+                type: object
+                description: Hair color configuration
+              skin:
+                type: object
+                description: Skin color configuration
+      ProfileMetadataDTO:
+        type: object
+        description: Lightweight profile metadata for display purposes
+        properties:
+          pointer:
+            type: string
+            description: Ethereum address of the profile owner
+          hasClaimedName:
+            type: boolean
+            description: Whether the user has claimed a unique Decentraland name
+          name:
+            type: string
+            description: Display name for the profile
+          thumbnailUrl:
+            type: string
+            description: URL to the profile's face thumbnail image
+        required:
+          - pointer
+          - hasClaimedName
+          - name
+          - thumbnailUrl
+      RegistryRequest:
+        type: object
+        properties:
+          entityIds:
+            type: array
+            items:
+              type: string
+            description: List of entity IDs (CIDs) to add or update in the registry
+        required:
+          - entityIds
+      RegistryResponse:
+        type: object
+        description: Result of registry creation/update operation
+        properties:
+          successes:
+            type: array
+            items:
+              type: object
+            description: List of successfully processed entities
+          failures:
+            type: array
+            items:
+              type: object
+              properties:
+                entityId:
+                  type: string
+                  description: Entity ID that failed
+                error:
+                  type: string
+                  description: Error message describing the failure
+            description: List of entities that failed to process
+        required:
+          - successes
+          - failures
+      FlushCacheResponse:
+        type: object
+        description: Result of cache flush operation
+        properties:
+          ok:
+            type: boolean
+            description: Whether the operation succeeded
+          message:
+            type: string
+            description: Status message
+        required:
+          - ok
+          - message
+      Error:
+        type: object
+        properties:
+          error:
+            type: string
+            description: Error message
+          code:
+            type: string
+            description: Error code
+        required:
+          - error
+
+ai_context: |
+  # AI Agent Context
+  
+  **Service Purpose:** Orchestrates and tracks the availability of optimized Decentraland entities (scenes, worlds, wearables, emotes, and profiles). Acts as a state management service that coordinates between entity deployments, optimization services (Asset Bundle Converter, LODs Generator), and client requests, ensuring optimized content is always available.
+  
+  **Key Capabilities:**
+  
+  - Tracks optimization status (pending/complete/failed) for Asset Bundles and LODs across platforms (Windows, Mac, WebGL)
+  - Manages entity registry with deployer ownership, pointers, and optimization state transitions
+  - Listens to SQS messages for deployment events and `AssetBundleConversionFinished` events
+  - Provides REST API for querying entity optimization status by owner or entity ID
+  - Handles state rotation when entities are redeployed (marks previous as obsolete, creates new registry entry)
+  - Manages historical deployment records for audit and analytics
+  - Integrates with Catalyst to fetch entity metadata and validate deployments
+  - Integrates with Catalyst to periodically fetch and validate profiles
+  
+  **Communication Pattern:**
+  
+  - Event-driven via AWS SQS/SNS (deployment events, conversion completion events)
+  - Synchronous HTTP REST API (status queries, admin registry operations)
+  
+  **Technology Stack:**
+  
+  - Runtime: Node.js
+  - Language: TypeScript 5.x
+  - HTTP Framework: @dcl/http-server
+  - Database: PostgreSQL (via @dcl/pg-component)
+  - Cache: Redis (queue status management) with in-memory fallback
+  - Component Architecture: @well-known-components (logger, metrics, http-server, env-config-provider)
+  
+  **External Dependencies:**
+  
+  - Databases: PostgreSQL (entity registry, optimization status, historical records)
+  - Queue: AWS SQS (deployment events from deployments-to-sqs service)
+  - Event Bus: AWS SNS (receives AssetBundleConversionFinished events from Asset Bundle Converter)
+  - Content Server: Catalyst Load Balancer (fetches entity metadata)
+  - CDN: Asset Bundle CDN (queries bundle availability)
+  - Worlds: Worlds Content Server (for world deployment handling)
+  - Catalyst: DAO Catalysts to fetch and validate entities
+  
+  **Project Structure:**
+  
+  - `adapters/`: Database, Catalyst, SQS, Redis, Worlds integrations
+  - `controllers/`: HTTP handlers for status endpoints, admin operations
+  - `logic/`: Message processing, registry orchestration, entity status fetching, worker management
+  - `logic/sync`: Components and modules handling Profiles syncing and curation
+  - `migrations/`: PostgreSQL schema migrations
+  - `scripts/`: Utility scripts for populating registry from CSV/manifests
+  
+  **API Specification:** See `docs/openapi.yaml` for complete API documentation
+
+readme: |
+  # Registry Server
+  
+  [![Coverage Status](https://coveralls.io/repos/github/decentraland/asset-bundle-registry/badge.svg)](https://coveralls.io/github/decentraland/asset-bundle-registry)
+  
+  This server is hooked into the event-driven architecture to listen for [Catalysts'](https://github.com/decentraland/catalyst) and [World Content Server's](https://github.com/decentraland/worlds-content-server) entities deployments in order to act as a gateway to retrieve the latest available version of these entities.
+  
+  Each entity has its specific way to determine its own latest version. Most of them depends on [Asset Bundles conversions](https://github.com/decentraland/asset-bundle-converter), therefore this server also listens to the events being reported by these services to make them available to clients once all the optimizations are already in place.
+  
+  ## Table of Contents
+  
+  - [Features](#features)
+  - [Dependencies & Related Services](#dependencies--related-services)
+  - [API Documentation](#api-documentation)
+  - [Database](#database)
+    - [Schema](#schema)
+    - [Migrations](#migrations)
+  - [Getting Started](#getting-started)
+    - [Prerequisites](#prerequisites)
+    - [Installation](#installation)
+    - [Configuration](#configuration)
+    - [Running the Service](#running-the-service)
+  - [Testing](#testing)
+    - [Running Tests](#running-tests)
+    - [Test Structure](#test-structure)
+  - [AI Agent Context](#ai-agent-context)
+  
+  ## Features
+  
+  - **Bundles registry**: Provides an endpoint to retrieve latest optimized version of scenes, emotes, wearables and worlds entities.
+  - **Bundles state transition**: Listen for events regarding entities deployments and bundles optimizations to transition state of entities stored in the database in order to ensure their latest version is always returned.
+  - **Profiles registry**: Provides an endpoint to retrieve validated Catalysts' profiles.
+  - **Profiles sync**: Polls entities from all Catalysts to react over new profiles deployments to store them in a multi-layer storage (memory cache and database).
+  - **Profiles curation**: Triggers a job every N minutes to validate ownership of all profiles stored in the rapid access cache.
+  
+  ## Dependencies & Related Services
+  
+  This service interacts with the following services:
+  
+  - **[Deployments to SQS](https://github.com/decentraland/deployments-to-sqs)**: Listens for events triggered by this service to react over new Catalyst deployments
+  - **[World Content Server](https://github.com/decentraland/worlds-content-server)**: Listens for events triggered by this server to react over new Worlds deployments
+  - **[Asset Bundle Converter](https://github.com/decentraland/asset-bundle-converter)**: Listens for events triggered by these services to react over bundle optimizations
+  - **[Catalyst](https://github.com/decentraland/catalyst)**: Used to validate received entities deployments and sanitize profiles stored in the cache
+  
+  External dependencies:
+  
+  - SNS and SQS from AWS Cloud Provider
+  - PostgreSQL
+  - Redis
+  
+  ## API Documentation
+  
+  The API is fully documented using the [OpenAPI standard](https://swagger.io/specification/). Its schema is located at [docs/openapi.yaml](docs/openapi.yaml).
+  
+  ## Database
+  
+  ### Schema
+  
+  See [docs/database-schemas.md](docs/database-schemas.md) for detailed schema, column definitions, and relationships
+  
+  ### Migrations
+  
+  The service uses `node-pg-migrate` for database migrations. These migrations are located in `src/migrations/`. The service automatically runs the migrations when starting up.
+  
+  It also exposes [scripts](./src/scripts/README.md) to nurture the database with deployments exported from Catalyst.
+  
+  #### Create a new migration
+  
+  Migrations are created by running the create command:
+  
+  ```bash
+  yarn migrate create name-of-the-migration
+  ```
+  
+  This will result in the creation of a migration file inside of the `src/migrations/` directory. This migration file MUST contain the migration set up and rollback procedures.
+  
+  #### Manually applying migrations
+  
+  If required, these migrations can be run manually.
+  
+  To run them manually:
+  
+  ```bash
+  yarn migrate up
+  ```
+  
+  To rollback them manually:
+  
+  ```bash
+  yarn migrate down
+  ```
+  
+  ## Getting Started
+  
+  ### Prerequisites
+  
+  Before running this service, ensure you have the following installed:
+  
+  - **Node.js**: Version 20.x or higher (LTS recommended)
+  - **Yarn**: Version 1.22.x or higher
+  - **Docker**: For containerized deployment
+  
+  <!-- List any other dependencies that are required to run the service -->
+  
+  ### Installation
+  
+  1. Clone the repository:
+  
+  ```bash
+  git clone https://github.com/decentraland/asset-bundle-registry.git
+  cd asset-bundle-registry
+  ```
+  
+  2. Install dependencies:
+  
+  ```bash
+  yarn install
+  ```
+  
+  3. Build the project:
+  
+  ```bash
+  yarn build
+  ```
+  
+  ### Configuration
+  
+  The service uses environment variables for configuration.
+  Create a `.env` file in the root directory containing the environment variables for the service to run.
+  Use the `.env.default` variables as an example.
+  
+  ### Running the Service
+  
+  #### Setting up the environment
+  
+  In order to successfully run this server, external dependencies such as databases, memory storages and such must be provided.
+  To do so, this repository provides you with a `docker-compose` file for that purpose. In order to get the environment set up, run:
+  
+  ```bash
+  docker-compose up
+  ```
+  
+  #### Running in development mode
+  
+  To run the service in development mode:
+  
+  ```bash
+  yarn start:dev
+  ```
+  
+  ## Testing
+  
+  This service includes comprehensive test coverage with both unit and integration tests.
+  
+  ### Running Tests
+  
+  Run all tests with coverage:
+  
+  ```bash
+  yarn test
+  ```
+  
+  Run tests in watch mode:
+  
+  ```bash
+  yarn test --watch
+  ```
+  
+  Run only unit tests:
+  
+  ```bash
+  yarn test test/unit
+  ```
+  
+  Run only integration tests:
+  
+  ```bash
+  yarn test test/integration
+  ```
+  
+  ### Test Structure
+  
+  - **Unit Tests** (`test/unit/`): Test individual components and functions in isolation
+  - **Integration Tests** (`test/integration/`): Test the complete request/response cycle
+  
+  For detailed testing guidelines and standards, refer to our [Testing Standards](https://github.com/decentraland/docs/tree/main/development-standards/testing-standards) documentation.
+  
+  ## AI Agent Context
+  
+  For detailed AI Agent context, see [docs/ai-agent-context.md](docs/ai-agent-context.md).
+
+extra_docs:
+  docs_database-schemas_md: |
+    # Database Schema Documentation
+    
+    This document describes the database schema for the Asset Bundle Registry service. The schema uses PostgreSQL and is managed through migrations located in `src/migrations/`.
+    
+    ## Database Schema Diagram
+    
+    ```mermaid
+    erDiagram
+        registries {
+            VARCHAR id PK "Entity ID (CID)"
+            VARCHAR type "Entity type"
+            BIGINT timestamp "Deployment timestamp"
+            VARCHAR_ARRAY pointers "Content pointers"
+            JSONB content "Entity content files"
+            JSONB metadata "Entity metadata"
+            VARCHAR status "Registry status"
+            JSONB bundles "Bundle conversion status"
+            VARCHAR deployer "Deployer address"
+            JSONB versions "Asset bundle versions"
+        }
+    
+        historical_registries {
+            VARCHAR id PK "Entity ID (CID)"
+            VARCHAR type "Entity type"
+            BIGINT timestamp "Deployment timestamp"
+            VARCHAR_ARRAY pointers "Content pointers"
+            JSONB content "Entity content files"
+            JSONB metadata "Entity metadata"
+            VARCHAR status "Registry status"
+            JSONB bundles "Bundle conversion status"
+            VARCHAR deployer "Deployer address"
+            JSONB versions "Asset bundle versions"
+            BIGINT migrated_at "Migration timestamp"
+        }
+    
+        profiles {
+            VARCHAR id PK "Profile entity ID"
+            VARCHAR pointer UK "User address"
+            BIGINT timestamp "Deployment timestamp"
+            JSONB content "Profile content"
+            JSONB metadata "Profile metadata"
+            BIGINT local_timestamp "Local sync timestamp"
+        }
+    
+        processed_profile_snapshots {
+            VARCHAR hash PK "Snapshot hash"
+            TIMESTAMP process_time "Processing timestamp"
+        }
+    
+        failed_profile_fetches {
+            VARCHAR entity_id PK "Failed entity ID"
+            VARCHAR pointer "User address"
+            BIGINT timestamp "Original timestamp"
+            JSONB auth_chain "Auth chain data"
+            BIGINT first_failed_at "First failure timestamp"
+            BIGINT last_retry_at "Last retry timestamp"
+            INTEGER retry_count "Number of retries"
+            TEXT error_message "Error description"
+        }
+    
+        registries ||--o| historical_registries : "rotates to"
+        profiles ||--o| failed_profile_fetches : "may fail"
+        profiles ||--o| processed_profile_snapshots : "generates"
+    ```
+    
+    ## Tables Overview
+    
+    The database contains the following tables:
+    
+    1. **`registries`** - Stores active entity registrations with their bundle conversion status
+    2. **`historical_registries`** - Archives previous entity versions when new deployments occur
+    3. **`profiles`** - Caches validated user profiles from Catalyst servers
+    4. **`processed_profile_snapshots`** - Tracks which profile snapshots have been processed
+    5. **`failed_profile_fetches`** - Stores failed profile fetch attempts for retry
+    
+    ---
+    
+    ## Table: `registries`
+    
+    Stores active entity registrations including scenes, wearables, emotes, and worlds with their asset bundle conversion status.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `id` | VARCHAR(255) | NOT NULL | **Primary Key**. Entity content identifier (CID) from Catalyst. |
+    | `type` | VARCHAR(255) | NOT NULL | Entity type: `scene`, `wearable`, `emote`, `profile`, or `world`. |
+    | `timestamp` | BIGINT | NOT NULL | Unix timestamp (milliseconds) when the entity was deployed to Catalyst. |
+    | `pointers` | VARCHAR(255)[] | NOT NULL | Array of pointers where this entity is active (coordinates or URNs). |
+    | `content` | JSONB | NOT NULL | Entity content files with file paths and content hashes. |
+    | `metadata` | JSONB | NULL | Entity-specific metadata (varies by entity type). |
+    | `status` | VARCHAR(255) | NOT NULL | Registry status: `complete`, `pending`, `failed`, `obsolete`, or `fallback`. |
+    | `bundles` | JSONB | NOT NULL | Asset bundle and LOD conversion status per platform (Windows, Mac, WebGL). |
+    | `deployer` | VARCHAR(255) | NOT NULL | Ethereum address of the entity deployer. |
+    | `versions` | JSONB | NULL | Asset bundle version information per platform (version string, build date). |
+    
+    ### Indexes
+    
+    - **Primary Key**: `id`
+    - **GIN Index**: `pointers` - For efficient array containment queries
+    - **Index**: `status` - For filtering by conversion status
+    - **Index**: `timestamp` - For ordering by deployment time
+    - **Index**: `deployer` - For querying entities by owner
+    - **Index**: `registries_id_lower_idx` on `LOWER(id)` - Case-insensitive entity ID lookups
+    
+    ### JSONB Structure: `bundles`
+    
+    ```json
+    {
+      "assets": {
+        "windows": "complete|pending|failed",
+        "mac": "complete|pending|failed",
+        "webgl": "complete|pending|failed"
+      },
+      "lods": {
+        "windows": "complete|pending|failed",
+        "mac": "complete|pending|failed",
+        "webgl": "complete|pending|failed"
+      }
+    }
+    ```
+    
+    ### JSONB Structure: `versions`
+    
+    ```json
+    {
+      "assets": {
+        "windows": { "version": "v5", "buildDate": "2024-01-15" },
+        "mac": { "version": "v5", "buildDate": "2024-01-15" },
+        "webgl": { "version": "v5", "buildDate": "2024-01-15" }
+      }
+    }
+    ```
+    
+    ### Business Rules
+    
+    1. Entity ID is the content identifier (CID) from Catalyst
+    2. Status transitions: `pending` → `complete` (on successful conversion) or `failed` (on error)
+    3. When a new entity is deployed to the same pointer, the old entity becomes `obsolete` or `fallback`
+    4. The `fallback` status indicates the entity is served while newer content is being processed
+    5. Timestamps stored in milliseconds (BIGINT)
+    
+    ---
+    
+    ## Table: `historical_registries`
+    
+    Archives previous entity versions when new deployments occur. Used for audit trails and analytics.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `id` | VARCHAR(255) | NOT NULL | **Primary Key**. Entity content identifier (CID). |
+    | `type` | VARCHAR(255) | NOT NULL | Entity type: `scene`, `wearable`, `emote`, `profile`, or `world`. |
+    | `timestamp` | BIGINT | NOT NULL | Unix timestamp (milliseconds) when the entity was deployed. |
+    | `pointers` | VARCHAR(255)[] | NOT NULL | Array of pointers where this entity was active. |
+    | `content` | JSONB | NOT NULL | Entity content files. |
+    | `metadata` | JSONB | NULL | Entity-specific metadata. |
+    | `status` | VARCHAR(255) | NOT NULL | Final status before archival. |
+    | `bundles` | JSONB | NOT NULL | Final bundle conversion status. |
+    | `deployer` | VARCHAR(255) | NOT NULL | Ethereum address of the entity deployer. |
+    | `versions` | JSONB | NULL | Asset bundle version information. |
+    | `migrated_at` | BIGINT | NOT NULL | Unix timestamp (milliseconds) when the entity was moved to historical. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `id`
+    - **Index**: `deployer` - For querying historical entities by owner
+    - **GIN Index**: `pointers` - For efficient array containment queries
+    
+    ### Business Rules
+    
+    1. Entities are moved here when replaced by new deployments
+    2. The `migrated_at` timestamp records when the rotation occurred
+    3. Historical records are immutable after creation
+    
+    ---
+    
+    ## Table: `profiles`
+    
+    Caches validated user profiles fetched from Catalyst servers for fast retrieval.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `id` | VARCHAR(255) | NOT NULL | **Primary Key**. Profile entity content identifier (CID). |
+    | `pointer` | VARCHAR(255) | NOT NULL | **Unique**. Ethereum address of the profile owner (lowercase). |
+    | `timestamp` | BIGINT | NOT NULL | Unix timestamp (milliseconds) from Catalyst deployment. |
+    | `content` | JSONB | NOT NULL | Profile content files (avatar images, etc.). |
+    | `metadata` | JSONB | NOT NULL | Profile metadata including avatar configuration. |
+    | `local_timestamp` | BIGINT | NOT NULL | Unix timestamp (milliseconds) when profile was cached locally. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `id`
+    - **Unique Constraint**: `pointer` - One profile per Ethereum address
+    - **Index**: `idx_profiles_timestamp` on `timestamp` - For ordering by deployment time
+    - **Index**: `idx_profiles_local_timestamp` on `local_timestamp` - For cache freshness queries
+    
+    ### Business Rules
+    
+    1. Each Ethereum address has exactly one active profile
+    2. Profiles are periodically validated for ownership (curation job)
+    3. `local_timestamp` tracks when the profile was synced to this service
+    4. Profile metadata follows the Decentraland Profile schema
+    
+    ---
+    
+    ## Table: `processed_profile_snapshots`
+    
+    Tracks which Catalyst profile snapshots have been processed to avoid reprocessing.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `hash` | VARCHAR(255) | NOT NULL | **Primary Key**. Snapshot content hash. |
+    | `process_time` | TIMESTAMP | NOT NULL | When the snapshot was processed. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `hash`
+    
+    ### Business Rules
+    
+    1. Used to deduplicate snapshot processing during profile sync
+    2. Prevents reprocessing the same Catalyst snapshot multiple times
+    
+    ---
+    
+    ## Table: `failed_profile_fetches`
+    
+    Stores failed profile fetch attempts for retry processing.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `entity_id` | VARCHAR(255) | NOT NULL | **Primary Key**. Profile entity ID that failed to fetch. |
+    | `pointer` | VARCHAR(255) | NOT NULL | Ethereum address of the profile. |
+    | `timestamp` | BIGINT | NOT NULL | Original deployment timestamp from the event. |
+    | `auth_chain` | JSONB | NULL | Authentication chain data (if available). |
+    | `first_failed_at` | BIGINT | NOT NULL | Unix timestamp (milliseconds) of first failure. |
+    | `last_retry_at` | BIGINT | NULL | Unix timestamp (milliseconds) of last retry attempt. |
+    | `retry_count` | INTEGER | NOT NULL | Number of retry attempts. Defaults to `0`. |
+    | `error_message` | TEXT | NULL | Error description from the last failure. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `entity_id`
+    - **Index**: `idx_failed_fetches_pointer` on `LOWER(pointer)` - Case-insensitive address lookup
+    - **Index**: `idx_failed_fetches_entity_id` on `LOWER(entity_id)` - Case-insensitive entity lookup
+    - **Index**: `idx_failed_fetches_retry_count` on `retry_count` - For retry prioritization
+    
+    ### Business Rules
+    
+    1. Failed fetches are retried with exponential backoff
+    2. The `retry_count` determines retry priority and backoff delay
+    3. Successful retries remove the record from this table
+    4. Records with high retry counts may require manual intervention
+

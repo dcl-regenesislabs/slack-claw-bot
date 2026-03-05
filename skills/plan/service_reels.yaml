@@ -1,0 +1,17 @@
+name: reels
+layer: feature_servers
+desc: Reels frontend (Gatsby-based)
+github: "https://github.com/decentraland/reels"
+owner: null
+lib_deps: [schemas, urn-resolver]
+
+calls: []
+
+called_by: []
+
+# ─── DETAILED DOCS (api spec, full context, readme) ───────────
+readme: |
+  # reels
+  
+  This is the reels project
+

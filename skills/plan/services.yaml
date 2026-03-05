@@ -1,0 +1,452 @@
+version: "1.0"
+generated_at: "2026-03-03"
+platform: Decentraland Core Backend
+workspace: https://github.com/decentraland/core-workspace
+
+architecture_overview: |
+  Four-layer backend architecture:
+  1. Entry Points Layer — WebSocket Connector (NATS-backed) + HTTP Gateway
+  2. Real-Time Layer — LiveKit SFU (positions, chat, voice, streaming)
+  3. Content Layer — Catalyst/Worlds → Asset Bundle processing → Registry
+  4. Feature Servers Layer — Business logic services via HTTP + AWS SQS events
+
+communication_patterns:
+  http_rest: most service-to-service calls
+  websocket: real-time peer tracking (archipelago-workers)
+  sns_sqs: event-driven async messaging (notifications, badges)
+  graphql: blockchain indexers (Squid, The Graph)
+  nats: push notifications to clients via WebSocket Connector
+  livekit_webrtc: user-to-user real-time (voice, chat, positions)
+
+services:
+  - name: archipelago-workers
+    desc: Workers for peer clustering and communications orchestration
+    layer: realtime
+    owner: null
+    github: "https://github.com/decentraland/archipelago-workers"
+    service_file: services/service_archipelago-workers.yaml
+    api: true
+    requests_doc: false
+    ai_ctx: true
+  - name: architecture
+    desc: Platform architecture diagram (D2)
+    layer: other
+    owner: null
+    github: "https://github.com/decentraland/architecture"
+    service_file: services/service_architecture.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: asset-bundle-converter
+    desc: Converts 3D assets into optimized asset bundles
+    layer: content
+    owner: null
+    github: "https://github.com/decentraland/asset-bundle-converter"
+    service_file: services/service_asset-bundle-converter.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: true
+  - name: asset-bundle-registry
+    desc: Registry service for asset bundles management
+    layer: content
+    owner: null
+    github: "https://github.com/decentraland/asset-bundle-registry"
+    service_file: services/service_asset-bundle-registry.yaml
+    api: true
+    requests_doc: false
+    ai_ctx: true
+  - name: atlas-server
+    desc: Server providing map and atlas-related data
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/atlas-server"
+    service_file: services/service_atlas-server.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: auth-server
+    desc: Authentication server for identity validation
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/auth-server"
+    service_file: services/service_auth-server.yaml
+    api: true
+    requests_doc: true
+    ai_ctx: true
+  - name: badges
+    desc: Badge system API and processor for user achievements
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/badges"
+    service_file: services/service_badges.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: block-indexer
+    desc: "Blockchain block indexing component for timestamp lookups (`@dcl/block-indexer`)"
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/block-indexer"
+    service_file: services/service_block-indexer.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: camera-reel-service
+    desc: Rust-based service for camera screenshots management
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/camera-reel-service"
+    service_file: services/service_camera-reel-service.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: true
+  - name: catalyst
+    desc: Core content server and backbone services for Decentraland
+    layer: content
+    owner: null
+    github: "https://github.com/decentraland/catalyst"
+    service_file: services/service_catalyst.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: true
+  - name: catalyst-contracts
+    desc: "Blockchain contract addresses and ABIs (`@dcl/catalyst-contracts`)"
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/catalyst-contracts"
+    service_file: services/service_catalyst-contracts.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: catalyst-storage
+    desc: "Storage component for catalysts (`@dcl/catalyst-storage`)"
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/catalyst-storage"
+    service_file: services/service_catalyst-storage.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: comms-gatekeeper
+    desc: Gatekeeper service for communications management
+    layer: realtime
+    owner: null
+    github: "https://github.com/decentraland/comms-gatekeeper"
+    service_file: services/service_comms-gatekeeper.yaml
+    api: true
+    requests_doc: false
+    ai_ctx: true
+  - name: comms-message-sfu
+    desc: Real-time message routing and validation service for LiveKit communications
+    layer: realtime
+    owner: null
+    github: "https://github.com/decentraland/comms-message-sfu"
+    service_file: services/service_comms-message-sfu.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: content-validator
+    desc: "Entity deployment validation library (`@dcl/content-validator`)"
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/content-validator"
+    service_file: services/service_content-validator.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: true
+  - name: core-components
+    desc: "Reusable service components (redis, sqs, sns, slack, analytics, etc.)"
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/core-components"
+    service_file: services/service_core-components.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: credits-server
+    desc: Server handling credits and virtual currency operations
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/credits-server"
+    service_file: services/service_credits-server.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: decentraland-crypto-middleware
+    desc: Crypto middleware for Decentraland services
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/decentraland-crypto-middleware"
+    service_file: services/service_decentraland-crypto-middleware.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: deployments-to-sqs
+    desc: Listens for content deployments and publishes to SQS
+    layer: content
+    owner: null
+    github: "https://github.com/decentraland/deployments-to-sqs"
+    service_file: services/service_deployments-to-sqs.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: true
+  - name: events
+    desc: Events platform frontend (Gatsby-based)
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/events"
+    service_file: services/service_events.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: events-notifier
+    desc: Event notification and scheduling service
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/events-notifier"
+    service_file: services/service_events-notifier.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: exploration-games
+    desc: Exploration games and quests backend service
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/exploration-games"
+    service_file: services/service_exploration-games.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: hashing
+    desc: "Hashing utilities library (`@dcl/hashing`)"
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/hashing"
+    service_file: services/service_hashing.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: lamb2
+    desc: Lambda functions and utilities service
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/lamb2"
+    service_file: services/service_lamb2.yaml
+    api: true
+    requests_doc: false
+    ai_ctx: true
+  - name: linker-server
+    desc: Enables authorized scene deployment to Foundation-owned lands
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/linker-server"
+    service_file: services/service_linker-server.yaml
+    api: true
+    requests_doc: false
+    ai_ctx: true
+  - name: marketplace-server
+    desc: "API server for the Decentraland Marketplace (NFTs, sales, orders)"
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/marketplace-server"
+    service_file: services/service_marketplace-server.yaml
+    api: true
+    requests_doc: false
+    ai_ctx: true
+  - name: notifications-workers
+    desc: Workers for processing and sending user notifications
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/notifications-workers"
+    service_file: services/service_notifications-workers.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: platform-crypto-middleware
+    desc: "Authentication middleware for signed fetch requests (`@dcl/platform-crypto-middleware`)"
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/platform-crypto-middleware"
+    service_file: services/service_platform-crypto-middleware.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: police-server
+    desc: Content moderation bot for LiveKit rooms
+    layer: realtime
+    owner: null
+    github: "https://github.com/decentraland/police-server"
+    service_file: services/service_police-server.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: profile-images
+    desc: Avatar profile image generation service
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/profile-images"
+    service_file: services/service_profile-images.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: true
+  - name: prometheus-nats-exporter
+    desc: NATS metrics exporter sidecar for Prometheus
+    layer: other
+    owner: null
+    github: "https://github.com/decentraland/prometheus-nats-exporter"
+    service_file: services/service_prometheus-nats-exporter.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: protocol
+    desc: "Protocol buffer definitions (`@dcl/protocol`)"
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/protocol"
+    service_file: services/service_protocol.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: realm-provider
+    desc: Service providing realm information and routing
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/realm-provider"
+    service_file: services/service_realm-provider.yaml
+    api: true
+    requests_doc: false
+    ai_ctx: true
+  - name: reels
+    desc: Reels frontend (Gatsby-based)
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/reels"
+    service_file: services/service_reels.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: referral
+    desc: Referral system frontend and backend
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/referral"
+    service_file: services/service_referral.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: schemas
+    desc: "Shared TypeScript schemas and types (`@dcl/schemas`)"
+    layer: shared_library
+    owner: "@decentraland/core-developers"
+    github: "https://github.com/decentraland/schemas"
+    service_file: services/service_schemas.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: snapshots-fetcher
+    desc: "Component for fetching entity snapshots (`@dcl/snapshots-fetcher`)"
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/snapshots-fetcher"
+    service_file: services/service_snapshots-fetcher.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: false
+  - name: social-service-ea
+    desc: "Social interactions microservice (friends, blocks, etc.)"
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/social-service-ea"
+    service_file: services/service_social-service-ea.yaml
+    api: true
+    requests_doc: false
+    ai_ctx: true
+  - name: urn-resolver
+    desc: "URN resolver for Decentraland assets (`@dcl/urn-resolver`)"
+    layer: shared_library
+    owner: null
+    github: "https://github.com/decentraland/urn-resolver"
+    service_file: services/service_urn-resolver.yaml
+    api: false
+    requests_doc: false
+    ai_ctx: true
+  - name: world-storage-service
+    desc: Secure storage and environment variables service for Decentraland worlds
+    layer: feature_servers
+    owner: null
+    github: "https://github.com/decentraland/world-storage-service"
+    service_file: services/service_world-storage-service.yaml
+    api: true
+    requests_doc: false
+    ai_ctx: true
+  - name: worlds-content-server
+    desc: Content server for Decentraland Worlds (named scenes)
+    layer: content
+    owner: null
+    github: "https://github.com/decentraland/worlds-content-server"
+    service_file: services/service_worlds-content-server.yaml
+    api: true
+    requests_doc: false
+    ai_ctx: true
+
+shared_libraries:
+  - name: schemas
+    package: "@dcl/schemas"
+    github: "https://github.com/decentraland/schemas"
+    desc: "Shared TypeScript schemas and types (`@dcl/schemas`)"
+    consumers: [archipelago-workers, asset-bundle-registry, atlas-server, auth-server, badges, catalyst, comms-gatekeeper, credits-server, deployments-to-sqs, events, events-notifier, lamb2, linker-server, marketplace-server, notifications-workers, police-server, profile-images, realm-provider, referral, reels, social-service-ea, worlds-content-server, world-storage-service]
+  - name: protocol
+    package: "@dcl/protocol"
+    github: "https://github.com/decentraland/protocol"
+    desc: "Protocol buffer definitions (`@dcl/protocol`)"
+    consumers: [archipelago-workers, comms-message-sfu, social-service-ea]
+  - name: core-components
+    package: "core-components"
+    github: "https://github.com/decentraland/core-components"
+    desc: "Reusable service components (redis, sqs, sns, slack, analytics, etc.)"
+    consumers: [catalyst, comms-gatekeeper, credits-server, events-notifier, marketplace-server, notifications-workers, police-server, social-service-ea]
+  - name: content-validator
+    package: "@dcl/content-validator"
+    github: "https://github.com/decentraland/content-validator"
+    desc: "Entity deployment validation library (`@dcl/content-validator`)"
+    consumers: [catalyst]
+  - name: platform-crypto-middleware
+    package: "@dcl/platform-crypto-middleware"
+    github: "https://github.com/decentraland/platform-crypto-middleware"
+    desc: "Authentication middleware for signed fetch requests (`@dcl/platform-crypto-middleware`)"
+    consumers: [asset-bundle-registry, comms-gatekeeper, credits-server, exploration-games, linker-server, social-service-ea, worlds-content-server, world-storage-service]
+  - name: catalyst-contracts
+    package: "@dcl/catalyst-contracts"
+    github: "https://github.com/decentraland/catalyst-contracts"
+    desc: "Blockchain contract addresses and ABIs (`@dcl/catalyst-contracts`)"
+    consumers: [catalyst, lamb2, realm-provider, worlds-content-server]
+  - name: catalyst-storage
+    package: "@dcl/catalyst-storage"
+    github: "https://github.com/decentraland/catalyst-storage"
+    desc: "Storage component for catalysts (`@dcl/catalyst-storage`)"
+    consumers: [catalyst, worlds-content-server]
+  - name: hashing
+    package: "@dcl/hashing"
+    github: "https://github.com/decentraland/hashing"
+    desc: "Hashing utilities library (`@dcl/hashing`)"
+    consumers: [catalyst, worlds-content-server]
+  - name: urn-resolver
+    package: "@dcl/urn-resolver"
+    github: "https://github.com/decentraland/urn-resolver"
+    desc: "URN resolver for Decentraland assets (`@dcl/urn-resolver`)"
+    consumers: [catalyst, referral, reels]
+  - name: block-indexer
+    package: "@dcl/block-indexer"
+    github: "https://github.com/decentraland/block-indexer"
+    desc: "Blockchain block indexing component for timestamp lookups (`@dcl/block-indexer`)"
+    consumers: [catalyst]
+  - name: snapshots-fetcher
+    package: "@dcl/snapshots-fetcher"
+    github: "https://github.com/decentraland/snapshots-fetcher"
+    desc: "Component for fetching entity snapshots (`@dcl/snapshots-fetcher`)"
+    consumers: [catalyst]
+  - name: decentraland-crypto-middleware
+    package: "decentraland-crypto-middleware"
+    github: "https://github.com/decentraland/decentraland-crypto-middleware"
+    desc: Crypto middleware for Decentraland services
+    consumers: []

@@ -1,0 +1,10 @@
+name: prometheus-nats-exporter
+layer: other
+desc: NATS metrics exporter sidecar for Prometheus
+github: "https://github.com/decentraland/prometheus-nats-exporter"
+owner: null
+lib_deps: []
+
+calls: []
+
+called_by: []

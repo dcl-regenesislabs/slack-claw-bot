@@ -1,0 +1,327 @@
+name: archipelago-workers
+layer: realtime
+desc: Workers for peer clustering and communications orchestration
+github: "https://github.com/decentraland/archipelago-workers"
+owner: null
+lib_deps: [schemas, protocol]
+
+calls:
+  - catalyst(HTTP): Fetches content data for statistics
+
+called_by:
+  - social-service-ea(WebSocket): Tracks peer connectivity and status
+  - realm-provider(WebSocket): Connects to WebSocket for realm communication
+
+# ─── DETAILED DOCS (api spec, full context, readme) ───────────
+openapi: |
+  openapi: 3.1.0
+  info:
+    title: Archipelago Workers API
+    description: |
+      ## Overview
+      
+      API documentation for Archipelago Stats and WebSocket Connector services implementing the Archipelago protocol for Decentraland's communication system. This unified specification provides access to both the observability layer (Stats API) and the real-time communication layer (WebSocket Connector API).
+      
+      The Archipelago protocol clusters users into dynamic islands based on their positions, enabling efficient crowd management and scalable communication. Islands are recalculated in real-time as users move, allowing for optimal distribution of avatars and communication channels. When the maximum number of users per island is reached, the system creates overlapping islands to ensure all users can still interact.
+      
+      **Key Concepts:**
+      - **Islands**: Dynamic groups of users clustered by proximity, with a configurable maximum occupancy
+      - **Peers**: Individual users/avatars in the Archipelago system
+      - **Parcels**: Geographic coordinates in Decentraland where users are located
+      - **Real-time updates**: Islands and peer positions are continuously recalculated
+      
+      ### Services
+      
+      ### Stats Service
+      
+      The **Archipelago Stats API** provides real-time visibility into the Decentraland communication system by aggregating and exposing statistics from the Archipelago core service. This service acts as an observability layer, transforming internal system state into queryable metrics and snapshots.
+      
+      **Purpose**: Enables monitoring, debugging, and analytics of user distribution, island clustering, and system health across the metaverse.
+      
+      **Key Endpoints**: `/parcels`, `/peers`, `/islands`, `/hot-scenes`, `/core-status`
+      
+      **Use Cases**:
+      - Live dashboards displaying real-time user distribution
+      - System monitoring and health tracking
+      - Analytics tools for crowd patterns and trending scenes
+      - Developer tools for debugging communication issues
+      
+      All data is provided in real-time and reflects the current state of the Archipelago system at the time of the API call.
+      
+      ### WebSocket Connector Service
+      
+      The **Archipelago WebSocket Connector API** provides real-time bidirectional communication for Decentraland clients through WebSocket connections. This service acts as the gateway between client applications and the Archipelago communication system.
+      
+      **Purpose**: Manages the connection layer for all peer-to-peer communication, enabling live position synchronization, chat messaging, profile updates, and island assignment notifications.
+      
+      **Key Features**:
+      - **Authentication**: Ethereum signature-based challenge-response handshake
+      - **Position Updates**: Real-time avatar position and movement synchronization
+      - **Chat Messages**: Text communication between nearby users
+      - **Island Assignments**: Dynamic notifications when users move between islands
+      
+      **Key Endpoints**: `/status`, `/metrics`, `/health/live`, `/ws` (WebSocket)
+      
+      **Use Cases**:
+      - Client connections for Decentraland applications
+      - Real-time multiplayer interactions
+      - Social features and chat functionality
+      - Scene integration for coordinated experiences
+      
+      For detailed information about the Archipelago protocol architecture, message formats, and communication patterns, see [ADR-204](https://adr.decentraland.org/adr/ADR-204).
+    version: 1.0.0
+    contact:
+      name: Decentraland
+      url: https://decentraland.org
+    license:
+      name: Apache 2.0
+      url: https://www.apache.org/licenses/LICENSE-2.0.html
+    x-api-id: archipelago-workers-api
+  servers:
+    - url: https://archipelago-ea-stats.decentraland.org
+      description: Stats service - Production
+    - url: https://archipelago-ea-stats.zone
+      description: Stats service - Development
+    - url: https://archipelago-ea-ws-connector.decentraland.org
+      description: WebSocket Connector service - Production
+    - url: https://archipelago-ea-ws-connector.zone
+      description: WebSocket Connector service - Development
+  paths:
+    /parcels:
+      $ref: './stats/openapi.yaml#/paths/~1parcels'
+    /peers:
+      $ref: './stats/openapi.yaml#/paths/~1peers'
+    /peers/{id}:
+      $ref: './stats/openapi.yaml#/paths/~1peers~1{id}'
+    /islands:
+      $ref: './stats/openapi.yaml#/paths/~1islands'
+    /islands/{id}:
+      $ref: './stats/openapi.yaml#/paths/~1islands~1{id}'
+    /hot-scenes:
+      $ref: './stats/openapi.yaml#/paths/~1hot-scenes'
+    /core-status:
+      $ref: './stats/openapi.yaml#/paths/~1core-status'
+    /comms/parcels:
+      $ref: './stats/openapi.yaml#/paths/~1comms~1parcels'
+    /comms/peers:
+      $ref: './stats/openapi.yaml#/paths/~1comms~1peers'
+    /comms/peers/{id}:
+      $ref: './stats/openapi.yaml#/paths/~1comms~1peers~1{id}'
+    /comms/islands:
+      $ref: './stats/openapi.yaml#/paths/~1comms~1islands'
+    /comms/islands/{id}:
+      $ref: './stats/openapi.yaml#/paths/~1comms~1islands~1{id}'
+    /status:
+      $ref: './ws-connector/openapi.yaml#/paths/~1status'
+    /metrics:
+      $ref: './ws-connector/openapi.yaml#/paths/~1metrics'
+    /health/live:
+      $ref: './ws-connector/openapi.yaml#/paths/~1health~1live'
+    /ws:
+      $ref: './ws-connector/openapi.yaml#/paths/~1ws'
+
+ai_context: |
+  # AI Agent Context
+  
+  **Service Purpose:** Monorepo containing three services that implement the Archipelago protocol for clustering users into dynamic islands based on their positions in Decentraland's metaverse. The protocol enables scalable crowd management and efficient real-time communication.
+  
+  **Key Capabilities:**
+  
+  - **Core Service**: Implements island clustering algorithms, manages peer-to-island assignments, processes position updates, and publishes island change notifications via NATS
+  - **WebSocket Connector Service**: Manages WebSocket connections for Decentraland clients, handles Ethereum-based authentication, routes real-time messages (positions, chat, profiles), and maintains peer registry
+  - **Stats Service**: Provides REST API for monitoring and analytics, exposes island/peer/parcel statistics, aggregates core service data for observability
+  
+  **Communication Pattern:** 
+  - Event-driven via NATS messaging (core service)
+  - Real-time bidirectional WebSocket connections (ws-connector service)
+  - Synchronous HTTP REST API (stats service)
+  
+  **Technology Stack:**
+  
+  - Runtime: Node.js 16+
+  - Language: TypeScript 4.x - 5.x
+  - HTTP Framework: @well-known-components/http-server
+  - WebSocket: ws library with @well-known-components/uws-http-server
+  - Component Architecture: @well-known-components (logger, metrics, nats, http-server, env-config-provider)
+  
+  **External Dependencies:**
+  
+  - Message Broker: NATS (peer heartbeats, disconnect events, island changes, discovery messages)
+  - Protocol: @dcl/protocol (Archipelago protocol definitions)
+  - Crypto: @dcl/crypto (Ethereum signature validation, AuthChain)
+  - Content: dcl-catalyst-client (for stats service to fetch content data)
+  
+  **Project Structure:**
+  
+  - `core/`: Island clustering engine, NATS subscribers, position processing
+  - `ws-connector/`: WebSocket handlers, peer registry, authentication flow
+  - `stats/`: REST API endpoints, Catalyst integration, data aggregation
+  
+  **API Specification:** See `docs/openapi.yaml` for combined Stats and WebSocket Connector API documentation
+
+readme: |
+  # Archipelago Workers
+  
+  [![Coverage Status](https://coveralls.io/repos/github/decentraland/archipelago-workers/badge.svg?branch=coverage)](https://coveralls.io/github/decentraland/archipelago-workers?branch=coverage)
+  
+  The Archipelago Workers is a monorepo containing three services that implement the Archipelago protocol for clustering users into dynamic islands based on their positions in Decentraland's metaverse. The protocol enables scalable crowd management and efficient real-time communication for standalone realms.
+  
+  ## Table of Contents
+  
+  - [Features](#features)
+  - [Dependencies](#dependencies)
+  - [API Documentation](#api-documentation)
+  - [Getting Started](#getting-started)
+    - [Prerequisites](#prerequisites)
+    - [Installation](#installation)
+    - [Configuration](#configuration)
+    - [Running the Service](#running-the-service)
+  - [Testing](#testing)
+  
+  ## Features
+  
+  - **Core Service**: Implements island clustering algorithms that dynamically group users into islands based on their in-world positions. Manages peer-to-island assignments, processes position updates, and publishes island change notifications via NATS.
+  - **WebSocket Connector Service**: Provides real-time bidirectional WebSocket connections for Decentraland clients. Handles Ethereum-based authentication, routes real-time messages (positions, chat, profiles), and maintains peer registry.
+  - **Stats Service**: Aggregates information about islands and peers, providing REST API endpoints for monitoring, analytics, and observability of the Archipelago system.
+  
+  ## Dependencies
+  
+  - **[Realm Provider](https://github.com/decentraland/realm-provider/)**: Exposes WebSocket connections to Decentraland clients
+  - **[Catalyst](https://github.com/decentraland/catalyst)**: Content server for fetching scene data (used by stats service)
+  - **NATS**: Message broker for peer heartbeats, disconnect events, island changes, and discovery messages
+  - **@dcl/protocol**: Archipelago protocol definitions
+  - **@dcl/crypto**: Ethereum signature validation, AuthChain
+  
+  ## API Documentation
+  
+  The API is fully documented using the [OpenAPI standard](https://swagger.io/specification/). The schema is located at [docs/openapi.yaml](docs/openapi.yaml).
+  
+  The monorepo includes:
+  - **Stats Service API**: REST endpoints for monitoring and analytics (see [docs/stats/openapi.yaml](docs/stats/openapi.yaml))
+  - **WebSocket Connector API**: Real-time communication endpoints (see [docs/ws-connector/openapi.yaml](docs/ws-connector/openapi.yaml))
+  
+  ## Getting Started
+  
+  ### Prerequisites
+  
+  Before running this service, ensure you have the following installed:
+  
+  - **Node.js**: Version 18.x or higher (LTS recommended)
+  - **Yarn**: Version 1.22.x or higher
+  - **Docker**: For containerized deployment and local development dependencies
+  
+  ### Installation
+  
+  1. Clone the repository:
+  
+  ```bash
+  git clone https://github.com/decentraland/archipelago-workers.git
+  cd archipelago-workers
+  ```
+  
+  2. Install dependencies:
+  
+  ```bash
+  yarn install
+  ```
+  
+  3. Build the project:
+  
+  ```bash
+  yarn build
+  ```
+  
+  ### Configuration
+  
+  The service uses environment variables for configuration. Copy the example file and adjust as needed:
+  
+  ```bash
+  cp .env.default .env
+  ```
+  
+  See `.env.default` for available configuration options.
+  
+  ### Running the Service
+  
+  #### Setting up the environment
+  
+  In order to successfully run these services, external dependencies such as message brokers must be provided.
+  
+  To do so, this repository provides you with a `docker-compose.yml` file for that purpose. In order to get the environment set up, run:
+  
+  ```bash
+  docker-compose up -d
+  ```
+  
+  This will start:
+  - NATS message broker on port `4222`
+  
+  #### Running in development mode
+  
+  To run all services in development mode:
+  
+  ```bash
+  yarn start:local
+  ```
+  
+  This will start all three services:
+  - **Core Service**: Island clustering engine
+  - **WebSocket Connector Service**: WebSocket gateway for clients
+  - **Stats Service**: REST API for monitoring and analytics
+  
+  ### NATS Messages
+  
+  The services communicate via the following NATS message topics:
+  
+  - `peer.${address}.heartbeat` - Peer heartbeat messages
+  - `peer.${address}.disconnect` - Peer disconnect events
+  - `engine.peer.${address}.island_changed` - Island assignment changes
+  - `engine.discovery` - Service discovery messages
+  - `engine.islands` - Island status reports
+  
+  ## Testing
+  
+  This service includes comprehensive test coverage with both unit and integration tests.
+  
+  ### Running Tests
+  
+  Run all tests with coverage:
+  
+  ```bash
+  yarn test
+  ```
+  
+  Run tests in watch mode:
+  
+  ```bash
+  yarn test --watch
+  ```
+  
+  Run only unit tests:
+  
+  ```bash
+  yarn test test/unit
+  ```
+  
+  Run only integration tests:
+  
+  ```bash
+  yarn test test/integration
+  ```
+  
+  ### Test Structure
+  
+  - **Unit Tests**: Test individual components and functions in isolation
+  - **Integration Tests**: Test the complete request/response cycle and service interactions
+  
+  For detailed testing guidelines and standards, refer to our [Testing Standards](https://github.com/decentraland/docs/tree/main/development-standards/testing-standards) documentation.
+  
+  ## AI Agent Context
+  
+  For detailed AI Agent context, see [docs/ai-agent-context.md](docs/ai-agent-context.md).
+  
+  ---
+  
+  **Note**: This is a monorepo containing three separate services. Each service can be run independently, but they work together to provide the complete Archipelago communication system.
+  
+

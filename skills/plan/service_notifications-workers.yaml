@@ -1,0 +1,12 @@
+name: notifications-workers
+layer: feature_servers
+desc: Workers for processing and sending user notifications
+github: "https://github.com/decentraland/notifications-workers"
+owner: null
+lib_deps: [schemas, core-components]
+
+calls:
+  - events-notifier(SNS/SQS): Consumes events for notification processing
+
+called_by:
+  - events-notifier(SNS/SQS): Publishes event notifications

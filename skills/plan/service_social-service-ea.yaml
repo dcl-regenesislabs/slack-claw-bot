@@ -1,0 +1,3589 @@
+name: social-service-ea
+layer: feature_servers
+desc: "Social interactions microservice (friends, blocks, etc.)"
+github: "https://github.com/decentraland/social-service-ea"
+owner: null
+lib_deps: [schemas, protocol, core-components, platform-crypto-middleware]
+
+calls:
+  - catalyst(HTTP): Fetches user profiles and avatars via catalyst-client
+  - archipelago-workers(WebSocket): Tracks peer connectivity and status
+
+called_by:
+  - worlds-content-server(HTTP): Validates community membership for world access
+  - comms-gatekeeper(HTTP): Retrieves user privacy settings
+  - comms-message-sfu(HTTP): Validates community membership for message routing
+
+# ─── DETAILED DOCS (api spec, full context, readme) ───────────
+openapi: |
+  openapi: 3.0.0
+  info:
+    title: Social Service API
+    version: 1.0.0
+    license:
+      name: MIT
+      url: https://opensource.org/licenses/MIT
+    description: |
+      ## Overview
+  
+      The Social Service API powers social interactions and community features within the Decentraland metaverse platform. This API enables users to create and manage communities, connect with friends, participate in voice chats, and engage in social activities.
+  
+      ### Key Features
+  
+      ### 🏘️ Communities
+      - **Create and manage communities** with customizable privacy settings (public/private) and visibility (listed/unlisted)
+      - **Member management** with role-based permissions (owner, moderator, member)
+      - **Community posts** for sharing updates and announcements
+      - **Place associations** to link communities with specific Decentraland locations
+      - **Ban management** for community moderation
+      - **Invitations and join requests** workflow for private communities
+  
+      ### 🎙️ Community Voice Chats
+      - Real-time voice chat sessions within communities
+      - Role-based participation (speakers and listeners)
+      - Active voice chat discovery across communities
+      - Location tracking for voice chat participants
+  
+      ### 🎁 Referral System
+      - Track user referrals and invitations
+      - Monitor referral progress and rewards
+      - Email association for referral campaigns
+  
+      ### 👥 Social Features
+      - **Friendship management** (via RPC/gRPC - not covered in this REST API)
+      - **Blocking and privacy controls** (via RPC/gRPC)
+      - **User profiles** with claimed names and avatars
+      - **Online status tracking** for community members
+  
+      ## Authentication
+  
+      This API uses two authentication methods:
+  
+      ### Signed Fetch (Primary)
+      Most endpoints use **Signed Fetch authentication** (ADR-44), which cryptographically signs requests using the user's Ethereum wallet. This ensures that requests are genuinely from the wallet owner without requiring traditional API keys.
+  
+      - **Header**: `Authorization: <signed-fetch-token>`
+      - **Required for**: All user-facing endpoints
+      - **Optional on**: Public read endpoints (returns additional data when authenticated)
+      - **Security**: Prevents scene-based requests for additional security
+  
+      ### Bearer Token (Admin)
+      Administrative endpoints use **Bearer token authentication** for system-level operations.
+  
+      - **Header**: `Authorization: Bearer <API_ADMIN_TOKEN>`
+      - **Required for**: Admin and moderation endpoints
+      - **Used by**: Backend services and authorized administrators   
+  
+      ### Key Concepts
+  
+      ### Community Privacy
+      - **Public**: Anyone can view and join
+      - **Private**: Requires invitation or approval to join
+  
+      ### Community Visibility
+      - **All** (listed): Appears in public community listings
+      - **Unlisted**: Only accessible via direct link, not shown in listings
+  
+      ### Community Roles
+      - **owner**: Full control over the community
+      - **moderator**: Can manage members, posts, and settings
+      - **member**: Regular community member
+      - **none**: Not a member of the community
+  
+      ### Request Types
+      - **invite**: An invitation sent to a user to join a community
+      - **request_to_join**: A request from a user to join a private community
+  
+  servers:
+    - url: https://social-api.decentraland.org
+      description: Production server
+    - url: https://social-api.decentraland.zone
+      description: Development server
+  
+  components:
+    securitySchemes:
+      SignedFetch:
+        type: apiKey
+        in: header
+        name: Authorization
+        description: |
+          Signed Fetch authentication.
+          See ADR-44 for more details about the authentication mechanism.
+      BearerAuth:
+        type: http
+        scheme: bearer
+        description: |
+          Bearer token authentication for admin endpoints.
+          Requires API_ADMIN_TOKEN.
+  
+  security:
+    - SignedFetch: []
+  
+  paths:
+    /v1/communities:
+      get:
+        operationId: listCommunities
+        summary: List communities
+        description: |
+          Lists all communities with full details, or performs a fast community search with minimal data.
+          This endpoint has optional Signed Fetch authentication.
+          When signed, it includes properties related to the authenticated user in its response.
+          This endpoint excludes unlisted communities from results. Use direct community access (GET `/v1/communities/{id}`) to retrieve unlisted communities.
+          
+          **Minimal Mode (minimal=true):**
+          When `minimal=true` is set, authentication is required and only the `search` parameter is used:
+          - Returns community `id`, `name`, `membersCount`, and `privacy` for fast lookups
+          - Requires `search` parameter with minimum 3 characters
+          - Maximum 50 results per request
+          - Supports pagination with `limit` and `offset` parameters
+          - Other filter parameters are ignored
+          
+          **Visibility Rules (Minimal Mode):**
+          - Public and Private communities: searchable by anyone
+          - Unlisted communities: only searchable by their members
+          
+          **Search Behavior (Minimal Mode):**
+          - Matches community names starting with the search term
+          - Also matches words in the middle of the name (after a space)
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: limit
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of communities per page. When `minimal=true`, max is 50.
+          - name: offset
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of communities to skip.
+          - name: search
+            in: query
+            required: false
+            schema:
+              type: string
+            description: Search term to filter communities by name. Required when `minimal=true` (minimum 3 characters).
+          - name: minimal
+            in: query
+            required: false
+            schema:
+              type: boolean
+              default: false
+            description: |
+              When `true`, returns community `id`, `name`, `membersCount`, and `privacy` for fast lookups.
+              Requires authentication and `search` parameter with minimum 3 characters.
+              Supports pagination with `limit` (max 50) and `offset` parameters.
+              Other filter parameters (`onlyMemberOf`, `onlyWithActiveVoiceChat`, `roles`) are ignored.
+          - name: onlyMemberOf
+            in: query
+            required: false
+            schema:
+              type: boolean
+            description: Filter communities where the authenticated user is a member. Ignored when `minimal=true`.
+          - name: onlyWithActiveVoiceChat
+            in: query
+            required: false
+            schema:
+              type: boolean
+            description: Filter to show only communities with active voice chats. Ignored when `minimal=true`.
+          - name: roles
+            in: query
+            required: false
+            schema:
+              type: array
+              items:
+                type: string
+                enum: [owner, moderator, member, none]
+            description: Filter communities by the authenticated user's role (can specify multiple roles). Ignored when `minimal=true`.
+        responses:
+          '200':
+            description: Communities found
+            content:
+              application/json:
+                schema:
+                  oneOf:
+                    - $ref: './schemas.yaml#/components/schemas/GetCommunities200OkResponse'
+                    - $ref: './schemas.yaml#/components/schemas/GetCommunitiesMinimal200OkResponse'
+          '400':
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      post:
+        operationId: createCommunity
+        summary: Create a new community
+        description: |
+          Creates a new community with the provided details.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        requestBody:
+          required: true
+          content:
+            multipart/form-data:
+              schema:
+                type: object
+                required:
+                  - name
+                  - description
+                properties:
+                  name:
+                    type: string
+                  description:
+                    type: string
+                  placeIds:
+                    type: string
+                    description: 'JSON array of place IDs to add to the community'
+                  privacy:
+                    type: string
+                    enum: [public, private]
+                    description: 'Community privacy setting'
+                  visibility:
+                    type: string
+                    enum: [all, unlisted]
+                    description: 'Community visibility setting'
+                  thumbnail:
+                    type: string
+                    format: binary
+                    description: 'Community thumbnail image'
+        responses:
+          '201':
+            description: Community created successfully
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/CreateCommunity201OkResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+    /v1/communities/{id}:
+      get:
+        operationId: getCommunityById
+        summary: Get a community by ID
+        description: |
+          Retrieves detailed information about a specific community by its unique ID.
+          This endpoint requires Signed Fetch authentication and returns the authenticated user's role in the community.
+          Returns both public and private communities if the user has access.
+          Includes voice chat status, member count, and community metadata.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+        responses:
+          '200':
+            description: Community found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetCommunityById200OkResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      put:
+        operationId: updateCommunity
+        summary: Update a community
+        description: |
+          Updates a community's details including name, description, privacy settings, unlisted status, and thumbnail.
+          This endpoint requires Signed Fetch authentication and only community owners can update.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+        requestBody:
+          required: true
+          content:
+            multipart/form-data:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    description: 'Community name'
+                  description:
+                    type: string
+                    description: 'Community description'
+                  placeIds:
+                    type: string
+                    description: 'JSON array of place IDs to replace all current community places'
+                  privacy:
+                    type: string
+                    enum: [public, private]
+                    description: 'Community privacy setting'
+                  visibility:
+                    type: string
+                    enum: [all, unlisted]
+                    description: 'Community visibility setting'
+                  thumbnail:
+                    type: string
+                    format: binary
+                    description: 'Community thumbnail image'
+        responses:
+          '200':
+            description: Community updated successfully
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/UpdateCommunity200OkResponse'
+          '400':
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required or not owner
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      patch:
+        operationId: patchCommunity
+        summary: Update a community partially
+        description: |
+          Partially updates a community's properties. Currently supports updating the Editor's Choice flag.
+          This endpoint requires Signed Fetch authentication and only global moderators can update Editor's Choice.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - editorsChoice
+                properties:
+                  editorsChoice:
+                    type: boolean
+                    description: "Whether the community should be marked as Editor's Choice. Only global moderators can update this field."
+        responses:
+          '204':
+            description: Community updated successfully
+          '400':
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required or insufficient permissions (only global moderators can update Editor's Choice)
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      delete:
+        operationId: deleteCommunity
+        summary: Delete a community
+        description: |
+          Deletes a community.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+        responses:
+          '204':
+            description: Community deleted successfully
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/communities/{id}/members:
+      get:
+        operationId: listCommunityMembers
+        summary: List community members
+        description: |
+          Lists all members of a specific community with their profiles and roles.
+          This endpoint has optional Signed Fetch authentication.
+          When not signed, it only returns members of public communities.
+          When signed, it returns all members if the user has access to the community, including friendship status with each member.
+          Can be filtered to show only online members.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: limit
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of members per page.
+          - name: offset
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of members to skip.
+          - name: onlyOnline
+            in: query
+            required: false
+            schema:
+              type: boolean
+            description: Filter to show only online members.
+        responses:
+          '200':
+            description: Members found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetCommunityMembers200OkResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      post:
+        operationId: addCommunityMember
+        summary: Add a member to a community
+        description: |
+          Adds a member to a community.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+        responses:
+          '204':
+            description: Member added successfully
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+    /v1/communities/{id}/members/{memberAddress}:
+      delete:
+        operationId: removeCommunityMember
+        summary: Remove a member from a community
+        description: |
+          Removes a member from a community.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: memberAddress
+            in: path
+            required: true
+            schema:
+              type: string
+            description: ETH address of the member to remove.
+        responses:
+          '204':
+            description: Member removed successfully
+          '404':
+            description: Community or member not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      patch:
+        operationId: updateMemberRole
+        summary: Update member role
+        description: |
+          Updates the role of a member in a community.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: memberAddress
+            in: path
+            required: true
+            schema:
+              type: string
+            description: ETH address of the member to update.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - role
+                properties:
+                  role:
+                    type: string
+                    enum: [owner, moderator, member]
+                    description: 'New role for the member'
+        responses:
+          '204':
+            description: Member role updated successfully
+          '404':
+            description: Community or member not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+    /v1/members/{address}/communities:
+      get:
+        operationId: getMemberCommunities
+        summary: List communities for a member
+        description: |
+          Lists all communities a member belongs to.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: address
+            in: path
+            required: true
+            schema:
+              type: string
+            description: ETH address of the member.
+          - name: limit
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of communities per page.
+          - name: offset
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of communities to skip.
+        responses:
+          '200':
+            description: Communities found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetMemberCommunities200OkResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      post:
+        operationId: getMemberCommunitiesByIds
+        summary: Get member communities by IDs
+        description: |
+          Validates a batch of community IDs and returns only those that exist and are visible to a user.
+          This endpoint is used by other services (like worlds-content-server) to validate community IDs
+          when storing access settings.
+  
+          **Authentication:**
+          This endpoint requires Bearer token authentication (admin token).
+  
+          **Visibility Rules:**
+          - Public communities are always visible
+          - Private communities are only visible to their members
+          - Banned users cannot see communities they are banned from
+  
+          **Usage:**
+          - Caller provides a list of community IDs to validate
+          - Response contains only the valid and visible communities
+          - Caller should check that all requested IDs are present in the response
+  
+          **Limits:**
+          - Maximum 50 community IDs per request
+        security:
+          - BearerAuth: []
+        parameters:
+          - name: address
+            in: path
+            required: true
+            schema:
+              type: string
+            description: ETH address of the member to check visibility for.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: './schemas.yaml#/components/schemas/GetMemberCommunitiesByIdsRequest'
+        responses:
+          '200':
+            description: Valid and visible communities
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetMemberCommunitiesByIds200OkResponse'
+          '400':
+            description: Invalid request - malformed community IDs or exceeds limit
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Bearer token required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/communities/{id}/bans:
+      get:
+        operationId: listBannedMembers
+        summary: List banned members of a community
+        description: |
+          Lists all banned members of a specific community.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: limit
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of banned members per page.
+          - name: offset
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of banned members to skip.
+        responses:
+          '200':
+            description: Banned members found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetBannedMembers200OkResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+    /v1/communities/{id}/members/{memberAddress}/bans:
+      post:
+        operationId: banCommunityMember
+        summary: Ban a member from a community
+        description: |
+          Bans a member from a community.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: memberAddress
+            in: path
+            required: true
+            schema:
+              type: string
+            description: ETH address of the member to ban.
+        responses:
+          '204':
+            description: Member banned successfully
+          '404':
+            description: Community or member not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      delete:
+        operationId: unbanCommunityMember
+        summary: Unban a member from a community
+        description: |
+          Unbans a member from a community.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: memberAddress
+            in: path
+            required: true
+            schema:
+              type: string
+            description: ETH address of the member to unban.
+        responses:
+          '204':
+            description: Member unbanned successfully
+          '404':
+            description: Community or member not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/communities/{id}/places:
+      get:
+        operationId: getCommunityPlaces
+        summary: Get community places
+        description: |
+          Lists all places (Decentraland world locations) associated with a specific community.
+          This endpoint has optional Signed Fetch authentication.
+          When not signed, it only returns places of public communities.
+          When signed, it returns all places if the user has access to the community or the community is public.
+          Places are identified by their unique place IDs (UUIDs).
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: limit
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of places per page.
+          - name: offset
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of places to skip.
+        responses:
+          '200':
+            description: Places found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetCommunityPlaces200OkResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+      post:
+        operationId: addCommunityPlaces
+        summary: Add places to community
+        description: |
+          Adds one or more places to a community.
+          This endpoint requires Signed Fetch authentication.
+          Duplicate places are ignored.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - placeIds
+                properties:
+                  placeIds:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+                    description: Array of place IDs to add to the community
+        responses:
+          '204':
+            description: Places added successfully
+          '400':
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/communities/{id}/places/{placeId}:
+      delete:
+        operationId: removeCommunityPlace
+        summary: Remove place from community
+        description: |
+          Removes a place from a community.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: placeId
+            in: path
+            required: true
+            schema:
+              type: string
+              format: uuid
+            description: The unique identifier of the place to remove.
+        responses:
+          '204':
+            description: Place removed successfully
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community or place not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/communities/{address}/managed:
+      get:
+        operationId: getManagedCommunities
+        summary: Get managed communities for an address
+        description: |
+          Lists all communities where the specified address is an owner or moderator.
+          This endpoint requires admin authentication.
+        security:
+          - BearerAuth: []
+        parameters:
+          - name: address
+            in: path
+            required: true
+            schema:
+              type: string
+            description: ETH address of the user to get managed communities for.
+          - name: limit
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of communities per page.
+          - name: offset
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of communities to skip.
+        responses:
+          '200':
+            description: Managed communities found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetManagedCommunities200OkResponse'
+          '401':
+            description: Unauthorized - Admin token required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/referral-progress:
+      post:
+        operationId: createReferralProgress
+        summary: Create referral progress
+        description: |
+          Creates a referral relationship between a referrer and an invited user.
+          This endpoint requires Signed Fetch authentication.
+          The authenticated user becomes the "invited" user, and the referrer address is provided in the request body.
+          This should be called when a user follows a referral link.
+        security:
+          - SignedFetch: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - referrer
+                properties:
+                  referrer:
+                    type: string
+                    description: 'ETH address of the referrer'
+        responses:
+          '204':
+            description: Referral progress created successfully
+          '400':
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Referrals
+      patch:
+        operationId: updateReferralStatus
+        summary: Update referral signed up status
+        description: |
+          Updates the referral progress status to signed up for the authenticated user.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        responses:
+          '204':
+            description: Referral status updated successfully
+          '400':
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Referral not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Referrals
+      get:
+        operationId: getReferralStats
+        summary: Get invited users accepted stats
+        description: |
+          Retrieves the current users invited by a referral and the ones from the last time they were fetched, along with reward images containing the tier and URL information. This allows comparing the previously seen data with the current one.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        responses:
+          '200':
+            description: Referral statistics found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetReferralStats200OkResponse'
+          '400':
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Referrals
+  
+    /v1/referral-email:
+      post:
+        operationId: addReferralEmail
+        summary: Add referral email
+        description: |
+          Associates an email address with a referral for the authenticated user.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - email
+                properties:
+                  email:
+                    type: string
+                    format: email
+                    description: 'Email address to associate with the referral'
+        responses:
+          '204':
+            description: Referral email added successfully
+          '400':
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Referrals
+  
+    /v1/communities/{id}/requests:
+      get:
+        operationId: getCommunityRequests
+        summary: Get community requests
+        description: |
+          Lists all pending requests (invites and join requests) for a specific community.
+          This endpoint requires Signed Fetch authentication and only community owners or moderators can access it.
+          Returns detailed information about each request including the member's profile, friendship status with the authenticated user.
+          Can be filtered by request type (invite or request_to_join).
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: limit
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of requests per page.
+          - name: offset
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of requests to skip.
+          - name: type
+            in: query
+            required: false
+            schema:
+              type: string
+              enum: [invite, request_to_join]
+            description: Filter requests by type (invite or request_to_join).
+        responses:
+          '200':
+            description: Community requests found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetCommunityRequests200OkResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required or insufficient permissions
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      post:
+        operationId: createCommunityRequest
+        summary: Create community request
+        description: |
+          Creates a community request (invite or join request) for a specific member.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - targetedAddress
+                  - type
+                properties:
+                  targetedAddress:
+                    type: string
+                    description: 'ETH address of the member to create the request for'
+                  type:
+                    type: string
+                    enum: [invite, request_to_join]
+                    description: 'Type of request to create'
+        responses:
+          '200':
+            description: Community request created successfully
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/CreateCommunityRequest200OkResponse'
+          '400':
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/communities/{id}/requests/{requestId}:
+      patch:
+        operationId: updateCommunityRequestStatus
+        summary: Update community request status
+        description: |
+          Updates the status of a community request (accept, reject, or cancel).
+          This endpoint requires Signed Fetch authentication with proper permissions:
+          - For invites: Only the invited user can accept/reject, community owners/moderators can cancel
+          - For join requests: Only community owners/moderators can accept/reject, the requesting user can cancel
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: requestId
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community request.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: './schemas.yaml#/components/schemas/UpdateCommunityRequestStatusRequest'
+        responses:
+          '204':
+            description: Community request status updated successfully
+          '400':
+            description: Invalid request or intention
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required or insufficient permissions
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community or request not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/members/{address}/requests:
+      get:
+        operationId: getMemberRequests
+        summary: Get member requests
+        description: |
+          Lists all pending requests (invites received and join requests sent) for a specific member.
+          This endpoint requires Signed Fetch authentication and users can only access their own requests.
+          Returns detailed community information for each request including voice chat status, member count, and friends in the community.
+          Can be filtered by request type (invite or request_to_join).
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: address
+            in: path
+            required: true
+            schema:
+              type: string
+            description: ETH address of the member.
+          - name: limit
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of requests per page.
+          - name: offset
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of requests to skip.
+          - name: type
+            in: query
+            required: false
+            schema:
+              type: string
+              enum: [invite, request_to_join]
+            description: Filter requests by type (invite or request_to_join).
+        responses:
+          '200':
+            description: Member requests found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetMemberRequests200OkResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required or accessing another user's requests
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/members/{address}/invites:
+      get:
+        operationId: getCommunityInvites
+        summary: Get community invites for a user
+        description: |
+          Lists all communities where the authenticated user (inviter) is a member but the specified address (invitee) is not a member.
+          This is used to render a list of potential communities to invite the user to.
+          This endpoint requires Signed Fetch authentication.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: address
+            in: path
+            required: true
+            schema:
+              type: string
+            description: ETH address of the user to check invite possibilities for (invitee).
+        responses:
+          '200':
+            description: Community invites found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetCommunityInvites200OkResponse'
+          '400':
+            description: Invalid request - Users cannot invite themselves
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/communities/{id}/posts/{postId}/like:
+      post:
+        operationId: likeCommunityPost
+        summary: Like a community post
+        description: |
+          Likes a post in a community.
+          This endpoint requires Signed Fetch authentication.
+          Users can only like posts from communities they are members of.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: postId
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the post.
+        responses:
+          '201':
+            description: Post liked successfully
+          '401':
+            description: Unauthorized - Signed Fetch required or not a member of the community
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community or post not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      delete:
+        operationId: unlikeCommunityPost
+        summary: Unlike a community post
+        description: |
+          Unlikes a post in a community.
+          This endpoint requires Signed Fetch authentication.
+          Users can only unlike posts they have previously liked.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: postId
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the post.
+        responses:
+          '204':
+            description: Post unliked successfully
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community or post not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/community-voice-chats/active:
+      get:
+        operationId: getActiveCommunityVoiceChats
+        summary: Get active community voice chats
+        description: |
+          Lists all active community voice chats visible to the authenticated user.
+          This endpoint requires Signed Fetch authentication.
+          Returns voice chats from communities the user is a member of, including participant counts,
+          moderator counts, community information, and location data (positions and worlds).
+        security:
+          - SignedFetch: []
+        responses:
+          '200':
+            description: Active community voice chats found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetActiveCommunityVoiceChats200OkResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Community Voice Chats
+  
+    /v1/moderation/communities:
+      get:
+        operationId: getCommunitiesForModeration
+        summary: Get all communities for moderation
+        description: |
+          Lists all communities for moderation purposes with detailed information.
+          This endpoint requires Signed Fetch authentication and the user must be a global moderator.
+          Global moderators are configured via feature flags.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: limit
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of communities per page.
+          - name: offset
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of communities to skip.
+          - name: search
+            in: query
+            required: false
+            schema:
+              type: string
+            description: Search term to filter communities by name or description.
+        responses:
+          '200':
+            description: Communities found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetCommunitiesForModeration200OkResponse'
+          '403':
+            description: Forbidden - Global moderator privileges required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/communities/{id}/posts:
+      get:
+        operationId: listCommunityPosts
+        summary: List community posts
+        description: |
+          Lists all posts from a specific community with pagination support.
+          This endpoint has optional Signed Fetch authentication.
+          When not signed, it only returns posts from public communities.
+          When signed, it returns all posts if the user has access to the community, including the user's like status for each post.
+          Posts are returned in reverse chronological order (newest first).
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: limit
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of posts per page (max 100).
+          - name: offset
+            in: query
+            required: false
+            schema:
+              type: integer
+            description: Number of posts to skip.
+        responses:
+          '200':
+            description: Posts found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/GetCommunityPosts200OkResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+      post:
+        operationId: createCommunityPost
+        summary: Create a community post
+        description: |
+          Creates a new post in a community.
+          This endpoint requires Signed Fetch authentication and only community owners or moderators can create posts.
+          Post content must be between 1 and 1000 characters.
+          Returns the created post with author profile information.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: './schemas.yaml#/components/schemas/CreatePostRequest'
+        responses:
+          '201':
+            description: Post created successfully
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/CreatePost201OkResponse'
+          '400':
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '401':
+            description: Unauthorized - Signed Fetch required or insufficient permissions
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+  
+    /v1/communities/{id}/posts/{postId}:
+      delete:
+        operationId: deleteCommunityPost
+        summary: Delete a community post
+        description: |
+          Deletes a post from a community.
+          This endpoint requires Signed Fetch authentication and only community owners or moderators can delete posts.
+        security:
+          - SignedFetch: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the community.
+          - name: postId
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The unique identifier of the post.
+        responses:
+          '204':
+            description: Post deleted successfully
+          '401':
+            description: Unauthorized - Signed Fetch required or insufficient permissions
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '404':
+            description: Community or post not found
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+          '500':
+            description: Internal server error
+            content:
+              application/json:
+                schema:
+                  $ref: './schemas.yaml#/components/schemas/ErrorResponse'
+        tags:
+          - Communities
+
+ai_context: |
+  # AI Agent Context
+  
+  **Service Purpose:** A microservice that handles social interactions for Decentraland, built using the Well Known Components architecture pattern. Enables users to create and manage communities, connect with friends, participate in voice chats, and engage in social activities within the metaverse.
+  
+  **Key Capabilities:**
+  
+  - **Community Management**: Create and manage communities with customizable privacy settings (public/private) and visibility (listed/unlisted)
+  - **Member Management**: Role-based permissions (owner, moderator, member) with invitation and join request workflows
+  - **Community Posts**: Share updates and announcements within communities with post likes
+  - **Place Associations**: Link communities with specific Decentraland locations
+  - **Voice Chat**: Real-time voice chat sessions within communities with role-based participation
+  - **Friendship Management**: Manage friend relationships and social connections (via RPC/gRPC)
+  - **Privacy Controls**: Blocking and privacy settings for user interactions
+  - **Referral System**: Track user referrals, invitations, and referral progress
+  - **User Profiles**: Integration with user profiles including claimed names and avatars
+  - **Online Status**: Track online status for community members
+  
+  **Communication Pattern:** 
+  - Synchronous HTTP REST API (community management, posts, voice chats)
+  - RPC/gRPC (friendships, blocking, private messages)
+  - Event-driven via NATS messaging (real-time updates)
+  - Server-Sent Events (SSE) for real-time notification streams
+  
+  **Technology Stack:**
+  
+  - Runtime: Node.js 20.x
+  - Language: TypeScript
+  - HTTP Framework: @well-known-components/http-server
+  - RPC Framework: @dcl/rpc for gRPC communication
+  - Database: PostgreSQL (via @well-known-components/pg-component)
+  - Cache: Redis for performance optimization
+  - Message Broker: NATS for real-time updates
+  - Storage: AWS S3 for media storage
+  - Component Architecture: @well-known-components (logger, metrics, http-server, pg-component, nats-component, env-config-provider)
+  
+  **External Dependencies:**
+  
+  - **PostgreSQL**: Communities, members, posts, friendships, social settings, referrals, voice chats
+  - **Redis**: Caching layer for performance optimization
+  - **NATS**: Message broker for real-time updates and event distribution
+  - **AWS S3**: Media storage for community images and referral rewards
+  - **AWS SNS**: Event notifications for social events
+  - **Catalyst**: Content server for user profiles and avatar data
+  - **Places API**: Scene and place information
+  - **Comms Gatekeeper**: Voice chat token generation
+  - **Archipelago Stats**: User presence and online status
+  
+  **Key Concepts:**
+  
+  - **Community Privacy**: 
+    - Public: Anyone can view and join
+    - Private: Requires invitation or approval to join
+  - **Community Visibility**: 
+    - Listed: Appears in public community listings
+    - Unlisted: Only accessible via direct link, not shown in listings
+  - **Community Roles**: 
+    - `owner`: Full control over the community
+    - `moderator`: Can manage members, posts, and settings
+    - `member`: Regular community member
+    - `none`: Not a member of the community
+  - **Request Types**: 
+    - `invite`: An invitation sent to a user to join a community
+    - `request_to_join`: A request from a user to join a private community
+  - **Private Voice Chats**: One-on-one voice chat sessions between users with expiration times
+  - **Referral System**: Tracks user referrals with status, tier grants, and email associations
+  
+  **Database Schema:**
+  
+  - **Main Tables**: `communities`, `community_members`, `community_posts`, `community_post_likes`, `community_bans`, `community_requests`, `community_places`, `friendships`, `friendships_history`, `social_settings`, `blocks`, `private_voice_chats`, `referral_progress`, `referral_progress_viewed`, `referral_emails`, `referral_reward_images`, `community_ranking_metrics`
+  - **Key Relationships**: Communities have members, posts, bans, and places. Members have roles. Posts have likes. Referrals track progress and rewards.
+  - **Full Documentation**: See [docs/database-schemas.md](docs/database-schemas.md) for detailed schema, column definitions, and relationships
+  
+  **API Specification:** OpenAPI docs available at [docs/openapi.yaml](docs/openapi.yaml)
+  
+  **Authentication Notes:**
+  
+  - Most REST endpoints use Signed Fetch authentication (ADR-44)
+  - Admin endpoints use Bearer token authentication
+  - RPC/gRPC endpoints use different authentication mechanisms
+  - Scene-based requests are prevented for additional security
+  
+
+readme: |
+  # Social Service EA
+  
+  [![Coverage Status](https://coveralls.io/repos/github/decentraland/social-service-ea/badge.svg)](https://coveralls.io/github/decentraland/social-service-ea)
+  
+  A microservice that handles social interactions for Decentraland, built using the Well Known Components architecture pattern. This service enables users to create and manage communities, connect with friends, participate in voice chats, and engage in social activities within the metaverse.
+  
+  This server interacts with PostgreSQL for data persistence, Redis for caching, NATS for messaging, AWS S3 for media storage, and various Decentraland services (Catalyst, Places API, Comms Gatekeeper) in order to provide users with comprehensive social features and community management capabilities.
+  
+  ## Table of Contents
+  
+  - [Features](#features)
+  - [Dependencies](#dependencies)
+  - [API Documentation](#api-documentation)
+  - [Database](#database)
+    - [Schema](#schema)
+    - [Migrations](#migrations)
+  - [Getting Started](#getting-started)
+    - [Prerequisites](#prerequisites)
+    - [Installation](#installation)
+    - [Configuration](#configuration)
+    - [Running the Service](#running-the-service)
+  - [Testing](#testing)
+  
+  ## Features
+  
+  - **Community Management**: Create and manage communities with customizable privacy settings (public/private) and visibility (listed/unlisted)
+  - **Member Management**: Role-based permissions (owner, moderator, member) with invitation and join request workflows
+  - **Community Posts**: Share updates and announcements within communities with post likes
+  - **Place Associations**: Link communities with specific Decentraland locations
+  - **Voice Chat**: Real-time voice chat sessions within communities with role-based participation
+  - **Friendship Management**: Manage friend relationships and social connections
+  - **Privacy Controls**: Blocking and privacy settings for user interactions
+  - **Referral System**: Track user referrals, invitations, and referral progress
+  - **User Profiles**: Integration with user profiles including claimed names and avatars
+  - **Online Status**: Track online status for community members
+  
+  ## Dependencies
+  
+  - **[Catalyst](https://github.com/decentraland/catalyst)**: Content server for user profiles and avatar data
+  - **[Places API](https://github.com/decentraland/places-api)**: Scene and place information
+  - **[Comms Gatekeeper](https://github.com/decentraland/comms-gatekeeper)**: Voice chat token generation
+  - **[Archipelago Stats](https://github.com/decentraland/archipelago-workers)**: User presence and online status
+  - **PostgreSQL**: Database for communities, members, posts, friendships, and social settings
+  - **Redis**: Caching layer for performance optimization
+  - **NATS**: Message broker for real-time updates and event distribution
+  - **AWS S3**: Media storage for community images and referral rewards
+  - **AWS SNS**: Event notifications for social events
+  - **LocalStack** (for local development): AWS services emulation
+  
+  ## API Documentation
+  
+  The API is fully documented using the [OpenAPI standard](https://swagger.io/specification/). The schema is located at [docs/openapi.yaml](docs/openapi.yaml).
+  
+  ### Authentication
+  
+  This API uses two authentication methods:
+  
+  - **Signed Fetch (Primary)**: Most endpoints use Signed Fetch authentication (ADR-44), which cryptographically signs requests using the user's Ethereum wallet
+  - **Bearer Token (Admin)**: Administrative endpoints use Bearer token authentication for system-level operations
+  
+  ### Quick Links
+  
+  - [🌟 Features](https://github.com/decentraland/social-service-ea/wiki/Features)
+  - [🏗 Architecture](https://github.com/decentraland/social-service-ea/wiki/Architecture)
+  - [🔗 API Documentation](https://github.com/decentraland/social-service-ea/wiki/API-Documentation)
+  - [🚀 Getting Started](https://github.com/decentraland/social-service-ea/wiki/Getting-Started)
+  - [🧪 Testing](https://github.com/decentraland/social-service-ea/wiki/Testing)
+  - [🔄 CI/CD](https://github.com/decentraland/social-service-ea/wiki/CI-CD)
+  
+  ## Database
+  
+  ### Schema
+  
+  See [docs/database-schemas.md](docs/database-schemas.md) for detailed schema, column definitions, and relationships.
+  
+  ### Migrations
+  
+  The service uses `node-pg-migrate` for database migrations. These migrations are located in `src/migrations/`. The service automatically runs the migrations when starting up.
+  
+  #### Create a new migration
+  
+  Migrations are created by running the create command:
+  
+  ```bash
+  yarn migrate create name-of-the-migration
+  ```
+  
+  This will result in the creation of a migration file inside of the `src/migrations/` directory. This migration file MUST contain the migration set up and rollback procedures.
+  
+  #### Manually applying migrations
+  
+  If required, these migrations can be run manually.
+  
+  To run them manually:
+  
+  ```bash
+  yarn migrate up
+  ```
+  
+  To rollback them manually:
+  
+  ```bash
+  yarn migrate down
+  ```
+  
+  ## Getting Started
+  
+  ### Prerequisites
+  
+  Before running this service, ensure you have the following installed:
+  
+  - **Node.js**: Version 20.x.x or higher
+  - **Yarn**: Version 1.22.x or higher
+  - **Docker**: For containerized deployment and local development dependencies
+  - **Docker Compose**: For orchestrating multiple services
+  
+  #### Extra prerequisites (optional when not using Docker Compose)
+  
+  - PostgreSQL 14+
+  - Redis 6+
+  - NATS 2+
+  - LocalStack (for AWS services emulation)
+  
+  ### Installation
+  
+  1. Clone the repository:
+  
+  ```bash
+  git clone https://github.com/decentraland/social-service-ea.git
+  cd social-service-ea
+  ```
+  
+  2. Install dependencies:
+  
+  ```bash
+  yarn install
+  ```
+  
+  3. Build the project:
+  
+  ```bash
+  yarn build
+  ```
+  
+  ### Configuration
+  
+  The service uses environment variables for configuration. Copy the example file and adjust as needed:
+  
+  ```bash
+  cp .env.default .env
+  ```
+  
+  See `.env.default` for available configuration options.
+  
+  ### Running the Service
+  
+  #### Setting up the environment
+  
+  In order to successfully run this server, external dependencies such as databases, caches, message brokers, and storage must be provided.
+  
+  To do so, this repository provides you with a `docker-compose.yml` file for that purpose. In order to get the environment set up, run:
+  
+  ```bash
+  docker compose up -d --wait
+  ```
+  
+  This will start:
+  - PostgreSQL database on port `5432`
+  - Redis on port `6379`
+  - NATS message broker on port `4222`
+  - LocalStack (SNS and S3) on port `4566`
+  
+  You can see the logs of the services with:
+  
+  ```bash
+  docker compose logs -f
+  ```
+  
+  #### Running in development mode
+  
+  To run the service in development mode:
+  
+  ```bash
+  yarn dev
+  ```
+  
+  This will:
+  - Watch for file changes
+  - Automatically rebuild TypeScript
+  - Restart the server on changes
+  
+  For production mode:
+  
+  ```bash
+  yarn start
+  ```
+  
+  ## Testing
+  
+  This service includes comprehensive test coverage with both unit and integration tests.
+  
+  ### Running Tests
+  
+  Run all tests with coverage:
+  
+  ```bash
+  yarn test
+  ```
+  
+  Run only unit tests:
+  
+  ```bash
+  yarn test:unit
+  ```
+  
+  Run only integration tests:
+  
+  ```bash
+  yarn test:integration
+  ```
+  
+  Run tests in watch mode:
+  
+  ```bash
+  yarn test:unit:watch
+  yarn test:integration:watch
+  ```
+  
+  ### Test Structure
+  
+  - **Unit Tests** (`test/unit/`): Test individual components and functions in isolation
+  - **Integration Tests** (`test/integration/`): Test the complete request/response cycle
+  
+  For detailed testing guidelines and standards, refer to our [Testing Standards](https://github.com/decentraland/docs/tree/main/development-standards/testing-standards) documentation.
+  
+  ## AI Agent Context
+  
+  For detailed AI Agent context, see [docs/ai-agent-context.md](docs/ai-agent-context.md).
+  
+  ---
+  
+  **Note**: This service requires multiple external dependencies. Using Docker Compose is the recommended way to run all dependencies locally for development.
+
+extra_docs:
+  docs_database-schemas_md: |
+    # Database Schema Documentation
+    
+    This document describes the database schema for the Social Service EA. The schema uses PostgreSQL and is managed through migrations located in `src/migrations/`.
+    
+    ## Database Schema Diagram
+    
+    ```mermaid
+    erDiagram
+        communities {
+            UUID id PK "Community ID"
+            VARCHAR name "Community name"
+            TEXT description "Community description"
+            VARCHAR owner_address "Owner address"
+            BOOLEAN private "Privacy flag"
+            BOOLEAN active "Active status"
+            BOOLEAN unlisted "Visibility flag"
+            TIMESTAMP created_at "Creation timestamp"
+            TIMESTAMP updated_at "Update timestamp"
+        }
+        
+        community_members {
+            UUID id PK "Member record ID"
+            UUID community_id FK "Community reference"
+            VARCHAR member_address "Member address"
+            VARCHAR role "Member role"
+            TIMESTAMP joined_at "Join timestamp"
+        }
+        
+        community_posts {
+            UUID id PK "Post ID"
+            UUID community_id FK "Community reference"
+            VARCHAR author_address "Author address"
+            TEXT content "Post content"
+            TIMESTAMP created_at "Creation timestamp"
+        }
+        
+        community_post_likes {
+            UUID post_id PK FK "Post reference"
+            VARCHAR user_address PK "User address"
+            TIMESTAMP liked_at "Like timestamp"
+        }
+        
+        friendships {
+            UUID id PK "Friendship ID"
+            VARCHAR address_requester "Requester address"
+            VARCHAR address_requested "Requested address"
+            BOOLEAN is_active "Active status"
+            TIMESTAMP created_at "Creation timestamp"
+            TIMESTAMP updated_at "Update timestamp"
+        }
+        
+        social_settings {
+            VARCHAR address PK "User address"
+            VARCHAR private_messages_privacy "Privacy setting"
+            VARCHAR blocked_users_messages_visibility "Visibility setting"
+        }
+        
+        private_voice_chats {
+            UUID id PK "Voice chat ID"
+            VARCHAR caller_address "Caller address"
+            VARCHAR callee_address "Callee address"
+            TIMESTAMP created_at "Creation timestamp"
+            TIMESTAMP updated_at "Update timestamp"
+            TIMESTAMP expires_at "Expiration timestamp"
+        }
+        
+        referral_progress {
+            UUID id PK "Referral ID"
+            TEXT referrer "Referrer address"
+            TEXT invited_user "Invited user address"
+            TEXT status "Referral status"
+            BIGINT signed_up_at "Sign up timestamp"
+            BOOLEAN tier_granted "Tier granted flag"
+            BIGINT tier_granted_at "Tier granted timestamp"
+            BIGINT created_at "Creation timestamp"
+            BIGINT updated_at "Update timestamp"
+        }
+        
+        communities ||--o{ community_members : "has"
+        communities ||--o{ community_posts : "has"
+        communities ||--o{ community_bans : "has"
+        communities ||--o{ community_places : "has"
+        communities ||--o{ community_requests : "has"
+        community_posts ||--o{ community_post_likes : "has"
+    ```
+    
+    ## Tables Overview
+    
+    The database contains the following main tables:
+    
+    1. **`communities`** - Stores community information and settings
+    2. **`community_members`** - Tracks community membership with roles
+    3. **`community_posts`** - Community posts and announcements
+    4. **`community_post_likes`** - Post likes by users
+    5. **`community_bans`** - Banned users from communities
+    6. **`community_requests`** - Join requests and invitations
+    7. **`community_places`** - Place associations for communities
+    8. **`friendships`** - Friend relationships between users
+    9. **`friendships_history`** - Historical friendship records
+    10. **`social_settings`** - User privacy and social settings
+    11. **`blocks`** - Blocked user relationships
+    12. **`private_voice_chats`** - One-on-one voice chat sessions
+    13. **`referral_progress`** - User referral tracking
+    14. **`referral_progress_viewed`** - Referral progress view tracking
+    15. **`referral_emails`** - Email associations for referrals
+    16. **`referral_reward_images`** - Referral reward images
+    17. **`community_ranking_metrics`** - Community ranking and metrics
+    
+    ## Table: `communities`
+    
+    Stores community information including name, description, owner, privacy settings, and visibility.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `id` | UUID | NOT NULL | **Primary Key**. Unique community identifier. |
+    | `name` | VARCHAR | NOT NULL | Community name. |
+    | `description` | TEXT | NOT NULL | Community description. |
+    | `owner_address` | VARCHAR | NOT NULL | Ethereum address of the community owner. |
+    | `private` | BOOLEAN | NOT NULL | Privacy flag. `true` for private communities, `false` for public. Defaults to `false`. |
+    | `active` | BOOLEAN | NOT NULL | Active status. Defaults to `true`. |
+    | `unlisted` | BOOLEAN | NOT NULL | Visibility flag. `true` for unlisted communities. |
+    | `created_at` | TIMESTAMP | NOT NULL | Timestamp when the community was created. Defaults to `now()`. |
+    | `updated_at` | TIMESTAMP | NOT NULL | Timestamp when the community was last updated. Defaults to `now()`. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `id`
+    
+    ### Business Rules
+    
+    1. Each community has one owner
+    2. Private communities require invitation or approval to join
+    3. Unlisted communities don't appear in public listings
+    
+    ---
+    
+    ## Table: `community_members`
+    
+    Tracks community membership with role-based permissions.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `id` | UUID | NOT NULL | **Primary Key**. Unique member record identifier. |
+    | `community_id` | UUID | NOT NULL | **Foreign Key** to `communities.id`. |
+    | `member_address` | VARCHAR | NOT NULL | Ethereum address of the member. |
+    | `role` | VARCHAR | NOT NULL | Member role: `owner`, `moderator`, or `member`. |
+    | `joined_at` | TIMESTAMP | NOT NULL | Timestamp when the member joined. Defaults to `now()`. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `id`
+    - **Foreign Key**: `community_id` references `communities(id)` ON DELETE CASCADE
+    
+    ### Business Rules
+    
+    1. Each community can have multiple members
+    2. Roles: `owner`, `moderator`, `member`
+    3. Owner has full control, moderators can manage members and posts
+    
+    ---
+    
+    ## Table: `community_posts`
+    
+    Stores posts and announcements within communities.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `id` | UUID | NOT NULL | **Primary Key**. Unique post identifier. Auto-generated. |
+    | `community_id` | UUID | NOT NULL | **Foreign Key** to `communities.id`. |
+    | `author_address` | VARCHAR | NOT NULL | Ethereum address of the post author. |
+    | `content` | TEXT | NOT NULL | Post content. |
+    | `created_at` | TIMESTAMP | NOT NULL | Timestamp when the post was created. Defaults to `now()`. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `id`
+    - **Foreign Key**: `community_id` references `communities(id)` ON DELETE CASCADE
+    - **Index**: `community_id` - For efficient community post queries
+    - **Index**: `community_posts_community_created_idx` on `(community_id, created_at)` - For sorted post queries
+    
+    ### Business Rules
+    
+    1. Posts belong to a single community
+    2. Posts are ordered by creation time (newest first)
+    3. Only community members can create posts
+    
+    ---
+    
+    ## Table: `community_post_likes`
+    
+    Tracks likes on community posts.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `post_id` | UUID | NOT NULL | **Primary Key (part 1)**. **Foreign Key** to `community_posts.id`. |
+    | `user_address` | VARCHAR | NOT NULL | **Primary Key (part 2)**. Ethereum address of the user who liked the post. |
+    | `liked_at` | TIMESTAMP | NOT NULL | Timestamp when the post was liked. Defaults to `now()`. |
+    
+    ### Indexes
+    
+    - **Composite Primary Key**: `(post_id, user_address)` - One like per user per post
+    - **Foreign Key**: `post_id` references `community_posts(id)` ON DELETE CASCADE
+    - **Index**: `post_id` - For efficient like counting
+    
+    ### Business Rules
+    
+    1. One like per user per post
+    2. Likes are deleted when posts are deleted (CASCADE)
+    
+    ---
+    
+    ## Table: `friendships`
+    
+    Stores friend relationships between users.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `id` | UUID | NOT NULL | **Primary Key**. Unique friendship identifier. |
+    | `address_requester` | VARCHAR | NOT NULL | Ethereum address of the user who sent the friend request. |
+    | `address_requested` | VARCHAR | NOT NULL | Ethereum address of the user who received the friend request. |
+    | `is_active` | BOOLEAN | NOT NULL | Active status. `true` when friendship is active. Defaults to `false`. |
+    | `created_at` | TIMESTAMP | NOT NULL | Timestamp when the friendship was created. Defaults to `now()`. |
+    | `updated_at` | TIMESTAMP | NOT NULL | Timestamp when the friendship was last updated. Defaults to `now()`. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `id`
+    
+    ### Business Rules
+    
+    1. Friendships are bidirectional when `is_active = true`
+    2. Friend requests start with `is_active = false`
+    3. Historical records are maintained in `friendships_history`
+    
+    ---
+    
+    ## Table: `social_settings`
+    
+    Stores user privacy and social interaction settings.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `address` | VARCHAR(42) | NOT NULL | **Primary Key**. Ethereum address of the user. |
+    | `private_messages_privacy` | VARCHAR | NOT NULL | Privacy setting for private messages. Defaults to `ONLY_FRIENDS`. |
+    | `blocked_users_messages_visibility` | VARCHAR | NOT NULL | Visibility setting for blocked users' messages. Defaults to `SHOW_MESSAGES`. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `address`
+    
+    ### Constraints
+    
+    - **Check Constraint**: `valid_private_messages_privacy` - Ensures valid privacy values
+    - **Check Constraint**: `valid_blocked_users_messages_visibility` - Ensures valid visibility values
+    
+    ### Business Rules
+    
+    1. One settings record per user
+    2. Privacy settings control who can send private messages
+    3. Visibility settings control how blocked users' messages are displayed
+    
+    ---
+    
+    ## Table: `private_voice_chats`
+    
+    Tracks one-on-one voice chat sessions between users.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `id` | UUID | NOT NULL | **Primary Key**. Unique voice chat identifier. |
+    | `caller_address` | VARCHAR | NOT NULL | Ethereum address of the caller. |
+    | `callee_address` | VARCHAR | NOT NULL | Ethereum address of the callee. |
+    | `created_at` | TIMESTAMP | NOT NULL | Timestamp when the voice chat was created. Defaults to `now()`. |
+    | `updated_at` | TIMESTAMP | NOT NULL | Timestamp when the voice chat was last updated. Defaults to `now()`. |
+    | `expires_at` | TIMESTAMP | NOT NULL | Timestamp when the voice chat expires. Must be greater than current time. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `id`
+    - **Index**: `caller_address` - For efficient caller queries
+    - **Index**: `callee_address` - For efficient callee queries
+    
+    ### Constraints
+    
+    - **Check Constraint**: `private_voice_chats_expires_at_check` - Ensures `expires_at > now()`
+    
+    ### Business Rules
+    
+    1. Only one active private voice chat per user pair
+    2. Voice chats have expiration times
+    3. Expired voice chats are automatically cleaned up
+    
+    ---
+    
+    ## Table: `referral_progress`
+    
+    Tracks user referrals and invitation progress.
+    
+    ### Columns
+    
+    | Column | Type | Nullable | Description |
+    |--------|------|----------|-------------|
+    | `id` | UUID | NOT NULL | **Primary Key**. Unique referral identifier. |
+    | `referrer` | TEXT | NOT NULL | Ethereum address of the referrer. |
+    | `invited_user` | TEXT | NOT NULL | Ethereum address of the invited user. |
+    | `status` | TEXT | NOT NULL | Referral status. |
+    | `signed_up_at` | BIGINT | NULL | Timestamp (in milliseconds) when the user signed up. |
+    | `tier_granted` | BOOLEAN | NOT NULL | Whether a tier reward was granted. Defaults to `false`. |
+    | `tier_granted_at` | BIGINT | NULL | Timestamp (in milliseconds) when the tier was granted. |
+    | `created_at` | BIGINT | NOT NULL | Timestamp (in milliseconds) when the referral was created. |
+    | `updated_at` | BIGINT | NOT NULL | Timestamp (in milliseconds) when the referral was last updated. |
+    
+    ### Indexes
+    
+    - **Primary Key**: `id`
+    - **Unique Index**: `unique_referral_progress_referrer_invited_user` on `(referrer, invited_user)` - One referral per referrer-invited pair
+    - **Index**: `idx_referral_progress_invited_user` on `invited_user` - For efficient invited user queries
+    
+    ### Business Rules
+    
+    1. One referral record per referrer-invited user pair
+    2. Status tracks the referral progress
+    3. Timestamps stored in milliseconds (BIGINT)
+    
+    ---
+    
+    ## Related Code
+    
+    - **Migrations**: `src/migrations/`
+    - **Database Adapters**: `src/adapters/db/`
+    - **Types**: `src/types/`
+    
+
+  docs_schemas_yaml: |
+    components:
+      schemas:
+        ErrorResponse:
+          type: object
+          required:
+            - message
+            - error
+          properties:
+            message:
+              type: string
+              description: 'A message describing the error'
+            error:
+              type: string
+              description: 'Error code (e.g. Not Found, Invalid Request, Unauthorized, etc.)'
+        PaginationParams:
+          type: object
+          required:
+            - limit
+            - offset
+          properties:
+            limit:
+              type: integer
+              description: 'Number of items per page'
+            offset:
+              type: integer
+              description: 'Number of items to skip'
+        PaginatedResponse:
+          type: object
+          required:
+            - results
+            - total
+            - limit
+            - offset
+          properties:
+            results:
+              type: array
+              items:
+                type: object
+            total:
+              type: integer
+              description: 'Total number of items'
+            limit:
+              type: integer
+              description: 'Number of items per page'
+            offset:
+              type: integer
+              description: 'Number of items skipped'
+            page:
+              type: integer
+              description: 'Current page number (1-indexed)'
+            pages:
+              type: integer
+              description: 'Total number of pages'
+        GetCommunities200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PaginatedResponse'
+                - type: object
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - name
+                          - description
+                          - ownerAddress
+                          - privacy
+                          - visibility
+                          - active
+                          - membersCount
+                        properties:
+                          id:
+                            type: string
+                          name:
+                            type: string
+                          description:
+                            type: string
+                          ownerAddress:
+                            type: string
+                          ownerName:
+                            type: string
+                            description: 'Display name of the community owner'
+                          privacy:
+                            type: string
+                            enum: [public, private]
+                          visibility:
+                            type: string
+                            enum: [all, unlisted]
+                            description: 'Community visibility setting (all = listed, unlisted = hidden from general listings)'
+                          active:
+                            type: boolean
+                          membersCount:
+                            type: integer
+                          thumbnails:
+                            type: object
+                            additionalProperties:
+                              type: string
+                            description: 'Map of thumbnail URLs by size/type'
+                          friends:
+                            type: array
+                            items:
+                              type: object
+                              description: 'Friend profile information including address and name'
+                            description: |
+                              Array of friends who are members of this community.
+                              This is only present when the user is signed in.
+                          role:
+                            type: string
+                            enum: [owner, moderator, member, none]
+                            description: |
+                              The role of the user in the community.
+                              This is only present when the user is signed in.
+                          voiceChatStatus:
+                            type: object
+                            nullable: true
+                            properties:
+                              isActive:
+                                type: boolean
+                              participantCount:
+                                type: integer
+                              moderatorCount:
+                                type: integer
+                            description: 'Voice chat status for the community (null if no active voice chat)'
+        CreateCommunity201OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              required:
+                - id
+                - name
+                - description
+                - ownerAddress
+                - privacy
+                - visibility
+                - active
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                ownerAddress:
+                  type: string
+                privacy:
+                  type: string
+                  enum: [public, private]
+                visibility:
+                  type: string
+                  enum: [all, unlisted]
+                active:
+                  type: boolean
+                thumbnails:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: 'A map of thumbnail types to URLs. The key is the thumbnail type (e.g. "raw") and the value is the URL.'
+        UpdateCommunity200OkResponse:
+          type: object
+          required:
+            - message
+            - data
+          properties:
+            message:
+              type: string
+              description: 'A message describing the result'
+            data:
+              type: object
+              required:
+                - id
+                - name
+                - description
+                - ownerAddress
+                - privacy
+                - visibility
+                - active
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                ownerAddress:
+                  type: string
+                privacy:
+                  type: string
+                  enum: [public, private]
+                visibility:
+                  type: string
+                  enum: [all, unlisted]
+                active:
+                  type: boolean
+                thumbnails:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: 'A map of thumbnail types to URLs. The key is the thumbnail type (e.g. "raw") and the value is the URL.'
+        GetCommunityById200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              required:
+                - id
+                - name
+                - description
+                - ownerAddress
+                - ownerName
+                - privacy
+                - visibility
+                - active
+                - membersCount
+                - role
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                ownerAddress:
+                  type: string
+                  description: 'ETH Address of the community owner'
+                ownerName:
+                  type: string
+                  description: 'Display name of the community owner'
+                privacy:
+                  type: string
+                  enum: [public, private]
+                visibility:
+                  type: string
+                  enum: [all, unlisted]
+                active:
+                  type: boolean
+                  description: 'Whether the community is active or it was logically deleted'
+                membersCount:
+                  type: integer
+                  description: 'Number of members in the community'
+                role:
+                  type: string
+                  enum: [owner, moderator, member, none]
+                  description: 'Role of the authenticated user in this community'
+                thumbnails:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: 'Map of thumbnail URLs by size/type'
+                voiceChatStatus:
+                  type: object
+                  nullable: true
+                  properties:
+                    isActive:
+                      type: boolean
+                    participantCount:
+                      type: integer
+                    moderatorCount:
+                      type: integer
+                  description: 'Voice chat status for the community (null if no active voice chat)'
+        GetCommunityMembers200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PaginatedResponse'
+                - type: object
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - address
+                          - role
+                          - joinedAt
+                          - name
+                          - hasClaimedName
+                          - profilePictureUrl
+                          - friendshipStatus
+                        properties:
+                          address:
+                            type: string
+                            description: 'ETH Address of the member'
+                          role:
+                            type: string
+                            enum: [owner, moderator, member]
+                            description: 'Role of the member in the community'
+                          joinedAt:
+                            type: string
+                            format: date-time
+                            description: 'When the member joined the community'
+                          name:
+                            type: string
+                            description: 'Display name of the member'
+                          hasClaimedName:
+                            type: boolean
+                            description: 'Whether the member has claimed their name'
+                          profilePictureUrl:
+                            type: string
+                            description: 'URL of the member profile picture'
+                          friendshipStatus:
+                            type: integer
+                            description: 'Friendship status code between the authenticated user and the member'
+        GetMemberCommunities200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PaginatedResponse'
+                - type: object
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - name
+                          - ownerAddress
+                          - active
+                          - role
+                        properties:
+                          id:
+                            type: string
+                          name:
+                            type: string
+                          ownerAddress:
+                            type: string
+                          active:
+                            type: boolean
+                          role:
+                            type: string
+                            enum: [owner, moderator, member]
+                          thumbnails:
+                            type: object
+                            additionalProperties:
+                              type: string
+                            description: 'Map of thumbnail URLs by size/type'
+        GetBannedMembers200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PaginatedResponse'
+                - type: object
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - address
+                          - bannedAt
+                        properties:
+                          address:
+                            type: string
+                            description: 'ETH Address of the banned member'
+                          bannedAt:
+                            type: string
+                            format: date-time
+                            description: 'When the member was banned'
+        CommunityPlace:
+          type: object
+          required:
+            - id
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: Unique identifier of the place
+        GetCommunityPlaces200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PaginatedResponse'
+                - type: object
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/CommunityPlace'
+    
+        GetManagedCommunities200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PaginatedResponse'
+                - type: object
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - name
+                          - ownerAddress
+                          - active
+                          - role
+                        properties:
+                          id:
+                            type: string
+                          name:
+                            type: string
+                          ownerAddress:
+                            type: string
+                          active:
+                            type: boolean
+                          role:
+                            type: string
+                            enum: [owner, moderator]
+    
+        GetCommunitiesForModeration200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PaginatedResponse'
+                - type: object
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - name
+                          - description
+                          - ownerAddress
+                          - privacy
+                          - visibility
+                          - active
+                          - membersCount
+                        properties:
+                          id:
+                            type: string
+                          name:
+                            type: string
+                          description:
+                            type: string
+                          ownerAddress:
+                            type: string
+                          privacy:
+                            type: string
+                            enum: [public, private]
+                          visibility:
+                            type: string
+                            enum: [all, unlisted]
+                          active:
+                            type: boolean
+                          membersCount:
+                            type: integer
+                          thumbnails:
+                            type: object
+                            additionalProperties:
+                              type: string
+                            description: 'Map of thumbnail URLs by size/type'
+    
+        GetReferralStats200OkResponse:
+          type: object
+          required:
+            - invitedUsersAccepted
+            - invitedUsersAcceptedViewed
+            - rewardImages
+          properties:
+            invitedUsersAccepted:
+              type: integer
+              description: 'Current total number of users invited by the referral'
+            invitedUsersAcceptedViewed:
+              type: integer
+              description: 'Total number of invited users recorded in the previous fetch'
+            rewardImages:
+              type: array
+              description: 'Images url for each tier reached'
+              items:
+                type: object
+    
+        CreateCommunityRequest200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              required:
+                - id
+                - communityId
+                - memberAddress
+                - type
+                - status
+              properties:
+                id:
+                  type: string
+                  description: 'Unique identifier of the community request'
+                communityId:
+                  type: string
+                  description: 'ID of the community'
+                memberAddress:
+                  type: string
+                  description: 'ETH address of the member'
+                type:
+                  type: string
+                  enum: [invite, request_to_join]
+                  description: 'Type of request'
+                status:
+                  type: string
+                  enum: [pending, accepted, rejected, cancelled]
+                  description: 'Status of the request'
+    
+        GetActiveCommunityVoiceChats200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              required:
+                - activeChats
+                - total
+              properties:
+                activeChats:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - communityId
+                      - participantCount
+                      - moderatorCount
+                      - isMember
+                      - communityName
+                      - positions
+                      - worlds
+                    properties:
+                      communityId:
+                        type: string
+                        description: 'ID of the community'
+                      participantCount:
+                        type: integer
+                        description: 'Number of participants in the voice chat'
+                      moderatorCount:
+                        type: integer
+                        description: 'Number of moderators in the voice chat'
+                      isMember:
+                        type: boolean
+                        description: 'Whether the user is a member of the community'
+                      communityName:
+                        type: string
+                        description: 'Name of the community'
+                      communityImage:
+                        type: string
+                        description: 'URL of the community image'
+                      positions:
+                        type: array
+                        items:
+                          type: string
+                        description: 'Array of position coordinates'
+                      worlds:
+                        type: array
+                        items:
+                          type: string
+                        description: 'Array of world identifiers'
+                total:
+                  type: integer
+                  description: 'Total number of active voice chats'
+    
+        GetCommunityRequests200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PaginatedResponse'
+                - type: object
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - communityId
+                          - memberAddress
+                          - type
+                          - status
+                          - name
+                          - hasClaimedName
+                          - profilePictureUrl
+                          - friendshipStatus
+                        properties:
+                          id:
+                            type: string
+                            description: 'Unique identifier of the community request'
+                          communityId:
+                            type: string
+                            description: 'ID of the community'
+                          memberAddress:
+                            type: string
+                            description: 'ETH address of the member who made/received the request'
+                          type:
+                            type: string
+                            enum: [invite, request_to_join]
+                            description: 'Type of request'
+                          status:
+                            type: string
+                            enum: [pending, accepted, rejected, cancelled]
+                            description: 'Status of the request'
+                          name:
+                            type: string
+                            description: 'Display name of the member'
+                          hasClaimedName:
+                            type: boolean
+                            description: 'Whether the member has claimed their name'
+                          profilePictureUrl:
+                            type: string
+                            description: 'URL of the member profile picture'
+                          friendshipStatus:
+                            type: integer
+                            description: 'Friendship status code between the authenticated user and the member'
+    
+        GetMemberRequests200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PaginatedResponse'
+                - type: object
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - communityId
+                          - memberAddress
+                          - type
+                          - status
+                          - name
+                          - description
+                          - ownerAddress
+                          - ownerName
+                          - privacy
+                          - membersCount
+                          - role
+                          - active
+                          - friends
+                          - voiceChatStatus
+                        properties:
+                          id:
+                            type: string
+                            description: 'Unique identifier of the community request'
+                          communityId:
+                            type: string
+                            description: 'ID of the community'
+                          memberAddress:
+                            type: string
+                            description: 'ETH address of the member for whom the request was made'
+                          type:
+                            type: string
+                            enum: [invite, request_to_join]
+                            description: 'Type of request (invite received or join request sent)'
+                          status:
+                            type: string
+                            enum: [pending, accepted, rejected, cancelled]
+                            description: 'Status of the request'
+                          name:
+                            type: string
+                            description: 'Name of the community'
+                          description:
+                            type: string
+                            description: 'Description of the community'
+                          ownerAddress:
+                            type: string
+                            description: 'ETH address of the community owner'
+                          ownerName:
+                            type: string
+                            description: 'Display name of the community owner'
+                          privacy:
+                            type: string
+                            enum: [public, private]
+                            description: 'Privacy setting of the community'
+                          membersCount:
+                            type: integer
+                            description: 'Total number of members in the community'
+                          role:
+                            type: string
+                            enum: [none, Member, Moderator, Owner]
+                            description: 'Current role of the user in this community'
+                          active:
+                            type: boolean
+                            description: 'Whether the community is active'
+                          friends:
+                            type: array
+                            items:
+                              type: string
+                            description: 'List of friends who are members of this community'
+                          voiceChatStatus:
+                            type: object
+                            required:
+                              - isActive
+                              - participantCount
+                              - moderatorCount
+                            properties:
+                              isActive:
+                                type: boolean
+                                description: 'Whether there is an active voice chat in the community'
+                              participantCount:
+                                type: integer
+                                description: 'Number of participants in the voice chat'
+                              moderatorCount:
+                                type: integer
+                                description: 'Number of moderators in the voice chat'
+                            description: 'Voice chat status information for the community'
+    
+        UpdateCommunityRequestStatusRequest:
+          type: object
+          required:
+            - intention
+          properties:
+            intention:
+              type: string
+              enum: [accepted, rejected, cancelled]
+              description: 'Action to perform on the community request'
+    
+        GetCommunityInvites200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+                required:
+                  - id
+                  - name
+                properties:
+                  id:
+                    type: string
+                    description: 'Unique identifier of the community'
+                  name:
+                    type: string
+                    description: 'Name of the community'
+              description: 'List of communities where the inviter is a member but the invitee is not'
+    
+        CommunityPost:
+          type: object
+          required:
+            - id
+            - communityId
+            - authorAddress
+            - authorName
+            - authorProfilePictureUrl
+            - authorHasClaimedName
+            - content
+            - createdAt
+            - likesCount
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: 'Unique post identifier'
+            communityId:
+              type: string
+              format: uuid
+              description: 'ID of the community this post belongs to'
+            authorAddress:
+              type: string
+              description: 'Ethereum address of the post author'
+            authorName:
+              type: string
+              description: 'Display name of the post author'
+            authorProfilePictureUrl:
+              type: string
+              format: uri
+              description: 'URL of the author profile picture'
+            authorHasClaimedName:
+              type: boolean
+              description: 'Whether the author has a claimed name'
+            content:
+              type: string
+              description: 'Post content (1-1000 characters)'
+            createdAt:
+              type: string
+              format: date-time
+              description: 'When the post was created'
+            likesCount:
+              type: integer
+              description: 'Number of likes on this post'
+            isLikedByUser:
+              type: boolean
+              description: 'Whether the authenticated user has liked this post (only present when user is authenticated)'
+    
+        CreatePostRequest:
+          type: object
+          required:
+            - content
+          properties:
+            content:
+              type: string
+              minLength: 1
+              maxLength: 1000
+              description: 'Post content (1-1000 characters)'
+    
+        GetCommunityPosts200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              required:
+                - posts
+                - total
+              properties:
+                posts:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/CommunityPost'
+                total:
+                  type: integer
+                  description: 'Total number of posts in the community'
+    
+        CreatePost201OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/CommunityPost'
+    
+        GetCommunitiesMinimal200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PaginatedResponse'
+                - type: object
+                  properties:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - name
+                          - membersCount
+                          - privacy
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+                            description: 'Unique identifier of the community'
+                          name:
+                            type: string
+                            description: 'Name of the community'
+                          membersCount:
+                            type: integer
+                            description: 'Number of members in the community'
+                          privacy:
+                            type: string
+                            enum: [public, private]
+                            description: 'Community privacy setting'
+                      description: 'List of communities matching the search query with minimal data'
+    
+        GetMemberCommunitiesByIdsRequest:
+          type: object
+          required:
+            - communityIds
+          properties:
+            communityIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+              minItems: 1
+              maxItems: 50
+              description: 'List of community IDs to validate (max 50)'
+    
+        GetMemberCommunitiesByIds200OkResponse:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              required:
+                - communities
+              properties:
+                communities:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - id
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        description: 'Unique identifier of a valid and visible community'
+                  description: 'List of communities that exist and are visible to the user'
+

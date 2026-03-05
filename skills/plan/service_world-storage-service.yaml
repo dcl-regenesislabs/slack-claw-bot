@@ -1,0 +1,1788 @@
+name: world-storage-service
+layer: feature_servers
+desc: Secure storage and environment variables service for Decentraland worlds
+github: "https://github.com/decentraland/world-storage-service"
+owner: null
+lib_deps: [schemas, platform-crypto-middleware]
+
+calls:
+  - worlds-content-server(HTTP): Fetches world permissions for access control
+
+called_by: []
+
+# ─── DETAILED DOCS (api spec, full context, readme) ───────────
+openapi: |
+  openapi: 3.0.3
+  info:
+    title: World Storage Service API
+    version: 1.0.0
+    description: |
+      ## Overview
+  
+      World Storage Service provides world-isolated key-value storage with three namespaces:
+      - **World Storage**: Global key-value storage scoped to a world (`/values/:key`)
+      - **Player Storage**: Per-player key-value storage scoped to both world and player address (`/players/:player_address/values/:key`)
+      - **Env Storage**: Encrypted environment variable storage scoped to a world (`/env/:key`)
+  
+      All requests must be signed using Decentraland's Signed Fetch (ADR-44); the calling world
+      is derived from the signed fetch metadata.
+  
+    contact:
+      name: Decentraland Foundation
+    license:
+      name: Apache 2.0
+      url: https://www.apache.org/licenses/LICENSE-2.0.html
+  
+  servers:
+    - url: https://storage.decentraland.zone
+      description: Development server
+    - url: https://storage.decentraland.org
+      description: Production server
+  
+  tags:
+    - name: World Storage
+      description: Endpoints for world-scoped storage
+    - name: Player Storage
+      description: Endpoints for player-scoped storage (scoped by world and player address)
+    - name: Env Storage
+      description: Endpoints for encrypted environment variable storage (scoped by world)
+    - name: Usage
+      description: Storage usage and limits for each namespace
+  
+  security:
+    - SignedFetch: []
+  
+  paths:
+    /usage/world:
+      get:
+        operationId: getWorldStorageUsage
+        tags:
+          - Usage
+        summary: Get world storage usage
+        description: |
+          Returns current world storage usage and the configured maximum total size limit.
+          The world identifier is resolved from the Signed Fetch metadata.
+        responses:
+          '200':
+            description: Usage information retrieved successfully
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/StorageUsageResponse'
+                examples:
+                  usage:
+                    value:
+                      usedBytes: 1200
+                      maxTotalSizeBytes: 10485760
+          '400':
+            description: Signed fetch is missing or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+          '401':
+            description: Unauthorized - signer is not authorized
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  
+    /usage/players/{player_address}:
+      get:
+        operationId: getPlayerStorageUsage
+        tags:
+          - Usage
+        summary: Get player storage usage
+        description: |
+          Returns current usage and maximum total size limit for a specific player within the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+        parameters:
+          - name: player_address
+            in: path
+            required: true
+            description: The player's wallet address
+            schema:
+              type: string
+              example: '0x1234567890abcdef1234567890abcdef12345678'
+        responses:
+          '200':
+            description: Usage information retrieved successfully
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/StorageUsageResponse'
+                examples:
+                  usage:
+                    value:
+                      usedBytes: 300
+                      maxTotalSizeBytes: 1048576
+          '400':
+            description: Signed fetch is missing or invalid, or player address is invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+                  invalidPlayerAddress:
+                    value:
+                      error: Bad request
+                      message: Invalid player address
+          '401':
+            description: Unauthorized - signer is not authorized
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  
+    /usage/env:
+      get:
+        operationId: getEnvStorageUsage
+        tags:
+          - Usage
+        summary: Get environment storage usage
+        description: |
+          Returns current env storage usage and the configured maximum total size limit for the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+  
+          **Authorization**: Only world owners and deployers can access this endpoint.
+        responses:
+          '200':
+            description: Usage information retrieved successfully
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/StorageUsageResponse'
+                examples:
+                  usage:
+                    value:
+                      usedBytes: 420
+                      maxTotalSizeBytes: 262144
+          '400':
+            description: Signed fetch is missing or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+          '401':
+            description: Unauthorized - signer is not owner or deployer
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  
+    /values:
+      get:
+        operationId: listWorldStorageValues
+        tags:
+          - World Storage
+        summary: List world storage values with pagination
+        description: |
+          Lists all key-value pairs stored for the calling world with pagination support.
+          The world identifier is resolved from the Signed Fetch metadata.
+          
+          Results are ordered alphabetically by key (ASC) for deterministic pagination.
+          Each item is returned as a single-key object: `{ key: value }`.
+        parameters:
+          - $ref: '#/components/parameters/LimitParam'
+          - $ref: '#/components/parameters/OffsetParam'
+          - $ref: '#/components/parameters/PrefixParam'
+        responses:
+          '200':
+            description: Paginated list of key-value pairs
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ListStorageItemsResponse'
+                examples:
+                  withValues:
+                    value:
+                      data:
+                        - key: foo
+                          value: { bar: 1 }
+                        - key: baz
+                          value: 3
+                      pagination:
+                        limit: 100
+                        offset: 0
+                        total: 2
+                  empty:
+                    value:
+                      data: []
+                      pagination:
+                        limit: 100
+                        offset: 0
+                        total: 0
+          '400':
+            description: Signed fetch is missing or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      delete:
+        operationId: clearWorldStorage
+        tags:
+          - World Storage
+        summary: Clear all world storage values
+        description: |
+          Deletes all values stored for the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+          
+          **Warning**: This is a destructive operation. The `X-Confirm-Delete-All` header
+          is required to prevent accidental data loss.
+          
+          Only world owners and deployers can perform this operation.
+        parameters:
+          - $ref: '#/components/parameters/ConfirmDeleteAllHeader'
+        responses:
+          '204':
+            description: All values deleted successfully
+          '400':
+            description: Signed fetch is missing, invalid, or confirmation header is missing
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+                  missingHeader:
+                    value:
+                      error: Bad request
+                      message: 'Missing required header: X-Confirm-Delete-All'
+          '401':
+            description: Unauthorized - signer is not authorized
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  
+    /values/{key}:
+      get:
+        operationId: getWorldStorageValue
+        tags:
+          - World Storage
+        summary: Get a world storage value
+        description: |
+          Retrieves the value stored under `key` for the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+        parameters:
+          - name: key
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '200':
+            description: Value found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/StorageValueResponse'
+          '400':
+            description: Signed fetch is missing or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+          '404':
+            description: Value not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      put:
+        operationId: upsertWorldStorageValue
+        tags:
+          - World Storage
+        summary: Upsert a world storage value
+        description: |
+          Creates or updates the value stored under `key` for the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+  
+          **Storage limits**: This endpoint enforces configurable size limits per world:
+          - Maximum value size per key (default: 512 KB)
+          - Maximum total storage size per world (default: 10 MB)
+        parameters:
+          - name: key
+            in: path
+            required: true
+            schema:
+              type: string
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpsertStorageRequest'
+              examples:
+                upsertValue:
+                  value:
+                    value:
+                      foo: bar
+        responses:
+          '200':
+            description: Value upserted
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/StorageValueResponse'
+          '400':
+            description: Invalid signed fetch, request body, or storage limit exceeded
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+                  invalidJson:
+                    value:
+                      message: Request body must be valid JSON
+                  missingValue:
+                    value:
+                      message: Value is required
+                  valueTooLarge:
+                    value:
+                      error: Bad request
+                      message: 'Value size (600000 bytes) exceeds the maximum allowed size (524288 bytes)'
+                  totalSizeExceeded:
+                    value:
+                      error: Bad request
+                      message: 'Total storage size would exceed the maximum allowed (10485760 bytes). Current usage: 10000000 bytes. Delete existing data to free up space'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      delete:
+        operationId: deleteWorldStorageValue
+        tags:
+          - World Storage
+        summary: Delete a world storage value
+        description: |
+          Deletes the value stored under `key` for the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+        parameters:
+          - name: key
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '204':
+            description: Deleted (or did not exist)
+          '400':
+            description: Signed fetch is missing or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  
+    /players/{player_address}/values:
+      get:
+        operationId: listPlayerStorageValues
+        tags:
+          - Player Storage
+        summary: List player storage values with pagination
+        description: |
+          Lists all key-value pairs stored for the specified player within the calling world with pagination support.
+          The world identifier is resolved from the Signed Fetch metadata.
+          
+          Results are ordered alphabetically by key (ASC) for deterministic pagination.
+          Each item is returned as a single-key object: `{ key: value }`.
+        parameters:
+          - name: player_address
+            in: path
+            required: true
+            description: The player's wallet address
+            schema:
+              type: string
+              example: '0x1234567890abcdef1234567890abcdef12345678'
+          - $ref: '#/components/parameters/LimitParam'
+          - $ref: '#/components/parameters/OffsetParam'
+          - $ref: '#/components/parameters/PrefixParam'
+        responses:
+          '200':
+            description: Paginated list of key-value pairs
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ListStorageItemsResponse'
+                examples:
+                  withValues:
+                    value:
+                      data:
+                        - key: level
+                          value: 5
+                        - key: score
+                          value: 100
+                      pagination:
+                        limit: 100
+                        offset: 0
+                        total: 2
+                  empty:
+                    value:
+                      data: []
+                      pagination:
+                        limit: 100
+                        offset: 0
+                        total: 0
+          '400':
+            description: Signed fetch is missing, invalid, or invalid player address
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+                  invalidAddress:
+                    value:
+                      error: Bad request
+                      message: Invalid player address
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      delete:
+        operationId: clearPlayerStorage
+        tags:
+          - Player Storage
+        summary: Clear all player storage values for a specific player
+        description: |
+          Deletes all values stored for the specified player within the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+          
+          **Warning**: This is a destructive operation. The `X-Confirm-Delete-All` header
+          is required to prevent accidental data loss.
+          
+          Only world owners and deployers can perform this operation.
+        parameters:
+          - name: player_address
+            in: path
+            required: true
+            description: The player's wallet address
+            schema:
+              type: string
+              example: '0x1234567890abcdef1234567890abcdef12345678'
+          - $ref: '#/components/parameters/ConfirmDeleteAllHeader'
+        responses:
+          '204':
+            description: All values for the player deleted successfully
+          '400':
+            description: Signed fetch is missing, invalid, or confirmation header is missing
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+                  missingHeader:
+                    value:
+                      error: Bad request
+                      message: 'Missing required header: X-Confirm-Delete-All'
+          '401':
+            description: Unauthorized - signer is not authorized
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  
+    /players/{player_address}/values/{key}:
+      get:
+        operationId: getPlayerStorageValue
+        tags:
+          - Player Storage
+        summary: Get a player storage value
+        description: |
+          Retrieves the value stored under `key` for the specified player within the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+        parameters:
+          - name: player_address
+            in: path
+            required: true
+            description: The player's wallet address
+            schema:
+              type: string
+              example: '0x1234567890abcdef1234567890abcdef12345678'
+          - name: key
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '200':
+            description: Value found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/StorageValueResponse'
+          '400':
+            description: Signed fetch is missing or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+          '404':
+            description: Value not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      put:
+        operationId: upsertPlayerStorageValue
+        tags:
+          - Player Storage
+        summary: Upsert a player storage value
+        description: |
+          Creates or updates the value stored under `key` for the specified player within the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+  
+          **Storage limits**: This endpoint enforces configurable size limits per player per world:
+          - Maximum value size per key (default: 100 KB)
+          - Maximum total storage size per player per world (default: 1 MB)
+        parameters:
+          - name: player_address
+            in: path
+            required: true
+            description: The player's wallet address
+            schema:
+              type: string
+              example: '0x1234567890abcdef1234567890abcdef12345678'
+          - name: key
+            in: path
+            required: true
+            schema:
+              type: string
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpsertStorageRequest'
+              examples:
+                upsertValue:
+                  value:
+                    value:
+                      score: 100
+                      level: 5
+        responses:
+          '200':
+            description: Value upserted
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/StorageValueResponse'
+          '400':
+            description: Invalid signed fetch, request body, or storage limit exceeded
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+                  invalidJson:
+                    value:
+                      message: Request body must be valid JSON
+                  missingValue:
+                    value:
+                      message: Value is required
+                  valueTooLarge:
+                    value:
+                      error: Bad request
+                      message: 'Value size (200000 bytes) exceeds the maximum allowed size (102400 bytes)'
+                  totalSizeExceeded:
+                    value:
+                      error: Bad request
+                      message: 'Total storage size would exceed the maximum allowed (1048576 bytes). Current usage: 1000000 bytes. Delete existing data to free up space'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      delete:
+        operationId: deletePlayerStorageValue
+        tags:
+          - Player Storage
+        summary: Delete a player storage value
+        description: |
+          Deletes the value stored under `key` for the specified player within the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+        parameters:
+          - name: player_address
+            in: path
+            required: true
+            description: The player's wallet address
+            schema:
+              type: string
+              example: '0x1234567890abcdef1234567890abcdef12345678'
+          - name: key
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '204':
+            description: Deleted (or did not exist)
+          '400':
+            description: Signed fetch is missing or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  
+    /players:
+      get:
+        operationId: listPlayers
+        tags:
+          - Player Storage
+        summary: List players with stored values
+        description: |
+          Lists all distinct player addresses that have stored values within the calling world with pagination support.
+          The world identifier is resolved from the Signed Fetch metadata.
+          
+          Results are ordered alphabetically by player address (ASC) for deterministic pagination.
+        parameters:
+          - $ref: '#/components/parameters/LimitParam'
+          - $ref: '#/components/parameters/OffsetParam'
+        responses:
+          '200':
+            description: Paginated list of player addresses
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ListPlayersResponse'
+                examples:
+                  withPlayers:
+                    value:
+                      data:
+                        - '0x1234567890abcdef1234567890abcdef12345678'
+                        - '0x6a327965be29a7acb83e1d1bbd689b72e188e58d'
+                      pagination:
+                        limit: 100
+                        offset: 0
+                        total: 2
+                  empty:
+                    value:
+                      data: []
+                      pagination:
+                        limit: 100
+                        offset: 0
+                        total: 0
+          '400':
+            description: Signed fetch is missing or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      delete:
+        operationId: clearAllPlayersStorage
+        tags:
+          - Player Storage
+        summary: Clear all player storage values for all players
+        description: |
+          Deletes all player storage values for all players within the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+          
+          **Warning**: This is a destructive operation that affects ALL players.
+          The `X-Confirm-Delete-All` header is required to prevent accidental data loss.
+          
+          Only world owners and deployers can perform this operation.
+        parameters:
+          - $ref: '#/components/parameters/ConfirmDeleteAllHeader'
+        responses:
+          '204':
+            description: All player storage values deleted successfully
+          '400':
+            description: Signed fetch is missing, invalid, or confirmation header is missing
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+                  missingHeader:
+                    value:
+                      error: Bad request
+                      message: 'Missing required header: X-Confirm-Delete-All'
+          '401':
+            description: Unauthorized - signer is not authorized
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  
+    /env:
+      get:
+        operationId: listEnvKeys
+        tags:
+          - Env Storage
+        summary: List environment variable keys (names only)
+        description: |
+          Lists all environment variable key names (not values) for the calling world with pagination support.
+          The world identifier is resolved from the Signed Fetch metadata.
+          
+          **Important**: This endpoint returns ONLY key names to protect secrets. Values are never exposed.
+          
+          Results are ordered alphabetically by key (ASC) for deterministic pagination.
+          
+          **Authorization**: Only world owners and deployers can access this endpoint.
+        parameters:
+          - $ref: '#/components/parameters/LimitParam'
+          - $ref: '#/components/parameters/OffsetParam'
+          - $ref: '#/components/parameters/PrefixParam'
+        responses:
+          '200':
+            description: Paginated list of key names
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ListEnvKeysResponse'
+                examples:
+                  withKeys:
+                    value:
+                      data:
+                        - API_SECRET
+                        - SENTRY_DSN
+                      pagination:
+                        limit: 50
+                        offset: 0
+                        total: 2
+                  empty:
+                    value:
+                      data: []
+                      pagination:
+                        limit: 50
+                        offset: 0
+                        total: 0
+          '400':
+            description: Signed fetch is missing, invalid, or invalid pagination parameters
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+                  invalidLimit:
+                    value:
+                      error: Bad request
+                      message: limit must be a positive integer
+                  limitExceeded:
+                    value:
+                      error: Bad request
+                      message: limit cannot exceed 500
+          '401':
+            description: Unauthorized - signer is not owner or deployer
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      delete:
+        operationId: clearEnvStorage
+        tags:
+          - Env Storage
+        summary: Clear all environment variables
+        description: |
+          Deletes all environment variables stored for the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+          
+          **Warning**: This is a destructive operation. The `X-Confirm-Delete-All` header
+          is required to prevent accidental data loss.
+          
+          Only world owners and deployers can perform this operation.
+        parameters:
+          - $ref: '#/components/parameters/ConfirmDeleteAllHeader'
+        responses:
+          '204':
+            description: All environment variables deleted successfully
+          '400':
+            description: Signed fetch is missing, invalid, or confirmation header is missing
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+                  missingHeader:
+                    value:
+                      error: Bad request
+                      message: 'Missing required header: X-Confirm-Delete-All'
+          '401':
+            description: Unauthorized - signer is not authorized
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  
+    /env/{key}:
+      get:
+        operationId: getEnvStorageValue
+        tags:
+          - Env Storage
+        summary: Get an environment variable value
+        description: |
+          Retrieves the environment variable stored under `key` for the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+          Values are stored encrypted at rest.
+          
+          **Authorization**: Only authorized addresses can access this endpoint.
+          World owners and deployers are explicitly not allowed, even if they have permissions.
+        parameters:
+          - name: key
+            in: path
+            required: true
+            description: The environment variable key
+            schema:
+              type: string
+              example: 'API_SECRET'
+        responses:
+          '200':
+            description: Value found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/EnvStorageValueResponse'
+          '400':
+            description: Signed fetch is missing or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+          '401':
+            description: Unauthorized - signer is not authorized
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '404':
+            description: Value not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      put:
+        operationId: upsertEnvStorageValue
+        tags:
+          - Env Storage
+        summary: Upsert an environment variable value
+        description: |
+          Creates or updates the environment variable stored under `key` for the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+          Values are stored encrypted at rest.
+          
+          **Authorization**: Only world owners and deployers can perform this operation.
+          Authorized addresses are not allowed.
+  
+          **Storage limits**: This endpoint enforces configurable size limits per world:
+          - Maximum value size per key (default: 10 KB)
+          - Maximum total storage size per world (default: 256 KB)
+        parameters:
+          - name: key
+            in: path
+            required: true
+            description: The environment variable key
+            schema:
+              type: string
+              example: 'API_SECRET'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpsertEnvStorageRequest'
+              examples:
+                upsertValue:
+                  value:
+                    value: 'sk-secret-api-key-12345'
+        responses:
+          '204':
+            description: Value upserted
+          '400':
+            description: Invalid signed fetch, request body, or storage limit exceeded
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+                  invalidJson:
+                    value:
+                      message: Request body must be valid JSON
+                  missingValue:
+                    value:
+                      message: Value is required
+                  invalidValueType:
+                    value:
+                      message: Invalid JSON body
+                  valueTooLarge:
+                    value:
+                      error: Bad request
+                      message: 'Value size (20480 bytes) exceeds the maximum allowed size (10240 bytes)'
+                  totalSizeExceeded:
+                    value:
+                      error: Bad request
+                      message: 'Total storage size would exceed the maximum allowed (262144 bytes). Current usage: 250000 bytes. Delete existing data to free up space'
+          '401':
+            description: Unauthorized - signer is not authorized
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      delete:
+        operationId: deleteEnvStorageValue
+        tags:
+          - Env Storage
+        summary: Delete an environment variable value
+        description: |
+          Deletes the environment variable stored under `key` for the calling world.
+          The world identifier is resolved from the Signed Fetch metadata.
+          
+          **Authorization**: Only world owners and deployers can perform this operation.
+          Authorized addresses are not allowed.
+        parameters:
+          - name: key
+            in: path
+            required: true
+            description: The environment variable key
+            schema:
+              type: string
+              example: 'API_SECRET'
+        responses:
+          '204':
+            description: Deleted (or did not exist)
+          '400':
+            description: Signed fetch is missing or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  signedFetchRequired:
+                    value:
+                      error: Invalid Auth Chain
+                      message: This endpoint requires a signed fetch request. See ADR-44.
+          '401':
+            description: Unauthorized - signer is not authorized
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value:
+                      message: 'Unauthorized: Signer is not authorized to perform operations'
+          '500':
+            description: Unexpected error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  
+  components:
+    securitySchemes:
+      SignedFetch:
+        type: apiKey
+        in: header
+        name: X-Identity-Auth-Chain-*
+        description: |
+          Signed fetch authentication using Decentraland's ADR-44 specification.
+          Multiple headers are used to provide the authentication chain.
+    parameters:
+      ConfirmDeleteAllHeader:
+        name: X-Confirm-Delete-All
+        in: header
+        required: true
+        description: |
+          Required confirmation header for bulk delete operations.
+          This header must be present (with any non-empty value) to confirm the destructive operation.
+          This safety mechanism prevents accidental data loss.
+        schema:
+          type: string
+        example: 'true'
+      LimitParam:
+        name: limit
+        in: query
+        required: false
+        description: |
+          Maximum number of items to return per page.
+          Default: 100, Maximum: 100. Invalid values (non-numeric, zero, negative, or exceeding max) fall back to the default.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+        example: 100
+      OffsetParam:
+        name: offset
+        in: query
+        required: false
+        description: |
+          Number of items to skip for pagination.
+          Default: 0. Invalid values (non-numeric or negative) fall back to the default.
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+        example: 0
+      PrefixParam:
+        name: prefix
+        in: query
+        required: false
+        description: |
+          Optional case-sensitive prefix filter applied to key names.
+          Only keys starting with the given prefix (case-sensitive) will be returned.
+        schema:
+          type: string
+        example: 'API_'
+    schemas:
+      StorageValueResponse:
+        type: object
+        properties:
+          value: {}
+        required:
+          - value
+        description: Stored value response for both world and player storage.
+      UpsertStorageRequest:
+        type: object
+        properties:
+          value: {}
+        required:
+          - value
+        description: Payload to persist under the provided key (used for both world and player storage).
+      EnvStorageValueResponse:
+        type: object
+        properties:
+          value:
+            type: string
+        required:
+          - value
+        description: Stored environment variable value response.
+      StorageUsageResponse:
+        type: object
+        properties:
+          usedBytes:
+            type: integer
+            description: Current storage usage in bytes for the requested scope
+            example: 1200
+          maxTotalSizeBytes:
+            type: integer
+            description: Maximum allowed total size in bytes for the requested scope
+            example: 10485760
+        required:
+          - usedBytes
+          - maxTotalSizeBytes
+        description: Current usage and configured maximum limit for a storage scope.
+      UpsertEnvStorageRequest:
+        type: object
+        properties:
+          value:
+            type: string
+        required:
+          - value
+        description: Payload to persist an environment variable under the provided key. Value must be a string.
+      Pagination:
+        type: object
+        properties:
+          limit:
+            type: integer
+            description: Number of items per page
+            example: 50
+          offset:
+            type: integer
+            description: Number of items skipped
+            example: 0
+          total:
+            type: integer
+            description: Total count of matching items
+            example: 100
+        required:
+          - limit
+          - offset
+          - total
+        description: Pagination metadata for paginated list responses.
+      ListEnvKeysResponse:
+        type: object
+        properties:
+          data:
+            type: array
+            items:
+              type: string
+            description: Array of environment variable key names (no values)
+          pagination:
+            $ref: '#/components/schemas/Pagination'
+        required:
+          - data
+          - pagination
+        description: |
+          Paginated response for listing environment variable keys.
+          Only key names are returned; values are never exposed to protect secrets.
+      StorageEntry:
+        type: object
+        properties:
+          key:
+            type: string
+            description: The storage key name
+          value:
+            description: The stored value (any JSON type)
+        required:
+          - key
+          - value
+        description: A single key-value entry from storage.
+      ListPlayersResponse:
+        type: object
+        properties:
+          data:
+            type: array
+            items:
+              type: string
+              description: A player wallet address
+            description: Array of distinct player addresses with stored values
+          pagination:
+            $ref: '#/components/schemas/Pagination'
+        required:
+          - data
+          - pagination
+        description: |
+          Paginated response for listing player addresses that have stored values in the world.
+          Addresses are sorted alphabetically (ASC) for deterministic pagination.
+      ListStorageItemsResponse:
+        type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/StorageEntry'
+            description: Array of key-value entries
+          pagination:
+            $ref: '#/components/schemas/Pagination'
+        required:
+          - data
+          - pagination
+        description: Paginated response for listing storage key-value pairs.
+      ErrorResponse:
+        type: object
+        properties:
+          message:
+            type: string
+          error:
+            type: string
+            description: Optional error code or cause when available.
+        required:
+          - message
+        description: Error response body.
+
+ai_context: |
+  # AI Agent Context
+  
+  **Service Purpose:**
+  
+  The World Storage Service is a standalone service that provides secure, isolated storage and environment variable access for Decentraland worlds. It acts as an API gateway for persistent storage and secrets management, used by Authoritative Servers running server-side scene code. The service enforces world isolation through cryptographic validation of signed fetch requests, ensuring that only authorized authoritative servers can access their world's data.
+  
+  **Key Capabilities:**
+  
+  - **Signed Fetch Validation**: Receives and validates signed fetch requests from authoritative servers using Decentraland's ADR-44 specification. Only requests signed by valid authoritative servers with proper private keys are accepted. The service explicitly rejects requests from client-side scenes (signer `decentraland-kernel-scene`) to prevent unauthorized access.
+  - **World Isolation Enforcement**: Extracts world name (e.g., "worldname.dcl.eth") from signed payload metadata (`serverName` or `realmName`), never from user-provided query parameters or request body. This ensures cryptographic proof of world ownership.
+  - **Key-Value Storage API**: Provides persistent storage with two namespaces:
+    - **World storage**: Global key-value storage scoped to a world (`/values/:key`)
+    - **Player storage**: Per-player key-value storage scoped to both world and player address (`/players/:player_address/values/:key`)
+  - **Environment Variables Management**: Serves encrypted environment variables (secrets, API keys, config) configured at deploy time (`/env/:key`). Values are encrypted at rest. GET operations are restricted to authorized addresses (AUTHORITATIVE_SERVER_ADDRESS or addresses in AUTHORIZED_ADDRESSES) only, while write/delete operations (PUT/DELETE) are restricted to world owners and deployers only. This ensures sensitive secrets are only readable by the authoritative server while allowing owners to manage them.
+  - **Bulk Delete Operations**: Supports clearing all values in a storage namespace. These operations require a confirmation header (`X-Confirm-Delete-All`) to prevent accidental data loss.
+  
+  **Communication Pattern:**
+  
+  HTTP REST API using signed fetch authentication. The service exposes REST endpoints that accept signed fetch requests with authentication headers (`X-Identity-Auth-Chain-*`). The world name is extracted from the cryptographic signature metadata, ensuring security and isolation. All requests must be signed by the authoritative server's private key tied to its world deployment.
+  
+  **Technology Stack:**
+  
+  - Runtime: Node.js (v24.x or higher)
+  - Language: TypeScript
+  - HTTP Framework: Well-Known Components HTTP Server (`@well-known-components/http-server`)
+  - Database: PostgreSQL with JSONB support for storing key-value pairs
+  - Authentication: Signed fetch validation (Decentraland ADR-44 specification)
+  - Logging: Well-Known Components Logger (`@well-known-components/logger`)
+  - Metrics: Prometheus-compatible metrics via Well-Known Components Metrics (`@well-known-components/metrics`)
+  - Tracing: Well-Known Components Tracer (`@well-known-components/tracer-component`)
+  
+  **External Dependencies:**
+  
+  - **PostgreSQL Database**: Stores world storage, player storage, and encrypted environment variables. Uses JSONB columns for flexible value storage. The database schema includes:
+    - `world_storage` table: Stores world-scoped key-value pairs (world_name, key, value)
+    - `player_storage` table: Stores player-scoped key-value pairs (world_name, player_addr, key, value)
+    - `env_variables` table: Stores encrypted environment variables (world_name, key, value_enc)
+  
+  **Key Concepts:**
+  
+  - **Signed Fetch**: All requests from authoritative servers must be signed using their private key. The signature includes metadata with the `serverName` (world name), which is cryptographically verified before processing any request. The signer address is extracted from the signature and used for authorization checks.
+  - **Authorization**: The service validates authorization using a two-tier system: (1) checks if the signer address matches AUTHORITATIVE_SERVER_ADDRESS or is in the AUTHORIZED_ADDRESSES environment variable (comma-separated list), and (2) if not authorized via addresses, checks world permissions via Worlds Content Server to verify if the signer is the world owner or has deployer permissions. Different endpoints use different authorization policies based on sensitivity.
+  - **World Isolation**: The world name is extracted exclusively from the signed fetch metadata, never from URL parameters or request body. This prevents world name spoofing and ensures data isolation between different worlds.
+  - **Storage Namespaces**: Two distinct storage namespaces exist - world storage (global to the world) and player storage (scoped per player address). Both are further isolated by world name extracted from the signature.
+  - **Environment Variables**: Secrets and configuration values are stored encrypted at rest. GET operations are restricted to authorized addresses (AUTHORITATIVE_SERVER_ADDRESS or addresses in AUTHORIZED_ADDRESSES environment variable) only, ensuring only the authoritative server can read sensitive values. Write/delete operations (PUT/DELETE) are restricted to world owners and deployers, allowing them to manage these variables. These are set at deployment time via Creator Hub UI or CLI, not at runtime.
+  - **Stateless Service**: The service itself is stateless - all state is stored in PostgreSQL. This allows for horizontal scaling and independent scaling from scene execution.
+  - **Request Flow**: Authoritative Server → Signed Fetch Request → World Storage Service → Signature Validation → World Name Extraction → Authorization Check → Database Query (with world_name from signature) → Response
+  
+  **Authorization Model:**
+  
+  The service uses three types of authorization middleware with different access levels:
+  
+  1. **General Authorization** (`authorizationMiddleware`): Used for most endpoints (GET/PUT/DELETE on `/values/:key` and `/players/:player_address/values/:key`). Allows both:
+     - Authorized addresses (AUTHORITATIVE_SERVER_ADDRESS or addresses in AUTHORIZED_ADDRESSES environment variable)
+     - World owners and deployers (verified via Worlds Content Server)
+  
+  2. **Owner/Deployer Only** (`ownerAndDeployerOnlyAuthorizationMiddleware`): Used for sensitive bulk delete operations (DELETE `/values`, DELETE `/players/:player_address/values`, DELETE `/players`) and env variable write/delete operations (PUT/DELETE `/env/:key`, DELETE `/env`). Only allows:
+     - World owners and deployers (authorized addresses are explicitly blocked)
+  
+  3. **Authorized Addresses Only** (`authorizedAddressesOnlyAuthorizationMiddleware`): Used exclusively for GET `/env/:key`. Only allows:
+     - Authorized addresses (AUTHORITATIVE_SERVER_ADDRESS or addresses in AUTHORIZED_ADDRESSES)
+     - World owners and deployers are explicitly blocked, even if they have permissions
+  
+  **Database notes:**
+  
+  - **World Storage Table**: `world_storage` with composite primary key (world_name, key). The `world_name` comes from the signed fetch metadata, ensuring isolation.
+  - **Player Storage Table**: `player_storage` with composite primary key (world_name, player_addr, key). Both world_name and player_addr are used for scoping.
+  - **Environment Variables Table**: `env_variables` with composite primary key (world_name, key). Values are stored encrypted (BYTEA type) for security.
+  - **Isolation Guarantee**: All database queries MUST use `world_name` extracted from the signed fetch signature, never from request parameters. This is a critical security requirement.
+  - **JSONB Storage**: Storage values use JSONB type for flexible JSON storage with PostgreSQL's JSON querying capabilities.
+
+readme: |
+  # World Storage Service
+  
+  [![Coverage Status](https://coveralls.io/repos/github/decentraland/world-storage-service/badge.svg?branch=main)](https://coveralls.io/github/decentraland/world-storage-service?branch=main)
+  
+  A standalone service that provides secure, isolated storage and environment variable access for Decentraland worlds. It acts as an API gateway for persistent storage and secrets management, used by Authoritative Servers running server-side scene code. The service enforces world isolation through cryptographic validation of signed fetch requests.
+  
+  ## Table of Contents
+  
+  - [Features](#features)
+  - [Dependencies & Related Services](#dependencies--related-services)
+  - [API Documentation](#api-documentation)
+  - [Database](#database)
+    - [Schema](#schema)
+    - [Migrations](#migrations)
+  - [Getting Started](#getting-started)
+    - [Prerequisites](#prerequisites)
+    - [Installation](#installation)
+    - [Configuration](#configuration)
+    - [Running the Service](#running-the-service)
+  - [Testing](#testing)
+    - [Running Tests](#running-tests)
+    - [Test Structure](#test-structure)
+  - [AI Agent Context](#ai-agent-context)
+  
+  ## Features
+  
+  - **Signed Fetch Validation**: Validates signed fetch requests from authoritative servers using Decentraland's ADR-44 specification, ensuring only authorized servers can access their world's data.
+  - **World Isolation**: Enforces cryptographic world isolation by extracting world name from signed payload metadata, preventing unauthorized access between worlds.
+  - **Key-Value Storage API**: Provides persistent storage with two namespaces - world-scoped storage and player-scoped storage for flexible data management.
+  - **Environment Variables Management**: Serves encrypted environment variables (secrets, API keys, config) configured at deploy time. GET operations are restricted to authorized addresses (AUTHORITATIVE_SERVER_ADDRESS) only, while write/delete operations are restricted to world owners and deployers only. This ensures sensitive secrets are only readable by the authoritative server while allowing owners to manage them.
+  - **Bulk Delete Operations**: Supports clearing all values in a storage namespace with a required confirmation header to prevent accidental data loss.
+  
+  ## Dependencies & Related Services
+  
+  This service interacts with the following services:
+  
+  - **[Authoritative Server](https://github.com/decentraland/js-sdk-toolchain/wiki/Decentraland-SDK7-Authoritative-Server-Guide)**: Receives signed fetch requests from authoritative servers running server-side scene code. The authoritative server signs requests using its private key tied to its world deployment.
+  - **[Worlds Content Server](https://github.com/decentraland/worlds-content-server)**: Fetches world permissions to validate that the signer of a request is authorized (owner or has deployer permissions) to perform operations on a specific world.
+  
+  ## API Documentation
+  
+  The API is fully documented using the [OpenAPI standard](https://swagger.io/specification/). It's schema is located at [docs/openapi.yaml](docs/openapi.yaml).
+  
+  ## Database
+  
+  ### Schema
+  
+  <!-- Remove this section if the service does not have a database -->
+  
+  See [docs/database-schemas.md](docs/database-schemas.md) for detailed schema, column definitions, and relationships
+  
+  ### Migrations
+  
+  <!-- Remove this section if the service does not have a database -->
+  
+  The service uses `node-pg-migrate` for database migrations. These migrations are located in `src/migrations/`. The service automatically runs the migrations when starting up.
+  
+  #### Create a new migration
+  
+  Migrations are created by running the create command:
+  
+  ```bash
+  yarn migrate create name-of-the-migration
+  ```
+  
+  This will result in the creation of a migration file inside of the `src/migrations/` directory. This migration file MUST contain the migration set up and rollback procedures.
+  
+  #### Manually applying migrations
+  
+  If required, these migrations can be run manually.
+  
+  To run them manually:
+  
+  ```bash
+  yarn migrate up
+  ```
+  
+  To rollback them manually:
+  
+  ```bash
+  yarn migrate down
+  ```
+  
+  ## Getting Started
+  
+  ### Prerequisites
+  
+  Before running this service, ensure you have the following installed:
+  
+  - **Node.js**: Version 24.x or higher (LTS recommended)
+  - **Yarn**: Version 1.22.x or higher
+  - **Docker**: For containerized deployment
+  
+  <!-- List any other dependencies that are required to run the service -->
+  
+  ### Installation
+  
+  1. Clone the repository:
+  
+  ```bash
+  git clone https://github.com/decentraland/world-storage-service.git
+  cd world-storage-service
+  ```
+  
+  2. Install dependencies:
+  
+  ```bash
+  yarn install
+  ```
+  
+  3. Build the project:
+  
+  ```bash
+  yarn build
+  ```
+  
+  ### Configuration
+  
+  The service uses environment variables for configuration.
+  Create a `.env` file in the root directory containing the environment variables for the service to run.
+  Use the `.env.default` variables as an example.
+  
+  ### Running the Service
+  
+  #### Setting up the environment
+  
+  In order to successfully run this server, external dependencies such as databases, memory storages and such must be provided.
+  To do so, this repository provides you with a `docker-compose` file for that purpose. In order to get the environment set up, run:
+  
+  ```bash
+  docker-compose up
+  ```
+  
+  #### Running in development mode
+  
+  To run the service in development mode:
+  
+  ```bash
+  yarn start:dev
+  ```
+  
+  ## Testing
+  
+  This service includes comprehensive test coverage with both unit and integration tests.
+  
+  ### Running Tests
+  
+  Run all tests with coverage:
+  
+  ```bash
+  yarn test
+  ```
+  
+  Run tests in watch mode:
+  
+  ```bash
+  yarn test --watch
+  ```
+  
+  Run only unit tests:
+  
+  ```bash
+  yarn test test/unit
+  ```
+  
+  Run only integration tests:
+  
+  ```bash
+  yarn test test/integration
+  ```
+  
+  ### Test Structure
+  
+  - **Unit Tests** (`test/unit/`): Test individual components and functions in isolation
+  - **Integration Tests** (`test/integration/`): Test the complete request/response cycle
+  
+  For detailed testing guidelines and standards, refer to our [Testing Standards](https://github.com/decentraland/docs/tree/main/development-standards/testing-standards) documentation.
+  
+  ## AI Agent Context
+  
+  For detailed AI Agent context, see [docs/ai-agent-context.md](docs/ai-agent-context.md).
+
+extra_docs:
+  docs_database-schemas_md: |
+    # Database Schema Documentation
+    
+    This document describes the database schema for the World Storage Service. The schema uses PostgreSQL and is managed through migrations located in `src/migrations/`.
+    
+    ## Database Schema Diagram
+    
+    <!-- Database DER -->
+    
+    ```mermaid
+    erDiagram
+      world_storage {
+        VARCHAR(255) world_name PK "World identifier (from signed fetch metadata)"
+        VARCHAR(255) key PK "Storage key"
+        JSONB value "Stored JSON value"
+        TIMESTAMP created_at "Creation timestamp"
+        TIMESTAMP updated_at "Last update timestamp"
+      }
+    
+      player_storage {
+        VARCHAR(255) world_name PK "World identifier (from signed fetch metadata)"
+        VARCHAR(255) player_address PK "Player address"
+        VARCHAR(255) key PK "Storage key"
+        JSONB value "Stored JSON value"
+        TIMESTAMP created_at "Creation timestamp"
+        TIMESTAMP updated_at "Last update timestamp"
+      }
+    
+      env_variables {
+        VARCHAR(255) world_name PK "World identifier (from signed fetch metadata)"
+        VARCHAR(255) key PK "Environment variable key"
+        BYTEA value_enc "Encrypted value (bytes)"
+        TIMESTAMP created_at "Creation timestamp"
+        TIMESTAMP updated_at "Last update timestamp"
+      }
+    ```
+    
+    ## Tables Overview
+    
+    The database contains the following tables:
+    
+    <!-- A list of tables, with their purpose -->
+    
+    1. **`world_storage`** - World-scoped key-value storage (JSON) isolated by `world_name`
+    2. **`player_storage`** - Player-scoped key-value storage (JSON) isolated by `world_name` and `player_address`
+    3. **`env_variables`** - Encrypted environment variables isolated by `world_name`
+    
+    <!-- Description of each table in a section per table -->
+    
+    ## Table: `world_storage`
+    
+    Stores key-value pairs scoped to a world. Each record is uniquely identified by `(world_name, key)`.
+    
+    ### Columns
+    
+    | Column       | Type         | Nullable | Description |
+    |--------------|--------------|----------|-------------|
+    | `world_name` | VARCHAR(255)  | NOT NULL | **Primary Key (part 1)**. World identifier extracted from signed fetch metadata (never from request params/body). |
+    | `key`        | VARCHAR(255)  | NOT NULL | **Primary Key (part 2)**. Storage key. |
+    | `value`      | JSONB         | NOT NULL | Stored value as JSON. |
+    | `created_at` | TIMESTAMP     | NOT NULL | Creation timestamp. Defaults to `current_timestamp`. |
+    | `updated_at` | TIMESTAMP     | NOT NULL | Last update timestamp. Defaults to `current_timestamp`. |
+    
+    ### Indexes
+    
+    - **Composite Primary Key**: `(world_name, key)`
+    
+    ### Constraints
+    
+    - **Primary Key**: `world_storage_pkey` on `(world_name, key)`
+    
+    ### Business Rules
+    
+    - **World isolation**: `world_name` MUST come from signed fetch metadata; it MUST NOT be accepted from user-controlled inputs (query params, request body).
+    
+    ### Other
+    
+    - **JSON storage**: `value` is `JSONB` to support arbitrary JSON payloads and efficient JSON querying.
+    
+    ---
+    
+    ## Table: `player_storage`
+    
+    Stores key-value pairs scoped to a world and a player. Each record is uniquely identified by `(world_name, player_address, key)`.
+    
+    ### Columns
+    
+    | Column           | Type         | Nullable | Description |
+    |------------------|--------------|----------|-------------|
+    | `world_name`     | VARCHAR(255)  | NOT NULL | **Primary Key (part 1)**. World identifier extracted from signed fetch metadata (never from request params/body). |
+    | `player_address` | VARCHAR(255)  | NOT NULL | **Primary Key (part 2)**. Player identifier (address). |
+    | `key`            | VARCHAR(255)  | NOT NULL | **Primary Key (part 3)**. Storage key. |
+    | `value`          | JSONB         | NOT NULL | Stored value as JSON. |
+    | `created_at`     | TIMESTAMP     | NOT NULL | Creation timestamp. Defaults to `current_timestamp`. |
+    | `updated_at`     | TIMESTAMP     | NOT NULL | Last update timestamp. Defaults to `current_timestamp`. |
+    
+    ### Indexes
+    
+    - **Composite Primary Key**: `(world_name, player_address, key)`
+    
+    ### Constraints
+    
+    - **Primary Key**: `player_storage_pkey` on `(world_name, player_address, key)`
+    
+    ### Business Rules
+    
+    - **World isolation**: `world_name` MUST come from signed fetch metadata; it MUST NOT be accepted from user-controlled inputs (query params, request body).
+    - **Player scoping**: All reads/writes for player data must include both `world_name` and `player_address`.
+    
+    ### Other
+    
+    - **JSON storage**: `value` is `JSONB` to support arbitrary JSON payloads and efficient JSON querying.
+    
+    ---
+    
+    ## Table: `env_variables`
+    
+    Stores encrypted environment variables scoped to a world. Each record is uniquely identified by `(world_name, key)`.
+    
+    ### Columns
+    
+    | Column       | Type         | Nullable | Description |
+    |--------------|--------------|----------|-------------|
+    | `world_name` | VARCHAR(255)  | NOT NULL | **Primary Key (part 1)**. World identifier extracted from signed fetch metadata (never from request params/body). |
+    | `key`        | VARCHAR(255)  | NOT NULL | **Primary Key (part 2)**. Environment variable key. |
+    | `value_enc`  | BYTEA         | NOT NULL | Encrypted value stored as raw bytes. |
+    | `created_at` | TIMESTAMP     | NOT NULL | Creation timestamp. Defaults to `current_timestamp`. |
+    | `updated_at` | TIMESTAMP     | NOT NULL | Last update timestamp. Defaults to `current_timestamp`. |
+    
+    ### Indexes
+    
+    - **Composite Primary Key**: `(world_name, key)`
+    
+    ### Constraints
+    
+    - **Primary Key**: `env_variables_pkey` on `(world_name, key)`
+    
+    ### Business Rules
+    
+    - **World isolation**: `world_name` MUST come from signed fetch metadata; it MUST NOT be accepted from user-controlled inputs (query params, request body).
+    - **Encrypted at rest**: `value_enc` stores encrypted bytes; encryption/decryption is handled by the service.
+    
+    ### Other
+    
+    - **Encrypted storage**: `value_enc` is `BYTEA` to store ciphertext as bytes.
+

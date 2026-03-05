@@ -1,0 +1,347 @@
+name: linker-server
+layer: feature_servers
+desc: Enables authorized scene deployment to Foundation-owned lands
+github: "https://github.com/decentraland/linker-server"
+owner: null
+lib_deps: [schemas, platform-crypto-middleware]
+
+calls:
+  - catalyst(HTTP): Publishes re-signed entities to Catalyst
+
+called_by: []
+
+# ─── DETAILED DOCS (api spec, full context, readme) ───────────
+openapi: |
+  openapi: 3.0.3
+  info:
+    title: Linker Server API
+    version: 1.0.0
+    description: |
+      ## Overview
+  
+      The Linker Server provides an intermediary service for deploying content to Decentraland's Catalyst network.
+      It validates authorization for specific parcels and proxies upload requests with server-signed authentication.
+  
+    contact:
+      name: Decentraland Foundation
+    license:
+      name: Apache 2.0
+      url: https://www.apache.org/licenses/LICENSE-2.0.html
+  
+  servers:
+    - url: http://localhost:3000
+      description: Local development server
+  
+  tags:
+    - name: Health
+      description: Health check endpoints
+    - name: Content
+      description: Content management endpoints
+  
+  paths:
+    /ping:
+      get:
+        tags:
+          - Health
+        summary: Ping endpoint
+        description: Simple health check that returns the request path
+        responses:
+          '200':
+            description: OK
+            content:
+              text/plain:
+                schema:
+                  type: string
+                  example: /ping
+  
+    /health/ready:
+      get:
+        tags:
+          - Health
+        summary: Readiness check
+        description: Check if the server is ready to handle requests
+        responses:
+          '200':
+            description: Server is ready
+            content:
+              text/plain:
+                schema:
+                  type: string
+  
+    /health/startup:
+      get:
+        tags:
+          - Health
+        summary: Startup check
+        description: Check if the server has completed startup
+        responses:
+          '200':
+            description: Server has started
+            content:
+              text/plain:
+                schema:
+                  type: string
+  
+    /health/live:
+      get:
+        tags:
+          - Health
+        summary: Liveness check
+        description: Check if the server is alive
+        responses:
+          '200':
+            description: Server is alive
+            content:
+              text/plain:
+                schema:
+                  type: string
+  
+    /about:
+      get:
+        tags:
+          - Health
+        summary: Server information
+        description: Returns server metadata and configuration
+        responses:
+          '200':
+            description: Server information
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    acceptingUsers:
+                      type: boolean
+                    healthy:
+                      type: boolean
+                    configurations:
+                      type: object
+                      properties:
+                        networkId:
+                          type: integer
+                        realmName:
+                          type: string
+  
+    /content/available-content:
+      get:
+        tags:
+          - Content
+        summary: Get available content
+        description: Proxies request to Catalyst to check available content
+        parameters:
+          - name: cid
+            in: query
+            description: Content identifier to check
+            schema:
+              type: string
+        responses:
+          '200':
+            description: Content availability information
+          '500':
+            description: Error proxying request
+  
+    /content/entities:
+      post:
+        tags:
+          - Content
+        summary: Upload entity
+        description: |
+          Validates authorization and uploads an entity to the Catalyst.
+          Requires a valid auth chain and authorization for all parcels in the entity.
+        requestBody:
+          required: true
+          content:
+            multipart/form-data:
+              schema:
+                type: object
+                required:
+                  - authChain
+                  - entityId
+                properties:
+                  authChain:
+                    type: string
+                    description: JSON-encoded auth chain
+                  entityId:
+                    type: string
+                    description: The entity ID
+        responses:
+          '200':
+            description: Entity uploaded successfully
+          '400':
+            description: Missing required fields
+          '403':
+            description: Authorization failed
+            content:
+              text/plain:
+                schema:
+                  type: string
+                  examples:
+                    - No auth chain provided
+                    - Invalid auth chain
+                    - Address not found
+                    - Missing access for N parcels
+          '500':
+            description: Internal server error
+  
+  components:
+    securitySchemes:
+      SignedFetch:
+        type: apiKey
+        in: header
+        name: X-Identity-Auth-Chain-*
+        description: |
+          Signed fetch authentication using Decentraland's ADR-44 specification.
+          Multiple headers are used to provide the authentication chain.
+  
+  
+
+ai_context: |
+  # AI Agent Context
+  
+  **Service Purpose:**
+  
+  The Linker Server acts as an intermediary for deploying content to Decentraland's Catalyst network. It validates authorization for specific parcels and proxies upload requests to the Catalyst content server with server-signed authentication.
+  
+  **Key Capabilities:**
+  
+  - Authorization validation for parcel deployments
+  - Auth chain signature verification
+  - Entity upload proxying to Catalyst
+  - Health check endpoints
+  
+  **Communication Pattern:**
+  
+  HTTP REST API
+  
+  **Technology Stack:**
+  
+  - Runtime: Node.js
+  - Language: TypeScript
+  - Framework: Well-Known Components (WKC) architecture
+  - HTTP Server: @well-known-components/http-server
+  
+  **External Dependencies:**
+  
+  - AWS Secrets Manager (for server wallet private key)
+  - Decentraland Catalyst (for content deployment)
+  - GitHub Pages (for authorization data)
+  
+  **Key Concepts:**
+  
+  - **Auth Chain**: A chain of signed messages that proves ownership of a wallet address
+  - **Parcel Authorization**: Users must be pre-authorized to deploy to specific parcels
+  - **Entity Upload**: Content entities are signed by the server and forwarded to Catalyst
+  
+  **Database notes:**
+  
+  - No persistent database - authorization data is fetched periodically from GitHub Pages
+  
+  
+
+readme: |
+  # Linker server
+  
+  The linker server is used to publish scenes on the Decentraland Foundation's lands without having owner or manager permissions over those lands via the contract. The service grabs an authorization's list from the [Linker Server Authorization](https://github.com/decentraland/linker-server-authorizations) repository to allow publishing scenes only to previously accepted wallets.
+  
+  ## How it works
+  
+  ### Downloading authorized wallets
+  
+  The service updates the authorized wallets and the plots they're authorized to deploy in through a polling process. There's no need to redeploy the service once the list is changed.
+  
+  ### Deploying scenes
+  
+  The deployment of scenes is done by signing the deployed entity first using the [Linked dApp UI](https://github.com/decentraland/linker-dapp) or any other UI.
+  
+  The process goes as follows:
+  
+  1. The user explicitly sets the linker server url as the Catalyst where they're going to deploy the scene.
+  2. The user signs the entity related to the scene that they want to deploy.
+  3. The linker server will check that the signed entity belongs to an authorized wallet and that this wallet can deploy scenes to the coordinates it needs to.
+  4. The linker server will re-sign the entities using a secret wallet with permissions and publish it to the Catalyst.
+  
+  The service will deploy the scenes in different Catalysts depending on the environment they're in.
+  
+  ## 🤖 AI Agent Context
+  
+  **Service Purpose:** Enables authorized users to deploy scenes to Decentraland Foundation-owned lands without requiring contract ownership or manager permissions. Acts as a proxy Catalyst that validates authorizations and re-signs entities with a privileged wallet.
+  
+  **Key Capabilities:**
+  
+  - Validates user authorization against approved wallet list (from linker-server-authorizations repository)
+  - Verifies parcel coordinates match authorized deployment plots
+  - Re-signs scene entities using privileged wallet with Foundation land permissions
+  - Publishes re-signed entities to Foundation Catalysts
+  - Polls authorization repository for updated wallet/plot lists
+  - Supports deployment to different Catalyst environments per configuration
+  
+  **Communication Pattern:** Synchronous HTTP REST API (receives deployment requests)
+  
+  **Technology Stack:**
+  
+  - Runtime: Node.js
+  - Language: TypeScript
+  - HTTP Framework: Express or @well-known-components/http-server
+  - Component Architecture: @well-known-components (logger, metrics)
+  
+  **External Dependencies:**
+  
+  - Authorization Source: linker-server-authorizations GitHub repository (authorized wallets and plots)
+  - Content Servers: Foundation Catalyst nodes (final deployment destination)
+  - Crypto: Ethereum wallet with Foundation land permissions (re-signing)
+  
+  **Authorization Flow:**
+  
+  1. Service polls linker-server-authorizations repo for authorized wallets and plots
+  2. User signs entity via Linked dApp UI
+  3. User deploys to linker server (specified as Catalyst endpoint)
+  4. Server validates: wallet is authorized AND coordinates match authorized plots
+  5. Server re-signs entity with privileged wallet
+  6. Server publishes to Foundation Catalyst nodes
+
+extra_docs:
+  docs_database-schemas_md: |
+    # Database Schema Documentation
+    
+    This service does not use a traditional database. Authorization data is stored externally and fetched periodically.
+    
+    ## External Data Sources
+    
+    ### Authorization Data
+    
+    Authorization data is fetched from:
+    `https://decentraland.github.io/linker-server-authorizations/authorizations.json`
+    
+    ### Authorization Schema
+    
+    ```typescript
+    interface LinkerAuthorization {
+      addresses: string[]      // Ethereum addresses (lowercased)
+      plots: string[]          // Parcel coordinates (e.g., "0,0", "-10,5")
+      startDate?: string       // ISO date string - authorization start
+      endDate?: string         // ISO date string - authorization end
+      onlyDev?: boolean        // If true, only valid in dev/staging environments
+    }
+    ```
+    
+    ## In-Memory Data Structure
+    
+    ### AuthorizationsList
+    
+    The fetched authorizations are converted to a lookup table for efficient access:
+    
+    ```typescript
+    type AuthorizationsList = {
+      [address: string]: string[]  // address -> list of authorized parcels
+    }
+    ```
+    
+    ### Business Rules
+    
+    - **Address normalization**: All addresses are stored in lowercase
+    - **Plot validation**: Plots must be valid coordinates within -200 to 200 range
+    - **Time-based filtering**: Authorizations with startDate/endDate are filtered based on current time
+    - **Environment filtering**: `onlyDev` authorizations are excluded in production
+    
+    
+

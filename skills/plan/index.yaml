@@ -1,0 +1,252 @@
+# Decentraland Backend — Triage Index
+# layer: RT=realtime CN=content FS=feature_servers LIB=shared_library OTHER=other
+# Full context per service: services/service_{name}.yaml
+# generated: 2026-03-03
+
+services:
+  archipelago-workers:
+    layer: RT
+    desc: Workers for peer clustering and communications orchestration
+    owner: null
+    calls: [catalyst(HTTP)]
+    called_by: [social-service-ea(WebSocket), realm-provider(WebSocket)]
+  architecture:
+    layer: OTHER
+    desc: Platform architecture diagram (D2)
+    owner: null
+    calls: []
+    called_by: []
+  asset-bundle-converter:
+    layer: CN
+    desc: Converts 3D assets into optimized asset bundles
+    owner: null
+    calls: []
+    called_by: []
+  asset-bundle-registry:
+    layer: CN
+    desc: Registry service for asset bundles management
+    owner: null
+    calls: [catalyst(HTTP), worlds-content-server(HTTP)]
+    called_by: []
+  atlas-server:
+    layer: FS
+    desc: Server providing map and atlas-related data
+    owner: null
+    calls: [WorkerSubgraph(HTTP (GraphQL))]
+    called_by: []
+  auth-server:
+    layer: FS
+    desc: Authentication server for identity validation
+    owner: null
+    calls: []
+    called_by: []
+  badges:
+    layer: FS
+    desc: Badge system API and processor for user achievements
+    owner: null
+    calls: [catalyst(HTTP)]
+    called_by: [events-notifier(SNS/SQS)]
+  block-indexer:
+    layer: LIB
+    desc: "Blockchain block indexing component for timestamp lookups (`@dcl/block-indexer`)"
+    owner: null
+    calls: []
+    called_by: []
+  camera-reel-service:
+    layer: FS
+    desc: Rust-based service for camera screenshots management
+    owner: null
+    calls: []
+    called_by: []
+  catalyst:
+    layer: CN
+    desc: Core content server and backbone services for Decentraland
+    owner: null
+    calls: []
+    called_by: [comms-gatekeeper(HTTP), social-service-ea(HTTP), badges(HTTP), asset-bundle-registry(HTTP), archipelago-workers/stats(HTTP), events(HTTP), linker-server(HTTP), profile-images(HTTP), realm-provider(HTTP), deployments-to-sqs(HTTP)]
+  catalyst-contracts:
+    layer: LIB
+    desc: "Blockchain contract addresses and ABIs (`@dcl/catalyst-contracts`)"
+    owner: null
+    calls: []
+    called_by: []
+  catalyst-storage:
+    layer: LIB
+    desc: "Storage component for catalysts (`@dcl/catalyst-storage`)"
+    owner: null
+    calls: []
+    called_by: []
+  comms-gatekeeper:
+    layer: RT
+    desc: Gatekeeper service for communications management
+    owner: null
+    calls: [catalyst(HTTP), social-service-ea(HTTP), worlds-content-server(HTTP)]
+    called_by: []
+  comms-message-sfu:
+    layer: RT
+    desc: Real-time message routing and validation service for LiveKit communications
+    owner: null
+    calls: [social-service-ea(HTTP)]
+    called_by: []
+  content-validator:
+    layer: LIB
+    desc: "Entity deployment validation library (`@dcl/content-validator`)"
+    owner: null
+    calls: []
+    called_by: []
+  core-components:
+    layer: LIB
+    desc: "Reusable service components (redis, sqs, sns, slack, analytics, etc.)"
+    owner: null
+    calls: []
+    called_by: []
+  credits-server:
+    layer: FS
+    desc: Server handling credits and virtual currency operations
+    owner: null
+    calls: [Squid Indexer(HTTP (GraphQL))]
+    called_by: []
+  decentraland-crypto-middleware:
+    layer: LIB
+    desc: Crypto middleware for Decentraland services
+    owner: null
+    calls: []
+    called_by: []
+  deployments-to-sqs:
+    layer: CN
+    desc: Listens for content deployments and publishes to SQS
+    owner: null
+    calls: [catalyst(HTTP)]
+    called_by: []
+  events:
+    layer: FS
+    desc: Events platform frontend (Gatsby-based)
+    owner: null
+    calls: [catalyst(HTTP)]
+    called_by: []
+  events-notifier:
+    layer: FS
+    desc: Event notification and scheduling service
+    owner: null
+    calls: [notifications-workers(SNS/SQS), badges(SNS/SQS)]
+    called_by: [notifications-workers(SNS/SQS)]
+  exploration-games:
+    layer: FS
+    desc: Exploration games and quests backend service
+    owner: null
+    calls: []
+    called_by: []
+  hashing:
+    layer: LIB
+    desc: "Hashing utilities library (`@dcl/hashing`)"
+    owner: null
+    calls: []
+    called_by: []
+  lamb2:
+    layer: FS
+    desc: Lambda functions and utilities service
+    owner: null
+    calls: []
+    called_by: []
+  linker-server:
+    layer: FS
+    desc: Enables authorized scene deployment to Foundation-owned lands
+    owner: null
+    calls: [catalyst(HTTP)]
+    called_by: []
+  marketplace-server:
+    layer: FS
+    desc: "API server for the Decentraland Marketplace (NFTs, sales, orders)"
+    owner: null
+    calls: []
+    called_by: []
+  notifications-workers:
+    layer: FS
+    desc: Workers for processing and sending user notifications
+    owner: null
+    calls: [events-notifier(SNS/SQS)]
+    called_by: [events-notifier(SNS/SQS)]
+  platform-crypto-middleware:
+    layer: LIB
+    desc: "Authentication middleware for signed fetch requests (`@dcl/platform-crypto-middleware`)"
+    owner: null
+    calls: []
+    called_by: []
+  police-server:
+    layer: RT
+    desc: Content moderation bot for LiveKit rooms
+    owner: null
+    calls: []
+    called_by: []
+  profile-images:
+    layer: FS
+    desc: Avatar profile image generation service
+    owner: null
+    calls: [catalyst(HTTP)]
+    called_by: []
+  prometheus-nats-exporter:
+    layer: OTHER
+    desc: NATS metrics exporter sidecar for Prometheus
+    owner: null
+    calls: []
+    called_by: []
+  protocol:
+    layer: LIB
+    desc: "Protocol buffer definitions (`@dcl/protocol`)"
+    owner: null
+    calls: []
+    called_by: []
+  realm-provider:
+    layer: FS
+    desc: Service providing realm information and routing
+    owner: null
+    calls: [catalyst(HTTP), archipelago-workers(WebSocket)]
+    called_by: []
+  reels:
+    layer: FS
+    desc: Reels frontend (Gatsby-based)
+    owner: null
+    calls: []
+    called_by: []
+  referral:
+    layer: FS
+    desc: Referral system frontend and backend
+    owner: null
+    calls: []
+    called_by: []
+  schemas:
+    layer: LIB
+    desc: "Shared TypeScript schemas and types (`@dcl/schemas`)"
+    owner: "@decentraland/core-developers"
+    calls: []
+    called_by: []
+  snapshots-fetcher:
+    layer: LIB
+    desc: "Component for fetching entity snapshots (`@dcl/snapshots-fetcher`)"
+    owner: null
+    calls: []
+    called_by: []
+  social-service-ea:
+    layer: FS
+    desc: "Social interactions microservice (friends, blocks, etc.)"
+    owner: null
+    calls: [catalyst(HTTP), archipelago-workers(WebSocket)]
+    called_by: [worlds-content-server(HTTP), comms-gatekeeper(HTTP), comms-message-sfu(HTTP)]
+  urn-resolver:
+    layer: LIB
+    desc: "URN resolver for Decentraland assets (`@dcl/urn-resolver`)"
+    owner: null
+    calls: []
+    called_by: []
+  world-storage-service:
+    layer: FS
+    desc: Secure storage and environment variables service for Decentraland worlds
+    owner: null
+    calls: [worlds-content-server(HTTP)]
+    called_by: []
+  worlds-content-server:
+    layer: CN
+    desc: Content server for Decentraland Worlds (named scenes)
+    owner: null
+    calls: [social-service-ea(HTTP)]
+    called_by: [world-storage-service(HTTP), comms-gatekeeper(HTTP), asset-bundle-registry(HTTP)]

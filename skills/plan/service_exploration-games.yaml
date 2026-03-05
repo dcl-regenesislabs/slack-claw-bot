@@ -1,0 +1,10 @@
+name: exploration-games
+layer: feature_servers
+desc: Exploration games and quests backend service
+github: "https://github.com/decentraland/exploration-games"
+owner: null
+lib_deps: [platform-crypto-middleware]
+
+calls: []
+
+called_by: []

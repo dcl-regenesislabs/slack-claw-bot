@@ -1,0 +1,10 @@
+name: police-server
+layer: realtime
+desc: Content moderation bot for LiveKit rooms
+github: "https://github.com/decentraland/police-server"
+owner: null
+lib_deps: [schemas, core-components]
+
+calls: []
+
+called_by: []

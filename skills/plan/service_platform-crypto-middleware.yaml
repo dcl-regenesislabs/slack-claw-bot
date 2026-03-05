@@ -1,0 +1,21 @@
+name: platform-crypto-middleware
+layer: shared_library
+desc: "Authentication middleware for signed fetch requests (`@dcl/platform-crypto-middleware`)"
+github: "https://github.com/decentraland/platform-crypto-middleware"
+owner: null
+lib_deps: []
+
+calls: []
+
+called_by: []
+
+# ─── DETAILED DOCS (api spec, full context, readme) ───────────
+readme: |
+  # Platform Authentication Middleware
+  
+  [![Coverage Status](https://coveralls.io/repos/github/decentraland/platform-crypto-middleware/badge.svg?branch=main)](https://coveralls.io/github/decentraland/platform-crypto-middleware?branch=main)
+  
+  A multi framework middleware to authenticate request signed with @decentraland/SignedFetch
+  
+  Platform's fork of https://github.com/decentraland/decentraland-crypto-middleware
+

@@ -1,0 +1,12 @@
+name: badges
+layer: feature_servers
+desc: Badge system API and processor for user achievements
+github: "https://github.com/decentraland/badges"
+owner: null
+lib_deps: [schemas]
+
+calls:
+  - catalyst(HTTP): Fetches wearables and entity data via catalyst-client
+
+called_by:
+  - events-notifier(SNS/SQS): Publishes badge-related events
