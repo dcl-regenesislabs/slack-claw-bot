@@ -1,3 +1,11 @@
+process.on("unhandledRejection", (err) => {
+  console.error("[process] Unhandled rejection:", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[process] Uncaught exception:", err);
+  process.exit(1);
+});
+
 import { loadConfig } from "./config.js";
 import { initAgent } from "./agent.js";
 import { startSlackBot } from "./slack.js";

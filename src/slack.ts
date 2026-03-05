@@ -1,4 +1,4 @@
-import { App } from "@slack/bolt";
+import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
 import { runAgent, syncAuth } from "./agent.js";
@@ -11,6 +11,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     token: config.slackBotToken,
     appToken: config.slackAppToken,
     socketMode: true,
+    logLevel: LogLevel.INFO,
   });
 
   const scheduler = new AgentScheduler(config.maxConcurrentAgents);
@@ -26,10 +27,12 @@ export async function startSlackBot(config: Config): Promise<void> {
     console.log(`[slack] Triggered by ${userName} in #${channelName}: ${text}`);
 
     function react(name: string): Promise<unknown> {
-      return client.reactions.add({ channel: event.channel, timestamp: event.ts, name });
+      return client.reactions.add({ channel: event.channel, timestamp: event.ts, name })
+        .catch((err) => { if (err.data?.error !== "already_reacted") throw err; });
     }
     function unreact(name: string): Promise<unknown> {
-      return client.reactions.remove({ channel: event.channel, timestamp: event.ts, name });
+      return client.reactions.remove({ channel: event.channel, timestamp: event.ts, name })
+        .catch((err) => { if (err.data?.error !== "no_reaction") throw err; });
     }
 
     const submission = scheduler.submit(threadTs, async () => {
@@ -75,6 +78,10 @@ export async function startSlackBot(config: Config): Promise<void> {
           .catch((e) => console.error("[slack] Failed to post audit log:", e));
       }
     });
+  });
+
+  app.error(async (error) => {
+    console.error("[slack] Bolt error:", error);
   });
 
   await app.start();
