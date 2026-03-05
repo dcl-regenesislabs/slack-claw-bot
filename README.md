@@ -9,7 +9,6 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Triages and labels issues
 - Summarizes threads and answers questions about repositories
 - Knows common repository aliases via a built-in skill (e.g. `@bot create an issue in mobile`)
-- Plans backend changes by analyzing service architecture and dependencies (e.g. `@bot plan: which services are involved in adding rate limiting to the auth-server?`)
 - Creates Shape Up pitch pages in Notion from a brief idea (e.g. `@bot shape: add a leaderboard to the Explorer world map`)
 
 ## Prerequisites
@@ -59,8 +58,8 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 | `NOTION_TOKEN` | No | Notion integration token for reading/creating pages |
-| `NOTION_SHAPE_DB_ID` | No | Notion database ID of the SHAPE template (default provided) |
-| `NOTION_SHAPE_PARENT_ID` | No | Notion page ID where new shape-ups are created (default provided) |
+| `NOTION_SHAPE_DB_ID` | No | Notion database ID where shape-up entries are created (default provided) |
+| `NOTION_SHAPE_PARENT_ID` | No | Fallback parent page ID for plain pages when `NOTION_SHAPE_DB_ID` is not set |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
@@ -111,5 +110,5 @@ src/
 test/               Unit tests (node:test)
 prompts/
   system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, github, mobile-project, plan, pr-review, repos, shape, triage)
+skills/             Agent skill definitions (create-issue, github, mobile-project, pr-review, repos, shape, triage)
 ```

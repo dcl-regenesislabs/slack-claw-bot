@@ -279,7 +279,6 @@ async function downloadTextFile(url: string): Promise<string> {
 function detectSkill(text: string): string {
   const t = text.toLowerCase().trimStart();
   if (/^shape(\s+up)?[\s:]/.test(t)) return "shape";
-  if (/^plan[\s:]/.test(t)) return "plan";
   if (/\bpr[\s-]?review\b/.test(t) || (/\breview\b/.test(t) && /\bpr\b/.test(t))) return "pr-review";
   if (/\btriage\b/.test(t)) return "triage";
   if (/\bcreate\b.+\bissue\b/.test(t) || /\bopen\b.+\bissue\b/.test(t)) return "create-issue";

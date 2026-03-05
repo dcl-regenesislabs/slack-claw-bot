@@ -1,6 +1,6 @@
 ---
 name: shape
-description: Create a Notion Shape Up pitch page from a brief idea. Triggered when the user's message starts with "shape:" or "shape up:". Generates a full pitch using the Decentraland Shape Up template and posts it as an entry in the SHAPE Notion database, then returns the page URL.
+description: Create a Notion Shape Up pitch page from a brief idea. Triggered when the user's message starts with "shape:" or "shape up:". Generates a full pitch using the Decentraland Shape Up template and posts it to Notion, then returns the page URL.
 ---
 
 ## Trigger
@@ -26,12 +26,25 @@ Extract the idea text after the colon.
 
 Write out all nine sections for the given idea. Be concrete and specific.
 
-### Step 2 — Query the SHAPE database schema
+### Step 2 — Determine where to create the page
 
-Query the database to discover the exact title property name and the type of the Appetite and Status properties:
+Check which env vars are set:
 
 ```bash
-DB_ID="${NOTION_SHAPE_DB_ID:-31a5f41146a5802d903bc93d73948dc1}"
+echo "DB_ID=${NOTION_SHAPE_DB_ID}"
+echo "PARENT_ID=${NOTION_SHAPE_PARENT_ID}"
+```
+
+- If `NOTION_SHAPE_DB_ID` is set → **database entry** (preferred, includes Status/Appetite properties)
+- Else if `NOTION_SHAPE_PARENT_ID` is set → **plain child page** under that parent
+- Else → output the generated content as text only; explain that neither `NOTION_SHAPE_DB_ID` nor `NOTION_SHAPE_PARENT_ID` is configured
+
+### Step 3a — Create as database entry (if NOTION_SHAPE_DB_ID is set)
+
+First query the schema to discover the title property name and types of Appetite/Status:
+
+```bash
+DB_ID="${NOTION_SHAPE_DB_ID}"
 
 curl -s "https://api.notion.com/v1/databases/$DB_ID" \
   -H "Authorization: Bearer $NOTION_TOKEN" \
@@ -40,13 +53,11 @@ curl -s "https://api.notion.com/v1/databases/$DB_ID" \
 ```
 
 From the result, identify:
-- The property with `"type": "title"` → this is the name field (e.g. `"Shape"` or `"Name"`)
+- The property with `"type": "title"` → the title field name (e.g. `"Shape"` or `"Name"`)
 - The `Appetite` property type (`select`, `rich_text`, etc.)
 - The `Status` property type (`status` or `select`)
 
-### Step 3 — Create the page as a database entry
-
-Use `database_id` as the parent (NOT `page_id`). Set Status=Raw Idea and Appetite from the generated content:
+Then create the page:
 
 ```bash
 curl -s -X POST "https://api.notion.com/v1/pages" \
@@ -67,17 +78,39 @@ JSON
 )"
 ```
 
-**Appetite property value** — use the format matching the schema type:
-- `select` type → `{ "select": { "name": "3-weeks" } }` or `{ "select": { "name": "6-weeks" } }`
-- `rich_text` type → `{ "rich_text": [{ "type": "text", "text": { "content": "3-weeks" } }] }`
+**Appetite value** — match the schema type:
+- `select` → `{ "select": { "name": "3-weeks" } }`
+- `rich_text` → `{ "rich_text": [{ "type": "text", "text": { "content": "3-weeks" } }] }`
 
-**Status property value** — use the format matching the schema type:
-- `status` type → `{ "status": { "name": "Raw Idea" } }`
-- `select` type → `{ "select": { "name": "Raw Idea" } }`
+**Status value** — match the schema type:
+- `status` → `{ "status": { "name": "Raw Idea" } }`
+- `select` → `{ "select": { "name": "Raw Idea" } }`
 
-If setting a property fails (e.g. option value doesn't exist), retry omitting that property — never let a property error block the page creation.
+If a property value is rejected, retry omitting that property — never let a property error block page creation.
 
-**Block format reference:**
+### Step 3b — Create as plain page (if only NOTION_SHAPE_PARENT_ID is set)
+
+```bash
+curl -s -X POST "https://api.notion.com/v1/pages" \
+  -H "Authorization: Bearer $NOTION_TOKEN" \
+  -H "Notion-Version: 2022-06-28" \
+  -H "Content-Type: application/json" \
+  -d "$(cat <<JSON
+{
+  "parent": { "page_id": "${NOTION_SHAPE_PARENT_ID}" },
+  "properties": {
+    "title": { "title": [{ "type": "text", "text": { "content": "Shape: <short title>" } }] }
+  },
+  "children": [ <blocks for all 9 sections> ]
+}
+JSON
+)"
+```
+
+No database properties are set in this mode — all content lives in the page body.
+
+### Block format reference
+
 ```json
 { "object": "block", "type": "heading_1", "heading_1": { "rich_text": [{ "type": "text", "text": { "content": "Problem" } }] } }
 { "object": "block", "type": "paragraph", "paragraph": { "rich_text": [{ "type": "text", "text": { "content": "..." } }] } }
@@ -85,9 +118,9 @@ If setting a property fails (e.g. option value doesn't exist), retry omitting th
 { "object": "block", "type": "heading_3", "heading_3": { "rich_text": [{ "type": "text", "text": { "content": "Must Have" } }] } }
 ```
 
-Use `heading_1` for the nine section titles, `paragraph` for prose, `bulleted_list_item` for lists, and `heading_3` for Roadmap sub-headings (Must Have / Nice to Have / Expendable).
+Use `heading_1` for section titles, `paragraph` for prose, `bulleted_list_item` for lists, and `heading_3` for Roadmap sub-headings (Must Have / Nice to Have / Expendable).
 
-The Notion API accepts at most 100 children per request. If content is large, create the page first then append blocks with `PATCH /v1/blocks/{page-id}/children`.
+The Notion API accepts at most 100 children per request. If content is large, create the page first then append remaining blocks with `PATCH /v1/blocks/{page-id}/children`.
 
 ### Step 4 — Return the URL
 
