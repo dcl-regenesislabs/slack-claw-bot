@@ -4,6 +4,34 @@ import type { Config } from "./config.js";
 import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
 
+export interface MediaAttachment {
+  data: string;       // base64
+  mimeType: string;
+  filename: string;
+}
+
+export interface ThreadData {
+  text: string;
+  images: MediaAttachment[];
+  videos: MediaAttachment[];
+  files: MediaAttachment[];
+}
+
+const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const TEXT_MIMES = new Set(["text/plain", "text/markdown"]);
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const MAX_FILES_PER_THREAD = 10;
+const MAX_CACHE_ENTRIES = 100;
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+interface CachedAttachment {
+  attachment: MediaAttachment;
+  cachedAt: number;
+}
+
+const mediaCache = new Map<string, CachedAttachment>();
+
 const nameCache = new Map<string, string>();
 
 export async function startSlackBot(config: Config): Promise<void> {
@@ -38,13 +66,16 @@ export async function startSlackBot(config: Config): Promise<void> {
     const submission = scheduler.submit(threadTs, async () => {
       await react("rl-bonk-doge");
 
-      const threadContent = await fetchThread(client, event.channel, threadTs);
+      const threadData = await fetchThread(client, event.channel, threadTs, config.slackBotToken);
       const isReview =
-        PR_URL_PATTERN.test(threadContent) ||
+        PR_URL_PATTERN.test(threadData.text) ||
         REVIEW_KEYWORD_PATTERN.test(text);
       const model = isReview ? REVIEW_MODEL : undefined;
       const { text: response, cost, tokens } = await runAgent({
-        threadContent,
+        threadContent: threadData.text,
+        images: threadData.images,
+        videos: threadData.videos,
+        files: threadData.files,
         triggeredBy: userName,
         model,
       });
@@ -161,7 +192,8 @@ async function fetchThread(
   client: WebClient,
   channel: string,
   threadTs: string,
-): Promise<string> {
+  botToken: string,
+): Promise<ThreadData> {
   const reply = await client.conversations.replies({
     channel,
     ts: threadTs,
@@ -180,11 +212,121 @@ async function fetchThread(
     }),
   );
 
-  return messages
-    .map((m) => {
-      const name = userNames.get(m.user || "") || "unknown";
-      const ts = m.ts ? new Date(parseFloat(m.ts) * 1000).toISOString() : "";
-      return `[${name}] (${ts}): ${m.text || ""}`;
-    })
-    .join("\n");
+  const images: MediaAttachment[] = [];
+  const videos: MediaAttachment[] = [];
+  const files: MediaAttachment[] = [];
+  let totalFiles = 0;
+
+  // Evict expired cache entries, then cap size by removing oldest
+  const now = Date.now();
+  for (const [key, entry] of mediaCache) {
+    if (now - entry.cachedAt > CACHE_TTL_MS) mediaCache.delete(key);
+  }
+  while (mediaCache.size > MAX_CACHE_ENTRIES) {
+    const oldest = mediaCache.keys().next().value!;
+    mediaCache.delete(oldest);
+  }
+
+  const textLines: string[] = [];
+
+  for (const m of messages) {
+    const name = userNames.get(m.user || "") || "unknown";
+    const ts = m.ts ? new Date(parseFloat(m.ts) * 1000).toISOString() : "";
+    let line = `[${name}] (${ts}): ${m.text || ""}`;
+
+    const msgFiles = (m as any).files as any[] | undefined;
+    if (msgFiles) {
+      for (const file of msgFiles) {
+        const mime: string = file.mimetype || "";
+        const filename: string = file.name || "unnamed";
+        const fileId: string = file.id || "";
+        const size: number = file.size || 0;
+        const url: string = file.url_private_download || "";
+
+        const isImage = IMAGE_MIMES.has(mime);
+        const isVideo = VIDEO_MIMES.has(mime);
+        const isText = TEXT_MIMES.has(mime);
+
+        if (!isImage && !isVideo && !isText) {
+          line += `\n[skipped file: ${filename} — unsupported type ${mime}]`;
+          continue;
+        }
+
+        if (size > MAX_FILE_SIZE) {
+          line += `\n[skipped file: ${filename} — exceeds 20MB limit]`;
+          continue;
+        }
+
+        if (totalFiles >= MAX_FILES_PER_THREAD) {
+          line += `\n[skipped file: ${filename} — thread file limit reached]`;
+          continue;
+        }
+
+        if (!url) {
+          line += `\n[skipped file: ${filename} — no download URL]`;
+          continue;
+        }
+
+        let attachment: MediaAttachment;
+        const cached = fileId ? mediaCache.get(fileId) : undefined;
+        if (cached && now - cached.cachedAt <= CACHE_TTL_MS) {
+          attachment = cached.attachment;
+        } else {
+          try {
+            attachment = await downloadSlackFile(url, mime, filename, botToken);
+            if (fileId) {
+              mediaCache.set(fileId, { attachment, cachedAt: now });
+            }
+          } catch (err) {
+            console.error(`[slack] Failed to download file ${filename}:`, err);
+            line += `\n[skipped file: ${filename} — download failed]`;
+            continue;
+          }
+        }
+
+        totalFiles++;
+
+        if (isImage) {
+          images.push(attachment);
+          line += `\n[attached image: ${filename}]`;
+        } else if (isVideo) {
+          videos.push(attachment);
+          line += `\n[attached video: ${filename}]`;
+        } else if (isText) {
+          files.push(attachment);
+          const content = Buffer.from(attachment.data, "base64").toString("utf-8");
+          line += `\n[attached file: ${filename}]\n--- file content ---\n${content}\n--- end file ---`;
+        }
+      }
+    }
+
+    textLines.push(line);
+  }
+
+  return {
+    text: textLines.join("\n"),
+    images,
+    videos,
+    files,
+  };
+}
+
+async function downloadSlackFile(
+  url: string,
+  mimeType: string,
+  filename: string,
+  botToken: string,
+): Promise<MediaAttachment> {
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${botToken}` },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} downloading ${filename}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return {
+    data: buffer.toString("base64"),
+    mimeType,
+    filename,
+  };
 }
