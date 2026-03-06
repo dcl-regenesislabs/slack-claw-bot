@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
@@ -181,8 +181,8 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
     if (allMedia.length > 0) {
       tempDir = mkdtempSync(join(tmpdir(), "slack-media-"));
-      mediaPaths = allMedia.map((attachment) => {
-        const filePath = join(tempDir!, attachment.filename);
+      mediaPaths = allMedia.map((attachment, i) => {
+        const filePath = join(tempDir!, `${i}-${basename(attachment.filename)}`);
         writeFileSync(filePath, Buffer.from(attachment.data, "base64"));
         return filePath;
       });

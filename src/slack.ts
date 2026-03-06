@@ -22,6 +22,7 @@ const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
 const TEXT_MIMES = new Set(["text/plain", "text/markdown"]);
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 const MAX_FILES_PER_THREAD = 10;
+const MAX_CACHE_ENTRIES = 100;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 interface CachedAttachment {
@@ -216,10 +217,14 @@ async function fetchThread(
   const files: MediaAttachment[] = [];
   let totalFiles = 0;
 
-  // Evict expired cache entries
+  // Evict expired cache entries, then cap size by removing oldest
   const now = Date.now();
   for (const [key, entry] of mediaCache) {
     if (now - entry.cachedAt > CACHE_TTL_MS) mediaCache.delete(key);
+  }
+  while (mediaCache.size > MAX_CACHE_ENTRIES) {
+    const oldest = mediaCache.keys().next().value!;
+    mediaCache.delete(oldest);
   }
 
   const textLines: string[] = [];
