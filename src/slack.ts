@@ -48,6 +48,11 @@ export async function startSlackBot(config: Config): Promise<void> {
     const threadTs = event.thread_ts || event.ts;
     const text = event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
 
+    if (event.user && await isExternalOrGuest(client, event.user)) {
+      console.warn(`[slack] Denied request from non-org user ${event.user}`);
+      return;
+    }
+
     const [userName, channelName] = await Promise.all([
       event.user ? resolveUserName(client, event.user) : Promise.resolve("unknown"),
       resolveChannelName(client, event.channel),
@@ -140,6 +145,35 @@ async function cachedLookup(
     return name;
   } catch {
     return key;
+  }
+}
+
+interface AuthEntry {
+  denied: boolean;
+  cachedAt: number;
+}
+
+const authCache = new Map<string, AuthEntry>();
+const AUTH_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+async function isExternalOrGuest(client: WebClient, userId: string): Promise<boolean> {
+  const cached = authCache.get(userId);
+  if (cached && Date.now() - cached.cachedAt <= AUTH_CACHE_TTL_MS) return cached.denied;
+
+  try {
+    const info = await client.users.info({ user: userId });
+    const user = info.user as any;
+    const denied = Boolean(user?.is_restricted || user?.is_ultra_restricted || user?.is_stranger);
+    authCache.set(userId, { denied, cachedAt: Date.now() });
+
+    // Cache the user name too, so resolveUserName won't re-fetch
+    const name = info.user?.real_name || info.user?.name;
+    if (name) nameCache.set(userId, name);
+
+    return denied;
+  } catch (err) {
+    console.error(`[slack] Failed to check user ${userId}, denying by default:`, err);
+    return true;
   }
 }
 
