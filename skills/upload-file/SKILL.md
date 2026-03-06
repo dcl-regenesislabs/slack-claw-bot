@@ -25,9 +25,12 @@ If not configured, tell the user: "File uploads are not configured. I can only d
 
 ## Upload
 
+Use the Cloudflare API (not the S3-compatible endpoint — that requires AWS Sig V4):
+
 ```bash
+unique_name="$(date +%s)-${filename}"
 curl -s -X PUT \
-  "https://${CF_R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${CF_R2_BUCKET}/$(date +%s)-${filename}" \
+  "https://api.cloudflare.com/client/v4/accounts/${CF_R2_ACCOUNT_ID}/r2/buckets/${CF_R2_BUCKET}/objects/${unique_name}" \
   -H "Authorization: Bearer ${CF_R2_TOKEN}" \
   -H "Content-Type: ${mime_type}" \
   --data-binary "@${file_path}"
@@ -37,12 +40,14 @@ curl -s -X PUT \
 - `mime_type` — match the file's actual type (e.g. `image/jpeg`, `video/mp4`)
 - `file_path` — absolute path to the local file (from the Attached Media section)
 
+A successful upload returns JSON with `"success": true`.
+
 ## Public URL
 
-After a successful upload (HTTP 200), the file is available at:
+After a successful upload, the file is available at:
 
 ```
-https://${CF_R2_PUBLIC_DOMAIN}/<timestamp>-<filename>
+https://${CF_R2_PUBLIC_DOMAIN}/<unique_name>
 ```
 
 ## Embedding in GitHub issues
