@@ -40,6 +40,12 @@ gh issue create --repo {repo} --title "..." --body "..." --label "bug,Android,cl
 - When creating issues in `decentraland/godot-explorer`, apply relevant labels from the mobile-project skill (type, platform, severity)
 - If the thread mentions who should work on the issue, assign them via `--assignee`
 
+## Images and Videos
+
+If the thread includes attached files (images, videos) and the user explicitly asks to upload them (e.g. "upload the image", "attach the image"), use the **upload-file** skill to upload them and embed the resulting URLs in the issue body.
+
+If the user does NOT ask to upload, describe the visual content in the issue body instead and mention that you can upload the files if they'd like.
+
 ## Guidelines
 
 - Title should be concise and actionable (imperative mood)
