@@ -38,22 +38,4 @@ describe("buildPrompt", () => {
     const result = buildPrompt("hello");
     assert.ok(!result.includes("Triggered by:"));
   });
-
-  it("includes media paths when provided", () => {
-    const paths = ["/tmp/slack-media-abc/screenshot.png", "/tmp/slack-media-abc/video.mp4"];
-    const result = buildPrompt("hello", false, undefined, paths);
-    assert.ok(result.includes("## Attached Media"));
-    assert.ok(result.includes("/tmp/slack-media-abc/screenshot.png"));
-    assert.ok(result.includes("/tmp/slack-media-abc/video.mp4"));
-  });
-
-  it("omits media section when no paths provided", () => {
-    const result = buildPrompt("hello");
-    assert.ok(!result.includes("Attached Media"));
-  });
-
-  it("omits media section when empty array provided", () => {
-    const result = buildPrompt("hello", false, undefined, []);
-    assert.ok(!result.includes("Attached Media"));
-  });
 });

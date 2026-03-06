@@ -1,10 +1,7 @@
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
-import { join, dirname, basename } from "node:path";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
-import type { ImageContent } from "@mariozechner/pi-ai";
-import type { MediaAttachment } from "./slack.js";
 import {
   createAgentSession,
   SessionManager,
@@ -34,9 +31,6 @@ interface AgentConfig {
 
 export interface RunOptions {
   threadContent: string;
-  images?: MediaAttachment[];
-  videos?: MediaAttachment[];
-  files?: MediaAttachment[];
   dryRun?: boolean;
   triggeredBy?: string;
   events?: EventEmitter;
@@ -136,8 +130,6 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   }
 
   const { threadContent, dryRun, triggeredBy, events } = options;
-  const images = options.images ?? [];
-  const allMedia = [...images, ...(options.videos ?? []), ...(options.files ?? [])];
   const effectiveModelId = options.model || modelId;
   const sessionManager = SessionManager.inMemory();
 
@@ -174,25 +166,8 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     tools: createCodingTools(cwd),
   });
 
-  let tempDir: string | undefined;
-
   try {
-    let mediaPaths: string[] | undefined;
-
-    if (allMedia.length > 0) {
-      tempDir = mkdtempSync(join(tmpdir(), "slack-media-"));
-      mediaPaths = allMedia.map((attachment, i) => {
-        const filePath = join(tempDir!, `${i}-${basename(attachment.filename)}`);
-        writeFileSync(filePath, Buffer.from(attachment.data, "base64"));
-        return filePath;
-      });
-    }
-
-    const imageContents: ImageContent[] | undefined = images.length > 0
-      ? images.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }))
-      : undefined;
-
-    const prompt = buildPrompt(threadContent, dryRun, triggeredBy, mediaPaths);
+    const prompt = buildPrompt(threadContent, dryRun, triggeredBy);
 
     if (events) {
       subscribeToTextDeltas(session, events);
@@ -201,10 +176,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     console.log("[agent] running prompt...");
     console.log("[agent] prompt:", prompt.slice(0, 200));
     console.log("[agent] model:", effectiveModelId);
-    if (mediaPaths) {
-      console.log(`[agent] media: ${mediaPaths.length} files (${imageContents?.length ?? 0} images for vision)`);
-    }
-    await session.prompt(prompt, imageContents ? { images: imageContents } : undefined);
+    await session.prompt(prompt);
 
     const messageCount = session.messages.length;
     console.log("[agent] messages in session:", messageCount);
@@ -223,13 +195,6 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     console.log("[agent] result length:", text.length);
     return { text, cost, tokens };
   } finally {
-    if (tempDir) {
-      try {
-        rmSync(tempDir, { recursive: true, force: true });
-      } catch (err) {
-        console.error("[agent] Failed to clean up temp dir:", err);
-      }
-    }
     session.dispose();
   }
 }
