@@ -27,7 +27,7 @@ These are not mandatory — use your judgment based on the content:
 - **Context** — key decisions, details, or constraints from the conversation
 - **Related Issues** — links to related issues found in step 2
 
-For bugs, try to include the platform (Android, iOS, desktop, VR) and app version if mentioned in the thread, but don't enforce a strict template — just capture what's useful.
+For bugs in `decentraland/godot-explorer`, use the bug report template defined in the mobile-project skill instead of freeform sections.
 
 ## Labels and Assignees
 
