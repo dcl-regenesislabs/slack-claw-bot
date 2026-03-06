@@ -1,7 +1,7 @@
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
-import { runAgent, syncAuth } from "./agent.js";
+import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
 
 const nameCache = new Map<string, string>();
@@ -39,7 +39,15 @@ export async function startSlackBot(config: Config): Promise<void> {
       await react("rl-bonk-doge");
 
       const threadContent = await fetchThread(client, event.channel, threadTs);
-      const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName });
+      const isReview =
+        PR_URL_PATTERN.test(threadContent) ||
+        REVIEW_KEYWORD_PATTERN.test(text);
+      const model = isReview ? REVIEW_MODEL : undefined;
+      const { text: response, cost, tokens } = await runAgent({
+        threadContent,
+        triggeredBy: userName,
+        model,
+      });
       await syncAuth();
 
       await unreact("rl-bonk-doge");
