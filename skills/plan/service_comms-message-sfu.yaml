@@ -10,6 +10,22 @@ calls:
 
 called_by: []
 
+ai_context: |
+  comms-message-sfu is an RT-layer service that routes and validates messages within LiveKit
+  communication rooms. It is an enforcement point — it checks sender legitimacy and community
+  membership before allowing messages through.
+
+  ## Role
+  rt-gateway: validates messages in real-time; not a discovery or storage service.
+  Calls social-service-ea (HTTP) to verify community membership and block status.
+
+  ## Validation pattern
+  - Operates as a LiveKit participant; intercepts directed chat messages from clients
+  - Validates sender's community membership and block status via social-service-ea
+  - Rejects messages from blocked or non-member senders before re-publishing
+  - Authentication: Signed Fetch (ADR-44) or Bearer token depending on context
+  - Always apply auth middleware before membership/block checks
+
 # ─── DETAILED DOCS (api spec, full context, readme) ───────────
 readme: |
   # Comms Message SFU

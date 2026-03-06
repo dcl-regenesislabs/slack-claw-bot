@@ -1,252 +1,345 @@
 # Decentraland Backend — Triage Index
 # layer: RT=realtime CN=content FS=feature_servers LIB=shared_library OTHER=other
+# role: gateway|rt-gateway|auth|discovery|storage|worker|content|library|other
+#   gateway    = enforces user access (blocks connections/requests)
+#   rt-gateway = real-time connection control (LiveKit, WebSocket)
+#   auth       = issues or validates identity credentials
+#   discovery  = provides information/lists only — never enforces access
+#   storage    = owns domain data; extend here for new data models
+#   worker     = background processing; not in synchronous request path
+#   content    = serves assets/scenes/content
+#   library    = shared library, no HTTP surface
+#   other      = infra/tooling
+# data_domain: domain entities this service owns (empty [] = no domain data)
 # Full context per service: services/service_{name}.yaml
 # generated: 2026-03-03
 
 services:
   archipelago-workers:
     layer: RT
+    role: rt-gateway
+    data_domain: [peer-clusters, scene-rooms]
     desc: Workers for peer clustering and communications orchestration
     owner: null
     calls: [catalyst(HTTP)]
     called_by: [social-service-ea(WebSocket), realm-provider(WebSocket)]
   architecture:
     layer: OTHER
+    role: other
+    data_domain: []
     desc: Platform architecture diagram (D2)
     owner: null
     calls: []
     called_by: []
   asset-bundle-converter:
     layer: CN
+    role: worker
+    data_domain: []
     desc: Converts 3D assets into optimized asset bundles
     owner: null
     calls: []
     called_by: []
   asset-bundle-registry:
     layer: CN
+    role: storage
+    data_domain: [asset-bundles]
     desc: Registry service for asset bundles management
     owner: null
     calls: [catalyst(HTTP), worlds-content-server(HTTP)]
     called_by: []
   atlas-server:
     layer: FS
+    role: discovery
+    data_domain: [map-tiles, parcels]
     desc: Server providing map and atlas-related data
     owner: null
     calls: [WorkerSubgraph(HTTP (GraphQL))]
     called_by: []
   auth-server:
     layer: FS
+    role: auth
+    data_domain: [identity, sessions]
     desc: Authentication server for identity validation
     owner: null
     calls: []
     called_by: []
   badges:
     layer: FS
+    role: storage
+    data_domain: [badges, achievements]
     desc: Badge system API and processor for user achievements
     owner: null
     calls: [catalyst(HTTP)]
     called_by: [events-notifier(SNS/SQS)]
   block-indexer:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "Blockchain block indexing component for timestamp lookups (`@dcl/block-indexer`)"
     owner: null
     calls: []
     called_by: []
   camera-reel-service:
     layer: FS
+    role: storage
+    data_domain: [screenshots]
     desc: Rust-based service for camera screenshots management
     owner: null
     calls: []
     called_by: []
   catalyst:
     layer: CN
+    role: content
+    data_domain: [scenes, profiles, wearables, deployments]
     desc: Core content server and backbone services for Decentraland
     owner: null
     calls: []
     called_by: [comms-gatekeeper(HTTP), social-service-ea(HTTP), badges(HTTP), asset-bundle-registry(HTTP), archipelago-workers/stats(HTTP), events(HTTP), linker-server(HTTP), profile-images(HTTP), realm-provider(HTTP), deployments-to-sqs(HTTP)]
   catalyst-contracts:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "Blockchain contract addresses and ABIs (`@dcl/catalyst-contracts`)"
     owner: null
     calls: []
     called_by: []
   catalyst-storage:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "Storage component for catalysts (`@dcl/catalyst-storage`)"
     owner: null
     calls: []
     called_by: []
   comms-gatekeeper:
     layer: RT
+    role: gateway
+    data_domain: [scene-access, livekit-tokens]
     desc: Gatekeeper service for communications management
     owner: null
     calls: [catalyst(HTTP), social-service-ea(HTTP), worlds-content-server(HTTP)]
     called_by: []
   comms-message-sfu:
     layer: RT
+    role: rt-gateway
+    data_domain: []
     desc: Real-time message routing and validation service for LiveKit communications
     owner: null
     calls: [social-service-ea(HTTP)]
     called_by: []
   content-validator:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "Entity deployment validation library (`@dcl/content-validator`)"
     owner: null
     calls: []
     called_by: []
   core-components:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "Reusable service components (redis, sqs, sns, slack, analytics, etc.)"
     owner: null
     calls: []
     called_by: []
   credits-server:
     layer: FS
+    role: storage
+    data_domain: [credits, transactions]
     desc: Server handling credits and virtual currency operations
     owner: null
     calls: [Squid Indexer(HTTP (GraphQL))]
     called_by: []
   decentraland-crypto-middleware:
     layer: LIB
+    role: library
+    data_domain: []
     desc: Crypto middleware for Decentraland services
     owner: null
     calls: []
     called_by: []
   deployments-to-sqs:
     layer: CN
+    role: worker
+    data_domain: []
     desc: Listens for content deployments and publishes to SQS
     owner: null
     calls: [catalyst(HTTP)]
     called_by: []
   events:
     layer: FS
+    role: storage
+    data_domain: [events]
     desc: Events platform frontend (Gatsby-based)
     owner: null
     calls: [catalyst(HTTP)]
     called_by: []
   events-notifier:
     layer: FS
+    role: worker
+    data_domain: [scheduled-notifications]
     desc: Event notification and scheduling service
     owner: null
     calls: [notifications-workers(SNS/SQS), badges(SNS/SQS)]
     called_by: [notifications-workers(SNS/SQS)]
   exploration-games:
     layer: FS
+    role: storage
+    data_domain: [quests, games]
     desc: Exploration games and quests backend service
     owner: null
     calls: []
     called_by: []
   hashing:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "Hashing utilities library (`@dcl/hashing`)"
     owner: null
     calls: []
     called_by: []
   lamb2:
     layer: FS
+    role: discovery
+    data_domain: []
     desc: Lambda functions and utilities service
     owner: null
     calls: []
     called_by: []
   linker-server:
     layer: FS
+    role: gateway
+    data_domain: []
     desc: Enables authorized scene deployment to Foundation-owned lands
     owner: null
     calls: [catalyst(HTTP)]
     called_by: []
   marketplace-server:
     layer: FS
+    role: storage
+    data_domain: [nfts, orders, sales]
     desc: "API server for the Decentraland Marketplace (NFTs, sales, orders)"
     owner: null
     calls: []
     called_by: []
   notifications-workers:
     layer: FS
+    role: worker
+    data_domain: [notifications]
     desc: Workers for processing and sending user notifications
     owner: null
     calls: [events-notifier(SNS/SQS)]
     called_by: [events-notifier(SNS/SQS)]
   platform-crypto-middleware:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "Authentication middleware for signed fetch requests (`@dcl/platform-crypto-middleware`)"
     owner: null
     calls: []
     called_by: []
   police-server:
     layer: RT
+    role: rt-gateway
+    data_domain: [moderation-events]
     desc: Content moderation bot for LiveKit rooms
     owner: null
     calls: []
     called_by: []
   profile-images:
     layer: FS
+    role: worker
+    data_domain: [profile-images]
     desc: Avatar profile image generation service
     owner: null
     calls: [catalyst(HTTP)]
     called_by: []
   prometheus-nats-exporter:
     layer: OTHER
+    role: other
+    data_domain: []
     desc: NATS metrics exporter sidecar for Prometheus
     owner: null
     calls: []
     called_by: []
   protocol:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "Protocol buffer definitions (`@dcl/protocol`)"
     owner: null
     calls: []
     called_by: []
   realm-provider:
     layer: FS
+    role: discovery
+    data_domain: []
     desc: Service providing realm information and routing
     owner: null
     calls: [catalyst(HTTP), archipelago-workers(WebSocket)]
     called_by: []
   reels:
     layer: FS
+    role: content
+    data_domain: []
     desc: Reels frontend (Gatsby-based)
     owner: null
     calls: []
     called_by: []
   referral:
     layer: FS
+    role: storage
+    data_domain: [referrals]
     desc: Referral system frontend and backend
     owner: null
     calls: []
     called_by: []
   schemas:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "Shared TypeScript schemas and types (`@dcl/schemas`)"
     owner: "@decentraland/core-developers"
     calls: []
     called_by: []
   snapshots-fetcher:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "Component for fetching entity snapshots (`@dcl/snapshots-fetcher`)"
     owner: null
     calls: []
     called_by: []
   social-service-ea:
     layer: FS
+    role: storage
+    data_domain: [friendships, blocks, bans, profiles]
     desc: "Social interactions microservice (friends, blocks, etc.)"
     owner: null
     calls: [catalyst(HTTP), archipelago-workers(WebSocket)]
     called_by: [worlds-content-server(HTTP), comms-gatekeeper(HTTP), comms-message-sfu(HTTP)]
   urn-resolver:
     layer: LIB
+    role: library
+    data_domain: []
     desc: "URN resolver for Decentraland assets (`@dcl/urn-resolver`)"
     owner: null
     calls: []
     called_by: []
   world-storage-service:
     layer: FS
+    role: storage
+    data_domain: [world-secrets, environment-variables]
     desc: Secure storage and environment variables service for Decentraland worlds
     owner: null
     calls: [worlds-content-server(HTTP)]
     called_by: []
   worlds-content-server:
     layer: CN
-    desc: Content server for Decentraland Worlds (named scenes)
+    role: content,gateway
+    data_domain: [worlds, named-scenes, world-permissions, worlds-access]
+    desc: Content server for Decentraland Worlds (named scenes). Mange access to worlds
     owner: null
     calls: [social-service-ea(HTTP)]
     called_by: [world-storage-service(HTTP), comms-gatekeeper(HTTP), asset-bundle-registry(HTTP)]

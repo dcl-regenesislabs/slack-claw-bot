@@ -11,6 +11,17 @@ calls:
 
 called_by: []
 
+ai_context: |
+  realm-provider is a discovery service. It provides routing information — which Catalyst nodes
+  to connect to, realm configuration, hot scene rankings — but does NOT authenticate or block users.
+
+  ## Important: discovery only, not an access control gateway
+  Despite the word "gateway" appearing in some OpenAPI descriptions (referring to routing clients
+  to optimal Catalyst nodes), realm-provider has no auth mechanisms and cannot enforce access
+  control. Never add ban checks, permission checks, or any access enforcement to realm-provider.
+  It is role: discovery in the service index — use role: gateway or role: rt-gateway services
+  (comms-gatekeeper, comms-message-sfu) for any enforcement logic.
+
 # ─── DETAILED DOCS (api spec, full context, readme) ───────────
 openapi: |
   openapi: 3.1.0

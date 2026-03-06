@@ -91,13 +91,19 @@ openapi: |
               application/json:
                 schema:
                   $ref: '#/components/schemas/About'
-          '404':
-            description: World not found
+          '401':
+            description: World owner has exceeded storage quota
             content:
               application/json:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
-  
+          '404':
+            description: World not found or has no deployed scenes
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
     /world/{world_name}/scenes:
       get:
         tags:
@@ -1735,25 +1741,34 @@ openapi: |
   
       SharedSecretPermissionSetting:
         type: object
+        description: |
+          Password-based access restriction. The secret is bcrypt-hashed before storage.
+          Access validation is enforced by comms-gatekeeper at connection time, NOT by this
+          server's HTTP API. There is no dedicated HTTP endpoint on this server for presenting
+          the secret — clients submit it through the comms connection flow.
         properties:
           type:
             type: string
             enum: [shared-secret]
           secret:
             type: string
-            description: Hashed secret (only set on creation, not returned in GET)
+            description: Bcrypt-hashed secret (only set on creation, not returned in GET responses)
         required:
           - type
   
       NFTOwnershipPermissionSetting:
         type: object
+        description: |
+          NFT-gated access restriction. Access is granted to wallets that own the specified NFT.
+          NOTE: NFT ownership verification in the access checker is currently a partial implementation
+          (returns false as a TODO). Access validation is enforced by comms-gatekeeper at connection time.
         properties:
           type:
             type: string
             enum: [nft-ownership]
           nft:
             type: string
-            description: NFT contract address and token ID
+            description: NFT URN (e.g. urn:decentraland:matic:collections-v2:0x...:tokenId)
         required:
           - type
           - nft
@@ -2234,11 +2249,19 @@ ai_context: |
   - Communication: LiveKit (optional, for comms adapter configuration)
   
   **Key Concepts:**
-  
+
   - **World**: A scene identified by a DCL name rather than parcel coordinates
   - **Addressable URN**: Entity URN format enabling global portable experiences and single-scene loading
   - **Global Portable Experience**: Experiences loaded for all users (via GLOBAL_PX query parameter)
   - **Single Scene**: Load a specific scene instead of Genesis City (via SPACE query parameter)
+
+  **Private Worlds / Access Restrictions:**
+
+  - Worlds can restrict visitor access via `worlds.access` (JSONB): `unrestricted`, `allow-list`, `shared-secret`, or `nft-ownership`
+  - **This server's HTTP API does NOT enforce access restrictions.** Public endpoints (`GET /worlds`, `GET /world/{name}/about`) always return world data regardless of access settings — private worlds are still publicly discoverable via the API
+  - Access restriction enforcement happens at **comms-gatekeeper** at WebRTC/LiveKit connection time; this server exposes `GET /world/{name}/permissions` so comms-gatekeeper can validate access
+  - `WorldInfo` (returned by `GET /worlds`) does NOT include the world's access type — callers must query `GET /world/{name}/permissions` separately to determine if a world is private
+  - `nft-ownership` access type is partially implemented (access checker currently returns `false` as a TODO)
   
   **Deployment Requirements:**
   
@@ -2247,18 +2270,18 @@ ai_context: |
   
   **Database Schema:**
   
-  - **Tables**: `worlds` (world deployments, permissions, metadata), `blocked` (blocked wallets), `migrations` (migration tracking)
-  - **Key Columns**: `worlds.name` (PK), `worlds.entity_id`, `worlds.permissions` (JSON), `worlds.owner`, `worlds.size`
-  - **Permissions**: Stored as JSON with `deployment`, `access`, and `streaming` settings (allow-list, unrestricted, shared-secret, NFT ownership)
+  - **Tables**: `worlds` (world-level config and access settings), `world_scenes` (scene deployments), `world_permissions` (deployment/streaming grants), `world_permission_parcels` (parcel-level restrictions), `blocked` (blocked wallets)
+  - **Key Columns**: `worlds.name` (PK), `worlds.access` (JSONB NOT NULL — stores access control settings), `worlds.owner`; scene data (`entity_id`, `size`, `deployer`, `parcels`) lives in `world_scenes`, not `worlds`
+  - **Access vs Permissions**: `worlds.access` (JSONB) stores visitor access settings (unrestricted/allow-list/shared-secret/nft-ownership); `world_permissions` table stores deployment and streaming grants (allow-list only)
   - **Full Documentation**: See [docs/database-schema.md](docs/database-schema.md) for detailed schema, column definitions, and relationships
   
   ## Database Notes for AI Agents
   
   1. **Case Sensitivity**: All world names and Ethereum addresses are stored in lowercase
-  2. **JSON Columns**: The `permissions`, `entity`, and `deployment_auth_chain` columns use PostgreSQL JSON type
+  2. **JSON/JSONB Columns**: `worlds.access` (JSONB) stores visitor access settings; `world_scenes.entity` (JSONB) and `world_scenes.deployment_auth_chain` (JSON) store scene data
   3. **Null Handling**: `entity_id` can be NULL if a world record exists but no deployment has been made
   4. **Size Calculation**: The `size` field is computed from content file sizes, not stored directly in entity
-  5. **Permission Validation**: Permission checks are handled in application layer (`src/logic/permissions-checker.ts`)
+  5. **Permission Validation**: Deployment/streaming permission checks handled in application layer (`src/logic/permissions-checker.ts`); access (visitor) restrictions validated via `src/logic/access-checker/component.ts`
   6. **Owner Validation**: The `owner` field is validated against blockchain via `nameOwnership` component
   7. **Migration System**: Migrations are auto-executed on startup via `migrationExecutor` component
   8. **Storage Separation**: Entity content files are stored separately in S3/disk storage, not in the database
