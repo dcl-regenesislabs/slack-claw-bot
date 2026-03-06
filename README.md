@@ -50,7 +50,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `SLACK_APP_TOKEN` | Yes | App-level token for Socket Mode (`xapp-...`) |
 | `GITHUB_TOKEN` | Yes | GitHub PAT for `gh` CLI |
 | `ANTHROPIC_OAUTH_REFRESH_TOKEN` | No* | Anthropic OAuth refresh token (see Auth section) |
-| `MODEL` | No | Model override (default: `claude-sonnet-4-5`) |
+| `MODEL` | No | Model override (default: `claude-sonnet-4-5`). PR reviews always use `claude-opus-4-6` regardless of this setting. |
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
 | `UPSTASH_REDIS_REST_URL` | No | Upstash Redis URL for OAuth token persistence |
 | `UPSTASH_REDIS_REST_TOKEN` | No | Upstash Redis token |

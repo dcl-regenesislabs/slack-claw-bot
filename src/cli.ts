@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
-import { initAgent, runAgent } from "./agent.js";
+import { initAgent, runAgent, REVIEW_MODEL, PR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 
 const dryRun = process.argv.includes("--dry-run");
 const positionalArgs = process.argv.slice(2).filter((a) => a !== "--dry-run");
@@ -18,13 +18,20 @@ function streamingEvents(): EventEmitter {
   return events;
 }
 
+function detectReviewModel(content: string): string | undefined {
+  const isReview =
+    PR_URL_PATTERN.test(content) ||
+    REVIEW_KEYWORD_PATTERN.test(content);
+  return isReview ? REVIEW_MODEL : undefined;
+}
+
 if (positionalArgs.length > 0) {
   // One-shot mode
   const threadContent = positionalArgs.join(" ");
   if (dryRun) console.log("Dry run enabled — agent will not execute commands");
 
   try {
-    await runAgent({ threadContent, dryRun, events: streamingEvents() });
+    await runAgent({ threadContent, dryRun, model: detectReviewModel(threadContent), events: streamingEvents() });
     console.log();
   } catch (err) {
     console.error("Error:", err instanceof Error ? err.message : err);
@@ -56,7 +63,7 @@ if (positionalArgs.length > 0) {
     console.log("\n--- Agent running ---\n");
 
     try {
-      await runAgent({ threadContent, dryRun, events: streamingEvents() });
+      await runAgent({ threadContent, dryRun, model: detectReviewModel(threadContent), events: streamingEvents() });
       console.log("\n\n--- Done ---\n");
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : err);
