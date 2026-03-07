@@ -5,191 +5,166 @@ description: Plan backend changes, investigate Decentraland service architecture
 
 # Decentraland Backend — Service Architecture
 
-This skill provides access to LLM-optimized snapshots of all Decentraland core backend services.
+This skill provides access to LLM-optimized snapshots of all Decentraland core backend services via the `@dcl/jarvis` package.
 
-## Files
+## CRITICAL: Never answer from general knowledge
 
-All files live in `skills/plan/`:
+Do **NOT** answer based on prior knowledge. The triage workflow below is mandatory for every question.
 
-| File | Purpose | ~Tokens |
-|------|---------|---------|
-| `skills/plan/index.yaml` | **Start here** — one entry per service: layer, owner, calls, called_by | ~600 |
-| `skills/plan/services.yaml` | Comprehensive index with metadata (no dep graph) | ~3,500 |
-| `skills/plan/services-graph.yaml` | Dependency graph only — on-demand lookup | ~2,500 |
-| `skills/plan/service_{name}.yaml` | Per-service: compact header + raw docs (openapi, readme, ai_context) | varies |
+**Pre-response checklist** (complete all before writing your answer):
+- [ ] Read `index.yaml` and `graph.yaml`
+- [ ] Read `{name}.yaml` for every candidate
+- [ ] Cloned every candidate repo and read `ai-agent-context`, `README.md`, OpenAPI spec, `src/`, and DB schema
+- [ ] For implementation plans: confirmed the user explicitly requested a new service, OR identified an existing service to extend
+
+**HARD RULE — never propose a new service unless explicitly asked:**
+**NEVER propose creating a new service** unless the user's message explicitly requests it (e.g. "create a new service", "I want a new service for X"). If the user did not explicitly ask for a new service, always extend the most appropriate existing service — even if it is imperfect. Adding endpoints, tables, handlers, or workers to an existing service is always preferred.
+
+**Never send a file path as the response.** Return the full answer in the Slack message. Use `/tmp/` as scratch space only — delete when done, never reference in response.
+
+---
+
+## Step 0 — Ensure latest manifests
+
+```bash
+INSTALLED=$(node -e "console.log(require('./node_modules/@dcl/jarvis/package.json').version)" 2>/dev/null || echo "none")
+LATEST=$(npm view @dcl/jarvis version 2>/dev/null)
+if [ "$INSTALLED" != "$LATEST" ]; then
+  echo "Updating @dcl/jarvis from $INSTALLED to $LATEST..."
+  npm install @dcl/jarvis@latest --no-save --silent
+else
+  echo "@dcl/jarvis is up to date ($INSTALLED)"
+fi
+```
+
+## Manifests
+
+All in `node_modules/@dcl/jarvis/manifests/`:
+
+| File | Purpose |
+|------|---------|
+| `index.yaml` | One entry per service: name, description, layer, repository, dependencies (~600 tokens) |
+| `graph.yaml` | Full dependency graph (~2,500 tokens) |
+| `{name}.yaml` | Per-service: team, repository, ai-agent-context URL, owned_entities, responsibilities, invariants, openapi_url, db schema_url, events, adrs |
 
 ## Triage Workflow
 
-When asked to plan a change or identify which services are involved:
+Applies to **every question** regardless of type.
 
-1. Read `skills/plan/index.yaml` — identify candidate services (layer, owner, who calls whom)
-2. Read the header of `skills/plan/service_{name}.yaml` for each candidate (stop before `# ─── DETAILED DOCS`)
-3. Only read below the separator if you need API spec / ai_context / readme details
-4. Report: involved services, call chain, owners to notify, submodules to check if source-level investigation is needed
+### Round 1 — Scan manifests
 
-## Selecting Integration Points
+1. Read `index.yaml` — identify candidate services by description, layer, dependencies
+2. Read `graph.yaml` — for each candidate, scan **both directions**:
+   - **Outbound** (what does this service call?) — already captured in `{name}.yaml` `dependencies`
+   - **Inbound** (what services list this candidate in their own `dependencies`?) — find these in `graph.yaml` and add every inbound dependent as a candidate; they may need changes too if you modify this service's API or data model
+3. For each candidate, read the **entire** `{name}.yaml`. Add to candidate list if found: `domain.concept_relationships.cross_service`, `events.publishes/consumes`, `dependencies.services`. Note for Round 2: `ai-agent-context` URL, `api.openapi_url`, `db.schema_url`, `adrs`, `service.team`, `domain.owned_entities`.
 
-Before proposing which service to modify for any feature, use `index.yaml` fields to classify candidates — do not rely on service names alone.
+### Round 2 — Inspect source (mandatory for every candidate)
 
-**Use `role` to find the right service type:**
-- Need to enforce access or block users? → look for `role: gateway` or `role: rt-gateway`
-- Need to store new domain data? → look for `role: storage` with matching `data_domain`
-- Need to issue/validate credentials? → look for `role: auth`
-- **Never add enforcement logic to `role: discovery` services** — they provide information only and have no access control mechanisms
-
-**Use `data_domain` to find where data lives:**
-- Search `data_domain` lists for the entity type you need (e.g., `bans`, `friendships`, `tokens`)
-- If no service owns it yet, add it to the most domain-appropriate `role: storage` service
-
-**Use `called_by` as a risk signal:**
-- Services with many callers are shared infrastructure — changes have wide blast radius
-- Prefer adding logic to a service with fewer callers when possible
-
-**Checklist before finalising integration points:**
-1. What `role` does each candidate service have? Does it match what I need?
-2. Which service has the relevant `data_domain` entries?
-3. Does the candidate already have auth/enforcement patterns? (check `ai_context` and `openapi`)
-4. Is the candidate in the actual request/connection path? (trace `calls`/`called_by` graph)
-
-## Ownership Queries
-
-When asked "who owns X?":
-
-1. Read `skills/plan/index.yaml` — find the service and check the `owner` field
-2. If `owner: null`, read the service header in `skills/plan/service_{name}.yaml` — the `ai_context` or `readme` sections may name a team or contact
-3. Report the owner/team name and the service's GitHub URL (from the `github` field)
-
-## Implementation / Deployment Questions
-
-When asked "how do I implement X?" or "how do I deploy/create Y?":
-
-1. Identify the relevant service(s) from `skills/plan/index.yaml`
-2. Read the service header from `skills/plan/service_{name}.yaml`
-3. Read `ai_context` — it describes architecture, patterns, and key conventions
-4. Read `openapi` if the question involves an API endpoint
-5. Read `readme` for deployment steps, configuration, and environment setup
-6. If the YAML context is insufficient, **clone the repo and inspect the source** (see below)
-
-When returning code examples in your response, always use code blocks with the appropriate language tag.
-
-## When to Inspect Source Code
-
-Inspect source code when:
-- The YAML docs don't fully answer the implementation question
-- The user asks about specific code patterns, file structure, or how something works internally
-- You need to find an example of how an existing endpoint or feature was implemented
-
-**Do NOT use `git clone` or `gh repo clone`** — use the GitHub API via `gh api` to read files directly without cloning:
+Clone all candidate repos upfront, browse freely, delete when done:
 
 ```bash
-# List directory contents
-gh api repos/<owner>/<repo>/contents/<path>
+# Clone all candidate repos (shallow)
+git clone --depth=1 https://github.com/decentraland/<repo> /tmp/<repo>
 
-# Read a specific file (decoded from base64)
-gh api repos/<owner>/<repo>/contents/<path/to/file.ts> --jq '.content' | base64 -d
+# Read docs — MANDATORY
+cat /tmp/<repo>/README.md
+cat /tmp/<repo>/docs/ai-agent-context.md   # path derived from service.ai-agent-context URL
+cat /tmp/<repo>/docs/openapi.yaml          # path derived from api.openapi_url; or curl if external URL
+
+# Browse and search source freely
+ls /tmp/<repo>/src/
+find /tmp/<repo>/src -name "*.ts" | head -50
+grep -r "<pattern>" /tmp/<repo>/src/
+
+# DB schema
+ls /tmp/<repo>/src/db 2>/dev/null
+ls /tmp/<repo>/migrations 2>/dev/null
+
+# If question mentions Explorer / client / Unity / renderer — also clone:
+git clone --depth=1 https://github.com/decentraland/unity-explorer /tmp/unity-explorer
+find /tmp/unity-explorer/Explorer/Assets/Scripts -name "*.cs" | xargs grep -l "<service-pattern>"
+
+# Never clone decentraland/explorer-website
+
+# Clean up all clones when done
+rm -rf /tmp/<repo> /tmp/unity-explorer
 ```
 
-Start by listing the repo root or `src/` to find relevant files, then read specific files as needed. Return any relevant code snippets in properly formatted code blocks.
+After reading: add any newly discovered services to the candidate list and re-check `index.yaml` for them.
 
-## Layer Codes
+### Round 3+ — Repeat until stable
 
-| Code | Meaning |
-|------|---------|
-| RT | Realtime (WebSocket, LiveKit) |
-| CN | Content (Catalyst, asset pipeline) |
-| FS | Feature servers (business logic) |
-| LIB | Shared library (no HTTP surface) |
-| OTHER | Infra / tooling |
+Repeat Round 2 for each new candidate. Stop when a full pass adds no new candidates.
 
+### Final report
+
+**How-to question** ("how to X", "how do I X", "how can I deploy X"):
+- Services involved and why
+- Step-by-step with commands/code snippets from the repos
+- Key gotchas, required config, auth considerations
+
+**Implementation plan** (Notion URL with no context, OR "I need to create/implement X", OR "plan: \<feature\>"):
+- Verify HARD RULE internally (see CRITICAL section)
+- Re-read Design Principles below and apply "extend never create", layer placement, Well-Known Components
+- Start with **Repos involved** list, then full 9-section plan (see Implementation Plan Structure below)
+
+## Integration Point Selection
+
+**Use `layer`** to find the right service type:
+
+| Value | Use for |
+|-------|---------|
+| `real-time` | WebSocket/LiveKit (comms, gatekeeper) |
+| `content` | Catalyst, asset pipeline |
+| `feature-servers` / `Feature Servers Layer` | Business logic — add most features here |
+| `shared-library` / `Shared Libraries` | npm packages, no HTTP surface |
+| `entry-points` | User-facing gateways — avoid adding logic here |
+| `Other` | Infra / tooling |
+
+**Use `domain.owned_entities`** to find where data lives. If no service owns it yet, add to the most domain-appropriate `feature-servers` service.
+
+Clone repos to `/tmp/` with `--depth=1`. Delete all clones when done.
 
 ## Implementation Plan Structure
 
-When delivering a backend implementation plan, include:
+Always open with:
+```
+**Repos involved:**
+- `decentraland/<repo1>` — <one-line role>
+- `decentraland/<repo2>` — <one-line role>
+```
 
-**1. Architecture Decision**
-- Which services to modify/create and why
-- Rationale for service selection (with alternatives considered and rejected)
-- Clear statement of "extend vs create" justification
+Then the 9 sections:
 
-**2. Implementation Components** (in order of dependencies)
-- Database schema (migrations, tables, indexes)
-- Data access layer (DB adapters)
-- Domain logic (business components)
-- API layer (controllers, handlers, routes)
-- Integration points (service-to-service calls)
-- Supporting infrastructure (cron jobs, workers, events)
+1. **Architecture Decision** — which services to modify/create and why
+2. **Implementation Components** — DB schema → adapters → domain logic → API layer → integrations → infra
+3. **Data Flow Diagrams** — Mermaid sequence diagrams for happy path + error path, labelled with component/endpoint names
+4. **Files to Create/Modify** — grouped by repo, new vs modified, include test files
+5. **Configuration** — env vars (.env.default entries), feature flags, service-to-service credentials
+6. **Implementation Order** — Phase 1: storage/API · Phase 2: integrations · Phase 3: client (each independently deployable)
+7. **Dependencies** — new npm packages, service dependencies, existing components to reuse
+8. **Testing Strategy** — unit (domain logic), integration (API endpoints), service integration (cross-service)
+9. **Deployment Notes** — migration order, service deploy order, rollback plan
 
-**3. Data Flow Diagrams**
-- Use Mermaid sequence diagrams for key user flows
-- Show: actors, services, calls, decisions (e.g., "if banned → 403")
-- Include at least: primary happy path, primary error path
-- Label each step with component/endpoint names
+## Design Principles
 
-**4. Files to Create/Modify**
-- List every file that needs changes
-- Group by service/repository
-- Distinguish "new files" from "modified files"
-- Include test files
+**Default: extend, never create.** A new service requires both: genuinely distinct domain AND the feature would fundamentally distort an existing model. Adding endpoints/tables alone is not enough.
 
-**5. Configuration**
-- Environment variables (.env.default entries)
-- Feature flags
-- Service-to-service credentials/URLs
+**Layers:** `real-time` (WebSocket/LiveKit) · `content` (Catalyst/assets) · `feature-servers` (business logic) · `shared-library` (no HTTP) · `Other` (infra). No cross-layer leakage.
 
-**6. Implementation Order**
-- Phase 1: Core storage/API (database, adapters, domain logic)
-- Phase 2: Integration (service-to-service calls, events)
-- Phase 3: Client/UI (if applicable)
-- Each phase should be independently deployable and testable
+**Well-Known Components pattern:**
+- `AppComponents` + `initComponents()` — one instance per component, no global singletons
+- `adapters/` — wrap external I/O (DB, HTTP, Redis, queues); isolate from domain logic
+- `logic/` — business rules via interfaces only; no HTTP/transport details
+- `controllers/handlers/` — thin: parse input → call components → map to HTTP errors
 
-**7. Dependencies**
-- List new npm packages (if any)
-- List service-to-service dependencies
-- Note existing components to reuse
+**API:** Follow existing patterns (routes, status codes, response envelopes). Validate inputs at the edge. Surface domain errors as typed results; convert to HTTP only in controllers.
 
-**8. Testing Strategy**
-- Unit tests for domain logic
-- Integration tests for API endpoints
-- Service integration tests (for cross-service calls)
+**Communication:** Prefer SNS/SQS over direct HTTP for async. Design handlers to be idempotent.
 
-**9. Deployment Notes**
-- Database migrations (run before code deploy)
-- Service deployment order
-- Rollback plan
+**Observability:** Use `createLogComponent`, `createMetricsComponent`, tracing, health-check from shared libs.
 
-## Design Principles (apply to all implementation plans)
+**Testing:** Side-effect-free business logic. Use `test/components.ts` for in-memory mocks. Update `README.md` and `docs/ai-agent-context.md` alongside code changes.
 
-**Architecture & Reuse**
-- **Default: extend, never create.** Before proposing a new service, identify every existing service that could accommodate this feature, and explain concretely why each one cannot. If an existing service *can* handle it — even imperfectly — extend it.
-- A new service is only justified when *both* conditions hold: (1) the domain is genuinely distinct from all existing services, *and* (2) adding this feature would fundamentally distort the existing service's model — not just add new endpoints or tables.
-- **Ownership is never a justification for a new service.** All Decentraland services (whether used by users, creators, or internally) are owned and coded by core engineering. Different stakeholders or governance models do not create different service owners.
-- When creating a new service: follow the Well-Known Components pattern, add it to `skills/plan/index.yaml` and architecture docs.
-- Place code in the correct layer: RT (WebSocket/LiveKit), CN (Catalyst/assets), FS (feature servers), LIB (no HTTP), OTHER (infra). No cross-layer leakage.
-
-**Well-Known Components pattern (mandatory)**
-- `AppComponents` interface + `initComponents()` factory — one instance per component, no global singletons. Favor small, focused interfaces; avoid "god" components.
-- **Adapters** (`adapters/`): wrap external I/O (DB, HTTP, Redis, queues); isolate protocols from domain logic.
-- **Domain logic** (`logic/`): implement business rules via component interfaces only — no HTTP/transport details.
-- **Controllers** (`controllers/handlers/`): thin — parse input, call `context.components`, map to HTTP/errors. Never construct components inline.
-
-**API & Error Design**
-- Follow existing HTTP patterns (routes, status codes, response envelopes) from similar services.
-- Validate all external inputs at the edge using shared schema validators.
-- Surface domain errors as typed results; convert to HTTP errors only in controllers.
-
-**Communication**
-- Prefer SNS/SQS over direct HTTP for async service-to-service calls. Design event handlers to be idempotent.
-
-**Observability**
-- Use `createLogComponent`, `createMetricsComponent`, tracing, and health-check components from shared libs.
-
-**Testing & Documentation**
-- Keep business logic side-effect-free; inject I/O via interfaces. Use `test/components.ts` for in-memory mocks.
-- Update `README.md` and `docs/ai-agent-context.md` alongside code changes.
-
-**Performance**
-- Use existing cache (in-memory/Redis) and DB components. Avoid unbounded in-memory growth; respect rate limits.
-
-**Delivery & Collaboration**
-- Ship in small, reversible increments; use feature flags for risky changes. Ensure DB migrations are backward-compatible.
-- Before new components or APIs, check existing patterns and confirm with owning teams.
+**Delivery:** Small reversible increments; feature flags for risky changes; backward-compatible DB migrations.
