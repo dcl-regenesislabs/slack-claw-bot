@@ -11,6 +11,9 @@ export interface Config {
   upstashRedisToken?: string;
   logChannelId?: string;
   healthPort?: number;
+  notionToken?: string;
+  notionShapeDbId?: string;
+  notionShapeParentId?: string;
 }
 
 export function loadConfig(): Config {
@@ -25,6 +28,9 @@ export function loadConfig(): Config {
     upstashRedisToken: process.env.UPSTASH_REDIS_REST_TOKEN,
     logChannelId: process.env.LOG_CHANNEL_ID,
     healthPort: process.env.HEALTH_PORT ? parseInt(process.env.HEALTH_PORT, 10) : undefined,
+    notionToken: process.env.NOTION_TOKEN,
+    notionShapeDbId: process.env.NOTION_SHAPE_DB_ID,
+    notionShapeParentId: process.env.NOTION_SHAPE_PARENT_ID,
   };
 }
 
