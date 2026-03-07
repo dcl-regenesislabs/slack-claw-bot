@@ -1,7 +1,7 @@
-import { App } from "@slack/bolt";
+import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
-import { runAgent, syncAuth } from "./agent.js";
+import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
 
 const nameCache = new Map<string, string>();
@@ -18,6 +18,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     token: config.slackBotToken,
     appToken: config.slackAppToken,
     socketMode: true,
+    logLevel: LogLevel.INFO,
   });
 
   botToken = config.slackBotToken;
@@ -49,6 +50,11 @@ export async function startSlackBot(config: Config): Promise<void> {
     const threadTs = event.thread_ts || event.ts;
     const text = event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
 
+    if (event.user && await isExternalOrGuest(client, event.user)) {
+      console.warn(`[slack] Denied request from non-org user ${event.user}`);
+      return;
+    }
+
     const [userName, channelName] = await Promise.all([
       event.user ? resolveUserName(client, event.user) : Promise.resolve("unknown"),
       resolveChannelName(client, event.channel),
@@ -57,18 +63,27 @@ export async function startSlackBot(config: Config): Promise<void> {
     console.log(`[slack] Triggered by ${userName} in #${channelName} [skill: ${skill}]: ${text}`);
 
     function react(name: string): Promise<unknown> {
-      return client.reactions.add({ channel: event.channel, timestamp: event.ts, name });
+      return client.reactions.add({ channel: event.channel, timestamp: event.ts, name })
+        .catch((err) => { if (err.data?.error !== "already_reacted") throw err; });
     }
     function unreact(name: string): Promise<unknown> {
-      return client.reactions.remove({ channel: event.channel, timestamp: event.ts, name });
+      return client.reactions.remove({ channel: event.channel, timestamp: event.ts, name })
+        .catch((err) => { if (err.data?.error !== "no_reaction") throw err; });
     }
 
     const submission = scheduler.submit(threadTs, async () => {
       await react("hourglass_flowing_sand");
 
       const threadContent = await fetchThread(client, event.channel, threadTs);
-
-      const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName });
+      const isReview =
+        PR_URL_PATTERN.test(threadContent) ||
+        REVIEW_KEYWORD_PATTERN.test(text);
+      const model = isReview ? REVIEW_MODEL : undefined;
+      const { text: response, cost, tokens } = await runAgent({
+        threadContent,
+        triggeredBy: userName,
+        model,
+      });
       await syncAuth();
 
       await unreact("hourglass_flowing_sand");
@@ -131,6 +146,10 @@ export async function startSlackBot(config: Config): Promise<void> {
     });
   });
 
+  app.error(async (error) => {
+    console.error("[slack] Bolt error:", error);
+  });
+
   await app.start();
   console.log("Slack bot is running");
 }
@@ -148,6 +167,35 @@ async function cachedLookup(
     return name;
   } catch {
     return key;
+  }
+}
+
+interface AuthEntry {
+  denied: boolean;
+  cachedAt: number;
+}
+
+const authCache = new Map<string, AuthEntry>();
+const AUTH_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+async function isExternalOrGuest(client: WebClient, userId: string): Promise<boolean> {
+  const cached = authCache.get(userId);
+  if (cached && Date.now() - cached.cachedAt <= AUTH_CACHE_TTL_MS) return cached.denied;
+
+  try {
+    const info = await client.users.info({ user: userId });
+    const user = info.user as any;
+    const denied = Boolean(user?.is_restricted || user?.is_ultra_restricted || user?.is_stranger);
+    authCache.set(userId, { denied, cachedAt: Date.now() });
+
+    // Cache the user name too, so resolveUserName won't re-fetch
+    const name = info.user?.real_name || info.user?.name;
+    if (name) nameCache.set(userId, name);
+
+    return denied;
+  } catch (err) {
+    console.error(`[slack] Failed to check user ${userId}, denying by default:`, err);
+    return true;
   }
 }
 

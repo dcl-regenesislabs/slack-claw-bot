@@ -34,7 +34,12 @@ export interface RunOptions {
   dryRun?: boolean;
   triggeredBy?: string;
   events?: EventEmitter;
+  model?: string;
 }
+
+export const REVIEW_MODEL = "claude-opus-4-6";
+export const PR_URL_PATTERN = /github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
+export const REVIEW_KEYWORD_PATTERN = /\breview\b/i;
 
 export interface RunResult {
   text: string;
@@ -125,6 +130,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   }
 
   const { threadContent, dryRun, triggeredBy, events } = options;
+  const effectiveModelId = options.model || modelId;
   const sessionManager = SessionManager.inMemory();
 
   const systemPrompt = readFileSync(
@@ -133,9 +139,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   ).trim();
 
   const modelRegistry = new ModelRegistry(authStorage);
-  const model = modelRegistry.find("anthropic", modelId);
+  const model = modelRegistry.find("anthropic", effectiveModelId);
   if (!model) {
-    throw new Error(`Model "anthropic/${modelId}" not found`);
+    throw new Error(`Model "anthropic/${effectiveModelId}" not found`);
   }
 
   const cwd = process.cwd();
@@ -169,7 +175,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
     console.log("[agent] running prompt...");
     console.log("[agent] prompt:", prompt.slice(0, 200));
-    console.log("[agent] model:", modelId);
+    console.log("[agent] model:", effectiveModelId);
     await session.prompt(prompt);
 
     const messageCount = session.messages.length;

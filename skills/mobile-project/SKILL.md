@@ -107,6 +107,41 @@ Cross-platform metaverse client combining Godot Engine 4.5.1 (custom fork) + Rus
 - Use `planning` or `need definition` when requirements are vague
 - Add `claw-created` to all issues created by this bot
 
+## Bug Report Template
+
+When creating bug issues in `decentraland/godot-explorer`, format the issue body using these headers to match the repo's bug report template. Always include the `bug` label.
+
+```markdown
+### Platform
+<!-- Android, iOS, Web Client -->
+
+### App Version
+<!-- e.g. 0.5.2, or "Not specified" -->
+
+### Device Information
+<!-- e.g. Samsung Galaxy S24, iPhone 15 Pro, or "Not specified" -->
+
+### Issue Description
+<!-- Clear summary of what's broken -->
+
+### Expected Behavior
+<!-- What should happen instead -->
+
+### Screenshots / Media
+<!-- Only include this section if media was shared in the thread -->
+
+### Steps to Reproduce
+<!-- Numbered steps to trigger the bug -->
+
+### Occurrence
+<!-- How often: 100%, ~75%, ~50%, <25% -->
+```
+
+- Extract all available information from the Slack thread
+- Use "Not specified" for required fields when information is missing
+- Omit the "Screenshots / Media" section entirely if no media was shared
+- Always include the `bug` label alongside other relevant labels
+
 ## Architecture
 
 ### Directory Structure
