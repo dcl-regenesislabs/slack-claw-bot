@@ -1,16 +1,34 @@
-FROM node:20-alpine
+# ---- Builder stage ----
+FROM node:24-alpine AS builder
 
-RUN apk add --no-cache tini github-cli
+RUN apk add --no-cache build-base
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile
 
 COPY tsconfig.json ./
 COPY src/ src/
+
+RUN yarn build
+
+# ---- Production stage ----
+FROM node:24-alpine
+
+RUN apk add --no-cache tini github-cli
+
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+COPY --from=builder /app/dist dist/
+COPY --from=builder /app/node_modules node_modules/
+COPY --from=builder /app/package.json package.json
+
+# Runtime assets read by agent at startup
 COPY prompts/ prompts/
 COPY skills/ skills/
 
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["npx", "tsx", "src/index.ts"]
+CMD ["node", "--enable-source-maps", "--abort-on-uncaught-exception", "--unhandled-rejections=strict", "dist/index.js"]

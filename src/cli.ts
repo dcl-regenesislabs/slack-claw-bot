@@ -6,12 +6,6 @@ import { initAgent, runAgent, REVIEW_MODEL, PR_URL_PATTERN, REVIEW_KEYWORD_PATTE
 const dryRun = process.argv.includes("--dry-run");
 const positionalArgs = process.argv.slice(2).filter((a) => a !== "--dry-run");
 
-await initAgent({
-  anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
-  githubToken: process.env.GITHUB_TOKEN,
-  model: process.env.MODEL,
-});
-
 function streamingEvents(): EventEmitter {
   const events = new EventEmitter();
   events.on("text", (delta: string) => process.stdout.write(delta));
@@ -19,57 +13,68 @@ function streamingEvents(): EventEmitter {
 }
 
 function detectReviewModel(content: string): string | undefined {
-  const isReview =
-    PR_URL_PATTERN.test(content) ||
-    REVIEW_KEYWORD_PATTERN.test(content);
+  const isReview = PR_URL_PATTERN.test(content) || REVIEW_KEYWORD_PATTERN.test(content);
   return isReview ? REVIEW_MODEL : undefined;
 }
 
-if (positionalArgs.length > 0) {
-  // One-shot mode
-  const threadContent = positionalArgs.join(" ");
-  if (dryRun) console.log("Dry run enabled — agent will not execute commands");
-
-  try {
-    await runAgent({ threadContent, dryRun, model: detectReviewModel(threadContent), events: streamingEvents() });
-    console.log();
-  } catch (err) {
-    console.error("Error:", err instanceof Error ? err.message : err);
-    process.exit(1);
-  }
-} else {
-  // Interactive REPL mode
-  console.log("CLI test mode");
-  if (dryRun) console.log("Dry run enabled — agent will not execute commands");
-  console.log("Type your message (multi-line: end with an empty line):\n");
-
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const lines: string[] = [];
-
-  rl.on("line", (line) => {
-    if (line === "" && lines.length > 0) {
-      const threadContent = lines.join("\n");
-      lines.length = 0;
-      handleInput(threadContent);
-    } else {
-      lines.push(line);
-    }
+async function main() {
+  await initAgent({
+    anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
+    githubToken: process.env.GITHUB_TOKEN,
+    model: process.env.MODEL,
   });
 
-  rl.on("close", () => process.exit(0));
-
-  async function handleInput(threadContent: string) {
-    rl.pause();
-    console.log("\n--- Agent running ---\n");
+  if (positionalArgs.length > 0) {
+    // One-shot mode
+    const threadContent = positionalArgs.join(" ");
+    if (dryRun) console.log("Dry run enabled — agent will not execute commands");
 
     try {
       await runAgent({ threadContent, dryRun, model: detectReviewModel(threadContent), events: streamingEvents() });
-      console.log("\n\n--- Done ---\n");
+      console.log();
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : err);
+      process.exit(1);
     }
+  } else {
+    // Interactive REPL mode
+    console.log("CLI test mode");
+    if (dryRun) console.log("Dry run enabled — agent will not execute commands");
+    console.log("Type your message (multi-line: end with an empty line):\n");
 
-    console.log("Type your next message (end with an empty line):\n");
-    rl.resume();
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const lines: string[] = [];
+
+    rl.on("line", (line) => {
+      if (line === "" && lines.length > 0) {
+        const threadContent = lines.join("\n");
+        lines.length = 0;
+        handleInput(threadContent);
+      } else {
+        lines.push(line);
+      }
+    });
+
+    rl.on("close", () => process.exit(0));
+
+    async function handleInput(threadContent: string) {
+      rl.pause();
+      console.log("\n--- Agent running ---\n");
+
+      try {
+        await runAgent({ threadContent, dryRun, model: detectReviewModel(threadContent), events: streamingEvents() });
+        console.log("\n\n--- Done ---\n");
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : err);
+      }
+
+      console.log("Type your next message (end with an empty line):\n");
+      rl.resume();
+    }
   }
 }
+
+main().catch((err) => {
+  console.error("Error:", err instanceof Error ? err.message : err);
+  process.exit(1);
+});
