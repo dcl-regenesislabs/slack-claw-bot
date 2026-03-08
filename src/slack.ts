@@ -7,7 +7,7 @@ import { AgentScheduler } from "./concurrency.js";
 const nameCache = new Map<string, string>();
 const pendingResponses = new Map<string, string>();
 
-const LARGE_RESPONSE_THRESHOLD = 2000;
+const LARGE_RESPONSE_THRESHOLD = 3000;
 const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
 const TEXT_EXTENSIONS = new Set([".md", ".txt"]);
 
