@@ -5,5 +5,4 @@ dist/
 sessions/
 .auth.json
 .DS_Store
-temp
-tmp/
+temp/
