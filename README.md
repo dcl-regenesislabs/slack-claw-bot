@@ -7,8 +7,9 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Creates GitHub issues from Slack thread discussions
 - Searches for related issues and PRs
 - Triages and labels issues
-- Summarizes threads and answers questions about repositories
+- Summarizes threads and answers general questions
 - Knows common repository aliases via a built-in skill (e.g. `@bot create an issue in mobile`)
+- Creates Shape Up pitch pages in Notion from a brief idea (e.g. `@bot shape: add a leaderboard to the Explorer world map`)
 
 ## Prerequisites
 
@@ -56,6 +57,9 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `UPSTASH_REDIS_REST_TOKEN` | No | Upstash Redis token |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
+| `NOTION_TOKEN` | No | Notion integration token for reading/creating pages |
+| `NOTION_SHAPE_DB_ID` | No | Notion database ID where shape-up entries are created (default provided) |
+| `NOTION_SHAPE_PARENT_ID` | No | Fallback parent page ID for plain pages when `NOTION_SHAPE_DB_ID` is not set |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
@@ -106,5 +110,5 @@ src/
 test/               Unit tests (node:test)
 prompts/
   system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, github, mobile-project, pr-review, repos, triage)
+skills/             Agent skill definitions (create-issue, github, mobile-project, plan, pr-review, repos, shape, triage)
 ```
