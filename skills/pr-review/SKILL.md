@@ -49,7 +49,7 @@ When asked to review a PR (not just summarize):
 
 - Fetch PR details (title, body, state, CI status)
 - Fetch the full diff
-- If needed, clone the repo to `/tmp/` to read changed files in full context
+- If needed, clone the repo to `tmp/` to read changed files in full context
 
 ### 2. Analyze the code
 
