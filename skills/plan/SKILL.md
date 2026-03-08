@@ -20,7 +20,7 @@ Do **NOT** answer based on prior knowledge. The triage workflow below is mandato
 **HARD RULE — never propose a new service unless explicitly asked:**
 **NEVER propose creating a new service** unless the user's message explicitly requests it (e.g. "create a new service", "I want a new service for X"). If the user did not explicitly ask for a new service, always extend the most appropriate existing service — even if it is imperfect. Adding endpoints, tables, handlers, or workers to an existing service is always preferred.
 
-**Never send a file path as the response.** Return the full answer in the Slack message. Use `/tmp/` as scratch space only — delete when done, never reference in response.
+**Never send a file path as the response.** Return the full answer in the Slack message. Use `/tmp/` as scratch space — delete any temporary files you create (e.g. drafted plans, notes), but never delete cloned repos.
 
 ---
 
@@ -61,11 +61,15 @@ Applies to **every question** regardless of type.
 
 ### Round 2 — Inspect source (mandatory for every candidate)
 
-Clone all candidate repos upfront, browse freely, delete when done:
+Clone all candidate repos upfront, browse freely. Only clone repos under the `decentraland` or `dcl-regenesislabs` org. Repos are kept in `/tmp/` — never delete them:
 
 ```bash
-# Clone all candidate repos (shallow)
-git clone --depth=1 https://github.com/decentraland/<repo> /tmp/<repo>
+# Clone or update a repo (shallow) — only decentraland org
+if [ -d /tmp/<repo> ]; then
+  git -C /tmp/<repo> pull --ff-only
+else
+  git clone --depth=1 https://github.com/decentraland/<repo> /tmp/<repo>
+fi
 
 # Read docs — MANDATORY
 cat /tmp/<repo>/README.md
@@ -81,14 +85,15 @@ grep -r "<pattern>" /tmp/<repo>/src/
 ls /tmp/<repo>/src/db 2>/dev/null
 ls /tmp/<repo>/migrations 2>/dev/null
 
-# If question mentions Explorer / client / Unity / renderer — also clone:
-git clone --depth=1 https://github.com/decentraland/unity-explorer /tmp/unity-explorer
+# If question mentions Explorer / client / Unity / renderer — also clone/update:
+if [ -d /tmp/unity-explorer ]; then
+  git -C /tmp/unity-explorer pull --ff-only
+else
+  git clone --depth=1 https://github.com/decentraland/unity-explorer /tmp/unity-explorer
+fi
 find /tmp/unity-explorer/Explorer/Assets/Scripts -name "*.cs" | xargs grep -l "<service-pattern>"
 
 # Never clone decentraland/explorer-website
-
-# Clean up all clones when done
-rm -rf /tmp/<repo> /tmp/unity-explorer
 ```
 
 After reading: add any newly discovered services to the candidate list and re-check `index.yaml` for them.
@@ -124,7 +129,7 @@ Repeat Round 2 for each new candidate. Stop when a full pass adds no new candida
 
 **Use `domain.owned_entities`** to find where data lives. If no service owns it yet, add to the most domain-appropriate `feature-servers` service.
 
-Clone repos to `/tmp/` with `--depth=1`. Delete all clones when done.
+Clone repos to `/tmp/` with `--depth=1`. Only clone repos under the `decentraland` or `dcl-regenesislabs`  org. If already present, `git pull` instead.
 
 ## Implementation Plan Structure
 
