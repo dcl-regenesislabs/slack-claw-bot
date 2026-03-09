@@ -1,7 +1,7 @@
 # ---- Builder stage ----
 FROM node:24-alpine AS builder
 
-RUN apk add --no-cache build-base
+RUN apk add --no-cache build-base cmake python3
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ RUN yarn build
 # ---- Production stage ----
 FROM node:24-alpine
 
-RUN apk add --no-cache tini github-cli
+RUN apk add --no-cache tini github-cli curl jq
 
 ENV NODE_ENV=production
 

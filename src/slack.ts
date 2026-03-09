@@ -64,11 +64,11 @@ export async function startSlackBot(config: Config): Promise<void> {
 
     function react(name: string): Promise<unknown> {
       return client.reactions.add({ channel: event.channel, timestamp: event.ts, name })
-        .catch((err) => { if (err.data?.error !== "already_reacted") throw err; });
+        .catch((err) => { if (err.data?.error !== "already_reacted" && err.data?.error !== "message_not_found") throw err; });
     }
     function unreact(name: string): Promise<unknown> {
       return client.reactions.remove({ channel: event.channel, timestamp: event.ts, name })
-        .catch((err) => { if (err.data?.error !== "no_reaction") throw err; });
+        .catch((err) => { if (err.data?.error !== "no_reaction" && err.data?.error !== "message_not_found") throw err; });
     }
 
     const submission = scheduler.submit(threadTs, async () => {
