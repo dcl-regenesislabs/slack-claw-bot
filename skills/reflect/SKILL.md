@@ -9,7 +9,7 @@ Use this skill when asked to review recent learnings or improve your own skills.
 
 ## Review recent learnings
 
-1. Use the `memory_search` tool to find recent patterns and learnings, or read the last 7 days of daily logs directly from the memory base directory provided in context:
+1. Use the `memory-search` skill to find recent patterns and learnings, or read the last 7 days of daily logs directly from the memory base directory provided in context:
    ```bash
    ls -t <memory_base_dir>/daily/ | head -7
    ```
@@ -25,7 +25,7 @@ Use this skill when asked to review recent learnings or improve your own skills.
 
 When asked to improve your skills, or when you notice recurring patterns that a skill update would fix:
 
-1. **Search recent daily logs** for patterns using `memory_search` — what keeps coming up? What mistakes repeat?
+1. **Search recent daily logs** for patterns using the `memory-search` skill — what keeps coming up? What mistakes repeat?
 2. **Clone this bot's repo** and create a branch using the `github` skill's PR workflow
 3. **Edit skill files** in `skills/` or `prompts/system.md` — add missing context, fix incorrect guidance
 4. **Run build and tests** before committing
