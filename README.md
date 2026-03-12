@@ -9,6 +9,8 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Triages and labels issues
 - Summarizes threads and answers questions about repositories
 - Knows common repository aliases via a built-in skill (e.g. `@bot create an issue in mobile`)
+- Remembers context within Slack threads (session persistence)
+- Learns from every run and adapts over time (memory system)
 
 ## Prerequisites
 
@@ -56,6 +58,8 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `UPSTASH_REDIS_REST_TOKEN` | No | Upstash Redis token |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
+| `DATA_DIR` | No | Local data directory (default: `/data/claw`) |
+| `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
@@ -82,6 +86,16 @@ All Anthropic auth uses OAuth — there is no API key path. The OAuth flow works
 
 This keeps the bot resilient to restarts without manual token re-provisioning.
 
+### Memory persistence (git)
+
+When `MEMORY_REPO` is set, memory files are backed by a GitHub repository:
+
+- **On startup** — the repo is cloned (or pulled if already present)
+- **After each run** — the agent commits and pushes changes as part of its memory save step
+- **Conflicts** — resolved by the agent during `git pull --rebase` (it understands both git and the content)
+
+Without `MEMORY_REPO`, the bot works normally but memory doesn't survive container restarts. Sessions are always ephemeral.
+
 ## Docker
 
 ```bash
@@ -95,16 +109,17 @@ Set `HEALTH_PORT=5000` (and expose the port) to enable the health check endpoint
 
 ```
 src/
-  index.ts          Entry point
-  slack.ts          Slack event handlers and message processing
-  agent.ts          Claude agent initialization and execution
+  index.ts          Entry point — startup, shutdown, git clone
+  slack.ts          Slack event handlers, thread fetching, message formatting
+  agent.ts          Session management, memory loading, pi-coding-agent
   prompt.ts         Prompt builder (extracted for testability)
   config.ts         Environment variable loading
-  concurrency.ts    Agent scheduler with queue management
+  concurrency.ts    Agent scheduler with queue management and drain
+  memory.ts         Memory loading, validation, size enforcement, git clone/pull
   cli.ts            CLI interface for local testing (REPL + one-shot)
   health.ts         Health check endpoint
 test/               Unit tests (node:test)
 prompts/
   system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, github, mobile-project, pr-review, repos, triage)
+skills/             Agent skill definitions (create-issue, github, memory-search, mobile-project, pr-review, reflect, repos, triage)
 ```

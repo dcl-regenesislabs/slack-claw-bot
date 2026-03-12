@@ -92,4 +92,32 @@ describe("AgentScheduler", () => {
     accepted(r2);
     await r2.done;
   });
+
+  it("drain resolves immediately when no work is running", async () => {
+    const scheduler = new AgentScheduler();
+    await scheduler.drain(1000);
+  });
+
+  it("drain waits for running work to complete", async () => {
+    const scheduler = new AgentScheduler();
+    let completed = false;
+    const r1 = scheduler.submit("t1", async () => {
+      await new Promise<void>((r) => setTimeout(r, 50));
+      completed = true;
+    });
+    accepted(r1);
+
+    await scheduler.drain(5000);
+    assert.ok(completed);
+  });
+
+  it("drain resolves on timeout if work takes too long", async () => {
+    const scheduler = new AgentScheduler();
+    scheduler.submit("t1", () => new Promise(() => {})); // never resolves
+
+    const start = Date.now();
+    await scheduler.drain(100);
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed >= 90, `Expected at least 90ms, got ${elapsed}ms`);
+  });
 });

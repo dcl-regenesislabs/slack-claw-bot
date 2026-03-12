@@ -1,12 +1,22 @@
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
-import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
+import { runAgent, syncAuth, detectReviewModel } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
 
 const nameCache = new Map<string, string>();
 
-export async function startSlackBot(config: Config): Promise<void> {
+function isSlackError(err: unknown): err is { data?: { error?: string } } {
+  return typeof err === "object" && err !== null && "data" in err;
+}
+
+interface SlackMessage { text?: string; ts?: string; user?: string }
+
+export function createScheduler(maxConcurrent: number): AgentScheduler {
+  return new AgentScheduler(maxConcurrent);
+}
+
+export async function startSlackBot(config: Config, scheduler: AgentScheduler): Promise<App> {
   const app = new App({
     token: config.slackBotToken,
     appToken: config.slackAppToken,
@@ -14,60 +24,48 @@ export async function startSlackBot(config: Config): Promise<void> {
     logLevel: LogLevel.INFO,
   });
 
-  const scheduler = new AgentScheduler(config.maxConcurrentAgents);
-
   app.event("app_mention", async ({ event, client, say }) => {
     const threadTs = event.thread_ts || event.ts;
     const text = event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
 
     if (event.user && await isExternalOrGuest(client, event.user)) {
-      console.warn(`[slack] Denied request from non-org user ${event.user}`);
+      console.warn(`[slack] Denied non-org user ${event.user}`);
       return;
     }
 
-    const [userName, channelName] = await Promise.all([
-      event.user ? resolveUserName(client, event.user) : Promise.resolve("unknown"),
-      resolveChannelName(client, event.channel),
-    ]);
-    console.log(`[slack] Triggered by ${userName} in #${channelName}: ${text}`);
-
-    function react(name: string): Promise<unknown> {
-      return client.reactions.add({ channel: event.channel, timestamp: event.ts, name })
-        .catch((err) => { if (err.data?.error !== "already_reacted") throw err; });
-    }
-    function unreact(name: string): Promise<unknown> {
-      return client.reactions.remove({ channel: event.channel, timestamp: event.ts, name })
-        .catch((err) => { if (err.data?.error !== "no_reaction") throw err; });
-    }
+    const userName = event.user ? await resolveUserName(client, event.user) : "unknown";
+    const channelName = await resolveChannelName(client, event.channel);
+    console.log(`[slack] ${userName} in #${channelName}: ${text}`);
 
     const submission = scheduler.submit(threadTs, async () => {
-      await react("rl-bonk-doge");
+      await react(client, event.channel, event.ts, "rl-bonk-doge");
 
-      const threadContent = await fetchThread(client, event.channel, threadTs);
-      const isReview =
-        PR_URL_PATTERN.test(threadContent) ||
-        REVIEW_KEYWORD_PATTERN.test(text);
-      const model = isReview ? REVIEW_MODEL : undefined;
       const { text: response, cost, tokens } = await runAgent({
-        threadContent,
+        threadTs,
+        eventTs: event.ts,
+        username: userName,
+        newMessage: text,
+        fetchThread: () => fetchThread(client, event.channel, threadTs),
+        fetchThreadSince: (oldest) => fetchThreadSince(client, event.channel, threadTs, oldest),
         triggeredBy: userName,
-        model,
+        model: detectReviewModel(text),
       });
-      await syncAuth();
 
-      await unreact("rl-bonk-doge");
+      await syncAuth();
+      await unreact(client, event.channel, event.ts, "rl-bonk-doge");
+
       if (response) {
-        await react("white_check_mark");
+        await react(client, event.channel, event.ts, "white_check_mark");
         await say({ text: markdownToMrkdwn(response), thread_ts: threadTs });
       } else {
-        await react("warning");
+        await react(client, event.channel, event.ts, "warning");
         await say({ text: "I wasn't able to produce a response.", thread_ts: threadTs });
       }
 
       if (config.logChannelId) {
-        postAuditLog(client, config.logChannelId, event, text, { status: "ok", cost, tokens })
-          .catch((err) => console.error("[slack] Failed to post audit log:", err));
+        await postAuditLog(client, config.logChannelId, event, text, { status: "ok", cost, tokens });
       }
+
     });
 
     if (submission === "thread-busy") {
@@ -82,13 +80,12 @@ export async function startSlackBot(config: Config): Promise<void> {
     submission.done.catch(async (err) => {
       const message = err instanceof Error ? err.message : "Unknown error occurred";
       console.error("[slack] Agent error:", err);
-      await unreact("rl-bonk-doge");
-      await react("x");
+      await unreact(client, event.channel, event.ts, "rl-bonk-doge");
+      await react(client, event.channel, event.ts, "x");
       await say({ text: `Something went wrong: ${message}`, thread_ts: threadTs });
 
       if (config.logChannelId) {
-        postAuditLog(client, config.logChannelId, event, text, { status: "error", error: message })
-          .catch((e) => console.error("[slack] Failed to post audit log:", e));
+        await postAuditLog(client, config.logChannelId, event, text, { status: "error", error: message });
       }
     });
   });
@@ -99,17 +96,35 @@ export async function startSlackBot(config: Config): Promise<void> {
 
   await app.start();
   console.log("Slack bot is running");
+  return app;
 }
 
-async function cachedLookup(
-  key: string,
-  fetch: () => Promise<string>,
-): Promise<string> {
+// --- Reactions ---
+
+async function react(client: WebClient, channel: string, ts: string, name: string): Promise<void> {
+  try {
+    await client.reactions.add({ channel, timestamp: ts, name });
+  } catch (err: unknown) {
+    if (!isSlackError(err) || err.data?.error !== "already_reacted") throw err;
+  }
+}
+
+async function unreact(client: WebClient, channel: string, ts: string, name: string): Promise<void> {
+  try {
+    await client.reactions.remove({ channel, timestamp: ts, name });
+  } catch (err: unknown) {
+    if (!isSlackError(err) || err.data?.error !== "no_reaction") throw err;
+  }
+}
+
+// --- Name Resolution ---
+
+async function cachedLookup(key: string, fetcher: () => Promise<string>): Promise<string> {
   const cached = nameCache.get(key);
   if (cached) return cached;
 
   try {
-    const name = await fetch();
+    const name = await fetcher();
     nameCache.set(key, name);
     return name;
   } catch {
@@ -123,7 +138,7 @@ interface AuthEntry {
 }
 
 const authCache = new Map<string, AuthEntry>();
-const AUTH_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const AUTH_CACHE_TTL_MS = 60 * 60 * 1000;
 
 async function isExternalOrGuest(client: WebClient, userId: string): Promise<boolean> {
   const cached = authCache.get(userId);
@@ -131,11 +146,10 @@ async function isExternalOrGuest(client: WebClient, userId: string): Promise<boo
 
   try {
     const info = await client.users.info({ user: userId });
-    const user = info.user as any;
+    const user = info.user;
     const denied = Boolean(user?.is_restricted || user?.is_ultra_restricted || user?.is_stranger);
     authCache.set(userId, { denied, cachedAt: Date.now() });
 
-    // Cache the user name too, so resolveUserName won't re-fetch
     const name = info.user?.real_name || info.user?.name;
     if (name) nameCache.set(userId, name);
 
@@ -160,6 +174,8 @@ function resolveChannelName(client: WebClient, channelId: string): Promise<strin
   });
 }
 
+// --- Audit ---
+
 type AuditOutcome =
   | { status: "ok"; cost: number; tokens: number }
   | { status: "error"; error: string };
@@ -171,19 +187,25 @@ async function postAuditLog(
   text: string,
   outcome: AuditOutcome,
 ): Promise<void> {
-  const { permalink } = await client.chat.getPermalink({
-    channel: event.channel,
-    message_ts: event.ts,
-  });
-  const detail = outcome.status === "ok"
-    ? `$${outcome.cost.toFixed(4)} (${outcome.tokens} tokens)`
-    : `error: ${outcome.error}`;
-  const icon = outcome.status === "ok" ? "✅" : "❌";
-  await client.chat.postMessage({
-    channel: logChannelId,
-    text: `${icon} <@${event.user}> in <#${event.channel}>: ${text} — ${detail}\n<${permalink}|View message>`,
-  });
+  try {
+    const { permalink } = await client.chat.getPermalink({
+      channel: event.channel,
+      message_ts: event.ts,
+    });
+    const detail = outcome.status === "ok"
+      ? `$${outcome.cost.toFixed(4)} (${outcome.tokens} tokens)`
+      : `error: ${outcome.error}`;
+    const icon = outcome.status === "ok" ? "✅" : "❌";
+    await client.chat.postMessage({
+      channel: logChannelId,
+      text: `${icon} <@${event.user}> in <#${event.channel}>: ${text} — ${detail}\n<${permalink}|View message>`,
+    });
+  } catch (err) {
+    console.error("[slack] Failed to post audit log:", err);
+  }
 }
+
+// --- Formatting ---
 
 export function markdownToMrkdwn(text: string): string {
   return text
@@ -191,19 +213,27 @@ export function markdownToMrkdwn(text: string): string {
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>");
 }
 
-async function fetchThread(
+// --- Thread Fetching ---
+
+async function fetchThread(client: WebClient, channel: string, threadTs: string): Promise<string> {
+  const reply = await client.conversations.replies({ channel, ts: threadTs, limit: 200 });
+  return formatMessages(client, reply.messages || []);
+}
+
+async function fetchThreadSince(
   client: WebClient,
   channel: string,
   threadTs: string,
+  sinceTs: string,
 ): Promise<string> {
-  const reply = await client.conversations.replies({
-    channel,
-    ts: threadTs,
-    limit: 200,
-  });
+  const reply = await client.conversations.replies({ channel, ts: threadTs, oldest: sinceTs, limit: 200 });
+  const messages = (reply.messages || []).filter(
+    (m) => m.ts && parseFloat(m.ts) > parseFloat(sinceTs),
+  );
+  return formatMessages(client, messages);
+}
 
-  const messages = reply.messages || [];
-
+async function formatMessages(client: WebClient, messages: SlackMessage[]): Promise<string> {
   const uniqueUserIds = [...new Set(
     messages.map((m) => m.user).filter((id): id is string => Boolean(id)),
   )];
