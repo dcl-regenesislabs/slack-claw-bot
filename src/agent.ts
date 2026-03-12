@@ -50,7 +50,9 @@ export interface RunResult {
 let authStorage: AuthStorage | null = null;
 let modelId: string;
 
-const authPath = join(projectDir, ".auth.json");
+const authPath = process.env.NODE_ENV === "production" && existsSync("/data")
+  ? "/data/.auth.json"
+  : join(projectDir, ".auth.json");
 let redisConfig: RedisConfig | null = null;
 let lastAuthSnapshot: string | null = null;
 

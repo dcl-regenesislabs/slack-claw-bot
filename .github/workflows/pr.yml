@@ -12,16 +12,16 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 24
+          cache: yarn
 
-      - run: npm ci
+      - run: yarn install --frozen-lockfile
 
       - name: Type check
-        run: npx tsc --noEmit
+        run: yarn tsc --noEmit
 
       - name: Test
-        run: npm test
+        run: yarn test
 
       - name: Build Docker image
         run: docker build -t slack-claw-bot:test .

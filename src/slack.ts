@@ -5,6 +5,13 @@ import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, REVIEW_KEYWORD_PATTER
 import { AgentScheduler } from "./concurrency.js";
 
 const nameCache = new Map<string, string>();
+const pendingResponses = new Map<string, string>();
+
+const LARGE_RESPONSE_THRESHOLD = 3000;
+const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
+const TEXT_EXTENSIONS = new Set([".md", ".txt"]);
+
+let botToken: string;
 
 export async function startSlackBot(config: Config): Promise<void> {
   const app = new App({
@@ -14,7 +21,30 @@ export async function startSlackBot(config: Config): Promise<void> {
     logLevel: LogLevel.INFO,
   });
 
+  botToken = config.slackBotToken;
   const scheduler = new AgentScheduler(config.maxConcurrentAgents);
+
+  app.action("deliver_file", async ({ action, body, ack, client }) => {
+    await ack();
+    const threadTs = (action as any).value;
+    const channel = (body as any).channel.id;
+    const pending = pendingResponses.get(threadTs);
+    if (!pending) return;
+    pendingResponses.delete(threadTs);
+    await client.files.uploadV2({ channel_id: channel, thread_ts: threadTs, content: pending, filename: "response.md", title: "Response" });
+    await client.chat.update({ channel, ts: (body as any).message.ts, text: "Delivered as a file.", blocks: [] });
+  });
+
+  app.action("deliver_message", async ({ action, body, ack, client }) => {
+    await ack();
+    const threadTs = (action as any).value;
+    const channel = (body as any).channel.id;
+    const pending = pendingResponses.get(threadTs);
+    if (!pending) return;
+    pendingResponses.delete(threadTs);
+    await client.chat.postMessage({ channel, thread_ts: threadTs, text: markdownToMrkdwn(pending) });
+    await client.chat.update({ channel, ts: (body as any).message.ts, text: "Delivered inline.", blocks: [] });
+  });
 
   app.event("app_mention", async ({ event, client, say }) => {
     const threadTs = event.thread_ts || event.ts;
@@ -29,19 +59,20 @@ export async function startSlackBot(config: Config): Promise<void> {
       event.user ? resolveUserName(client, event.user) : Promise.resolve("unknown"),
       resolveChannelName(client, event.channel),
     ]);
-    console.log(`[slack] Triggered by ${userName} in #${channelName}: ${text}`);
+    const skill = detectSkill(text);
+    console.log(`[slack] Triggered by ${userName} in #${channelName} [skill: ${skill}]: ${text}`);
 
     function react(name: string): Promise<unknown> {
       return client.reactions.add({ channel: event.channel, timestamp: event.ts, name })
-        .catch((err) => { if (err.data?.error !== "already_reacted") throw err; });
+        .catch((err) => { if (err.data?.error !== "already_reacted" && err.data?.error !== "message_not_found") throw err; });
     }
     function unreact(name: string): Promise<unknown> {
       return client.reactions.remove({ channel: event.channel, timestamp: event.ts, name })
-        .catch((err) => { if (err.data?.error !== "no_reaction") throw err; });
+        .catch((err) => { if (err.data?.error !== "no_reaction" && err.data?.error !== "message_not_found") throw err; });
     }
 
     const submission = scheduler.submit(threadTs, async () => {
-      await react("rl-bonk-doge");
+      await react("hourglass_flowing_sand");
 
       const threadContent = await fetchThread(client, event.channel, threadTs);
       const isReview =
@@ -55,10 +86,32 @@ export async function startSlackBot(config: Config): Promise<void> {
       });
       await syncAuth();
 
-      await unreact("rl-bonk-doge");
+      await unreact("hourglass_flowing_sand");
       if (response) {
         await react("white_check_mark");
-        await say({ text: markdownToMrkdwn(response), thread_ts: threadTs });
+        if (response.length > LARGE_RESPONSE_THRESHOLD) {
+          pendingResponses.set(threadTs, response);
+          const lines = response.split("\n").length;
+          await say({
+            thread_ts: threadTs,
+            text: "This response is long — choose a format:",
+            blocks: [
+              {
+                type: "section",
+                text: { type: "mrkdwn", text: `This response is long (~${lines} lines). How would you like to receive it?` },
+              },
+              {
+                type: "actions",
+                elements: [
+                  { type: "button", text: { type: "plain_text", text: "File (.md)" }, action_id: "deliver_file", value: threadTs },
+                  { type: "button", text: { type: "plain_text", text: "Inline message" }, action_id: "deliver_message", value: threadTs },
+                ],
+              },
+            ],
+          } as any);
+        } else {
+          await say({ text: markdownToMrkdwn(response), thread_ts: threadTs });
+        }
       } else {
         await react("warning");
         await say({ text: "I wasn't able to produce a response.", thread_ts: threadTs });
@@ -82,7 +135,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     submission.done.catch(async (err) => {
       const message = err instanceof Error ? err.message : "Unknown error occurred";
       console.error("[slack] Agent error:", err);
-      await unreact("rl-bonk-doge");
+      await unreact("hourglass_flowing_sand");
       await react("x");
       await say({ text: `Something went wrong: ${message}`, thread_ts: threadTs });
 
@@ -214,11 +267,46 @@ async function fetchThread(
     }),
   );
 
-  return messages
-    .map((m) => {
+  const parts = await Promise.all(
+    messages.map(async (m) => {
       const name = userNames.get(m.user || "") || "unknown";
       const ts = m.ts ? new Date(parseFloat(m.ts) * 1000).toISOString() : "";
-      return `[${name}] (${ts}): ${m.text || ""}`;
-    })
-    .join("\n");
+      let content = `[${name}] (${ts}): ${m.text || ""}`;
+
+      const files: any[] = (m as any).files || [];
+      for (const file of files) {
+        const ext = file.name?.toLowerCase().match(/\.[^.]+$/)?.[0] ?? "";
+        if (TEXT_MIMETYPES.has(file.mimetype) || TEXT_EXTENSIONS.has(ext)) {
+          const fileContent = await downloadTextFile(file.url_private_download);
+          if (fileContent) {
+            content += `\n[Attached file: ${file.name}]\n${fileContent}\n[/Attached file]`;
+          }
+        }
+      }
+
+      return content;
+    }),
+  );
+
+  return parts.join("\n");
 }
+
+async function downloadTextFile(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${botToken}` } });
+    if (!res.ok) return "";
+    return res.text();
+  } catch {
+    return "";
+  }
+}
+
+function detectSkill(text: string): string {
+  const t = text.toLowerCase().trimStart();
+  if (/^shape(\s+up)?[\s:]/.test(t)) return "shape";
+  if (/\bpr[\s-]?review\b/.test(t) || (/\breview\b/.test(t) && /\bpr\b/.test(t))) return "pr-review";
+  if (/\btriage\b/.test(t)) return "triage";
+  if (/\bcreate\b.+\bissue\b/.test(t) || /\bopen\b.+\bissue\b/.test(t)) return "create-issue";
+  return "general";
+}
+
