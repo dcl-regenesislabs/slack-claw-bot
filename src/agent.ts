@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { join, dirname, relative } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
 import {
@@ -20,8 +20,6 @@ import { buildPrompt } from "./prompt.js";
 import {
   loadMemoryContext,
   buildMemorySavePrompt,
-  snapshotMemoryFiles,
-  processMemoryPostSave,
   ensureMemoryDirs,
   ensureQmd,
   reindexMemory,
@@ -122,10 +120,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
   const modelId = options.model || defaultModelId;
   const { sessionManager, isResumed } = await resolveSession(options.threadTs);
-  const memorySnapshots = memoryDir ? snapshotMemoryFiles(memoryDir) : new Map<string, string>();
   const memoryContent = memoryDir ? loadMemoryContext(memoryDir, options.username) : "";
   if (memoryDir) {
-    console.log(`[memory] Loaded context for ${options.username} (${memoryContent.length} chars, ${memorySnapshots.size} files tracked)`);
+    console.log(`[memory] Loaded context for ${options.username} (${memoryContent.length} chars)`);
   } else {
     console.log("[memory] No dataDir configured — memory disabled");
   }
@@ -150,7 +147,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     const usedTools = hasToolCalls(session.messages);
     const hasSaveMarker = rawResponse.includes(SAVE_MARKER);
     if (usedTools || hasSaveMarker) {
-      await saveMemory(session, options.username, memorySnapshots);
+      await saveMemory(session, options.username);
     } else {
       console.log("[agent] Skipping memory save — no tools used and no [SAVE] marker");
     }
@@ -259,7 +256,7 @@ function createMemoryExtension(content: string): ExtensionFactory {
   };
 }
 
-async function saveMemory(session: AgentSession, username: string, snapshots: Map<string, string>): Promise<void> {
+async function saveMemory(session: AgentSession, username: string): Promise<void> {
   if (!memoryDir) return;
 
   const timer = setTimeout(() => {
@@ -269,21 +266,14 @@ async function saveMemory(session: AgentSession, username: string, snapshots: Ma
 
   try {
     await session.prompt(buildMemorySavePrompt(username, memoryDir));
+    console.log("[memory] Save complete");
   } catch (err) {
     console.error("[agent] Memory save failed:", err);
   } finally {
     clearTimeout(timer);
   }
 
-  const result = processMemoryPostSave(memoryDir, snapshots);
-  if (result.changedFiles.length > 0) {
-    console.log(`[memory] Save complete — ${result.changedFiles.length} file(s) changed:`);
-    for (const f of result.changedFiles) console.log(`[memory]   ${relative(memoryDir, f)}`);
-  } else {
-    console.log("[memory] Save complete — no files changed");
-  }
   reindexMemory();
-  for (const w of result.warnings) console.warn(`[memory] ${w}`);
 }
 
 // --- Auth ---

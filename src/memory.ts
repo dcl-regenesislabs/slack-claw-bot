@@ -1,14 +1,6 @@
-import {
-  readFileSync,
-  existsSync,
-  writeFileSync,
-  unlinkSync,
-  readdirSync,
-  mkdirSync,
-  statSync,
-} from "node:fs";
+import { readFileSync, existsSync, readdirSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 
 // --- qmd search index ---
 
@@ -34,7 +26,6 @@ function ensureCollection(memDir: string): void {
     if (!msg.includes("already exists")) throw err;
   }
 
-  // Collection exists — verify it still points to memDir
   try {
     const out = qmd("collection", "show", QMD_COLLECTION);
     const pathMatch = out.match(/Path:\s*(.+)/);
@@ -71,32 +62,7 @@ export function reindexMemory(): void {
   }
 }
 
-const MEMORY_LIMITS: Record<string, number> = {
-  "MEMORY.md": 4096,
-  "users/": 2048,
-  "daily/": 8192,
-};
-
-const INJECTION_PATTERNS = [
-  /ignore\s+(all\s+)?(previous\s+)?instructions/i,
-  /you\s+are\s+now/i,
-  /your\s+new\s+role/i,
-  /system\s+prompt/i,
-  /forget\s+(all\s+)?(your\s+)?instructions/i,
-  /disregard\s+(all\s+)?(previous\s+)?instructions/i,
-];
-
-function walkMarkdownFiles(dir: string, visitor: (path: string) => void): void {
-  if (!existsSync(dir)) return;
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walkMarkdownFiles(fullPath, visitor);
-    } else if (entry.isFile() && entry.name.endsWith(".md")) {
-      visitor(fullPath);
-    }
-  }
-}
+// --- Memory ---
 
 export function pullMemoryRepo(repo: string, memoryDir: string): void {
   if (existsSync(join(memoryDir, ".git"))) {
@@ -168,111 +134,4 @@ Rules:
 
 Keep entries concise. One line per learning. Don't duplicate what's already in memory.
 Reply with only "done" when finished.`;
-}
-
-export function snapshotMemoryFiles(memoryDir: string): Map<string, string> {
-  const snapshots = new Map<string, string>();
-  if (!existsSync(memoryDir)) return snapshots;
-
-  walkMarkdownFiles(memoryDir, (path) => {
-    snapshots.set(path, readFileSync(path, "utf-8"));
-  });
-
-  return snapshots;
-}
-
-export function validateMemoryWrites(
-  memoryDir: string,
-  snapshots: Map<string, string>,
-): string[] {
-  const warnings: string[] = [];
-  if (!existsSync(memoryDir)) return warnings;
-
-  walkMarkdownFiles(memoryDir, (path) => {
-    const content = readFileSync(path, "utf-8");
-    const oldContent = snapshots.get(path);
-    if (content === oldContent) return;
-
-    for (const pattern of INJECTION_PATTERNS) {
-      if (pattern.test(content)) {
-        const relPath = relative(memoryDir, path);
-        warnings.push(`Suspicious pattern in ${relPath}: ${pattern.source}`);
-        if (oldContent !== undefined) {
-          writeFileSync(path, oldContent, "utf-8");
-          warnings.push(`${relPath} restored from pre-run snapshot`);
-        } else {
-          unlinkSync(path);
-          warnings.push(`${relPath} deleted (new file with injection content)`);
-        }
-        break;
-      }
-    }
-  });
-
-  return warnings;
-}
-
-export function enforceMemoryLimits(
-  memoryDir: string,
-  snapshots: Map<string, string>,
-): string[] {
-  const warnings: string[] = [];
-  if (!existsSync(memoryDir)) return warnings;
-
-  function checkLimit(path: string, limit: number): void {
-    if (!existsSync(path)) return;
-    const stat = statSync(path);
-    if (stat.size > limit) {
-      const relPath = relative(memoryDir, path);
-      warnings.push(`${relPath} exceeds ${limit}B limit (${stat.size}B)`);
-      const snapshot = snapshots.get(path);
-      if (snapshot !== undefined) {
-        writeFileSync(path, snapshot, "utf-8");
-        warnings.push(`${relPath} restored from pre-run snapshot`);
-      }
-    }
-  }
-
-  checkLimit(join(memoryDir, "MEMORY.md"), MEMORY_LIMITS["MEMORY.md"]);
-
-  for (const subdir of ["users", "daily"] as const) {
-    const dir = join(memoryDir, subdir);
-    if (!existsSync(dir)) continue;
-    const limit = MEMORY_LIMITS[`${subdir}/`];
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isFile()) {
-        checkLimit(join(dir, entry.name), limit);
-      }
-    }
-  }
-
-  return warnings;
-}
-
-export function processMemoryPostSave(
-  memoryDir: string,
-  snapshots: Map<string, string>,
-): { warnings: string[]; changedFiles: string[] } {
-  const warnings = [
-    ...validateMemoryWrites(memoryDir, snapshots),
-    ...enforceMemoryLimits(memoryDir, snapshots),
-  ];
-  const changedFiles = getChangedMemoryFiles(memoryDir, snapshots);
-  return { warnings, changedFiles };
-}
-
-export function getChangedMemoryFiles(
-  memoryDir: string,
-  snapshots: Map<string, string>,
-): string[] {
-  const changed: string[] = [];
-  if (!existsSync(memoryDir)) return changed;
-
-  walkMarkdownFiles(memoryDir, (path) => {
-    if (readFileSync(path, "utf-8") !== snapshots.get(path)) {
-      changed.push(path);
-    }
-  });
-
-  return changed;
 }
