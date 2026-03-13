@@ -82,7 +82,6 @@ export function resolveMemoryDir(repo?: string): string {
       execFileSync("gh", ["repo", "clone", repo, memoryDir], {
         encoding: "utf-8",
         timeout: 30_000,
-        env: { ...process.env, GITHUB_TOKEN: undefined },
       });
       console.log(`[memory] Cloned ${repo} → ${memoryDir}`);
     }
