@@ -1,7 +1,7 @@
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tini git build-essential cmake curl \
+    tini git build-essential cmake curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN GH_VERSION=2.67.0 \
