@@ -11,7 +11,6 @@ export interface Config {
   upstashRedisToken?: string;
   logChannelId?: string;
   healthPort?: number;
-  dataDir: string;
   memoryRepo?: string;
 }
 
@@ -27,7 +26,6 @@ export function loadConfig(): Config {
     upstashRedisToken: process.env.UPSTASH_REDIS_REST_TOKEN,
     logChannelId: process.env.LOG_CHANNEL_ID,
     healthPort: process.env.HEALTH_PORT ? parseInt(process.env.HEALTH_PORT, 10) : undefined,
-    dataDir: process.env.DATA_DIR || "/data/claw",
     memoryRepo: process.env.MEMORY_REPO,
   };
 }

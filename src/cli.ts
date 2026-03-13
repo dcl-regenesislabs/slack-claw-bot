@@ -2,15 +2,23 @@ import "dotenv/config";
 import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
 import { initAgent, runAgent, detectReviewModel } from "./agent.js";
+import { resolveMemoryDir } from "./memory.js";
 
 const dryRun = process.argv.includes("--dry-run");
 const positionalArgs = process.argv.slice(2).filter((a) => a !== "--dry-run");
+
+let memoryDir: string | undefined;
+try {
+  memoryDir = resolveMemoryDir(process.env.MEMORY_REPO);
+} catch (err) {
+  console.error("[cli] Failed to set up memory:", err);
+}
 
 await initAgent({
   anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
   githubToken: process.env.GITHUB_TOKEN,
   model: process.env.MODEL,
-  dataDir: process.env.DATA_DIR || "./data",
+  memoryDir,
 });
 
 function streamingEvents(): EventEmitter {

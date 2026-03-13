@@ -12,8 +12,5 @@ COPY src/ src/
 COPY prompts/ prompts/
 COPY skills/ skills/
 
-# Create data directory for sessions and memory
-RUN mkdir -p /data/claw/sessions /data/claw/memory/daily /data/claw/memory/users
-
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["npx", "tsx", "src/index.ts"]

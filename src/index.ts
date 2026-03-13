@@ -10,8 +10,7 @@ import { loadConfig } from "./config.js";
 import { initAgent } from "./agent.js";
 import { startSlackBot, createScheduler } from "./slack.js";
 import { startHealthServer } from "./health.js";
-import { ensureMemoryDirs, pullMemoryRepo } from "./memory.js";
-import { join } from "node:path";
+import { resolveMemoryDir } from "./memory.js";
 
 const config = loadConfig();
 
@@ -19,14 +18,12 @@ if (config.healthPort) {
   startHealthServer(config.healthPort);
 }
 
-if (config.memoryRepo) {
-  try {
-    pullMemoryRepo(config.memoryRepo, join(config.dataDir, "memory"));
-  } catch (err) {
-    console.error("[startup] Failed to pull memory repo, continuing with local state:", err);
-  }
+let memoryDir: string | undefined;
+try {
+  memoryDir = resolveMemoryDir(config.memoryRepo);
+} catch (err) {
+  console.error("[startup] Failed to set up memory:", err);
 }
-ensureMemoryDirs(join(config.dataDir, "memory"));
 
 await initAgent({
   anthropicOAuthRefreshToken: config.anthropicOAuthRefreshToken,
@@ -34,7 +31,7 @@ await initAgent({
   model: config.model,
   upstashRedisUrl: config.upstashRedisUrl,
   upstashRedisToken: config.upstashRedisToken,
-  dataDir: config.dataDir,
+  memoryDir,
 });
 
 const scheduler = createScheduler(config.maxConcurrentAgents);

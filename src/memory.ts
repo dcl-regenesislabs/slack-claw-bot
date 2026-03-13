@@ -1,6 +1,7 @@
-import { readFileSync, existsSync, readdirSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 // --- qmd search index ---
 
@@ -10,6 +11,7 @@ const QMD_COLLECTION = "memory";
 function qmd(...args: string[]): string {
   return execFileSync("qmd", ["--index", QMD_INDEX, ...args], {
     encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
     timeout: 10_000,
   }).trim();
 }
@@ -64,24 +66,37 @@ export function reindexMemory(): void {
 
 // --- Memory ---
 
-export function pullMemoryRepo(repo: string, memoryDir: string): void {
-  if (existsSync(join(memoryDir, ".git"))) {
-    execFileSync("git", ["pull", "--rebase", "--autostash"], {
-      cwd: memoryDir,
-      encoding: "utf-8",
-      timeout: 30_000,
-    });
-    console.log("[memory] Pulled latest from git");
-  } else {
-    execFileSync("gh", ["repo", "clone", repo, memoryDir], {
-      encoding: "utf-8",
-      timeout: 30_000,
-    });
-    console.log(`[memory] Cloned ${repo} → ${memoryDir}`);
+export function resolveMemoryDir(repo?: string): string {
+  if (repo) {
+    // realpathSync resolves macOS /var → /private/var symlink so qmd sees a stable path
+    const rawDir = join(tmpdir(), "claw-memory");
+    const memoryDir = existsSync(rawDir) ? realpathSync(rawDir) : realpathSync(tmpdir()) + "/claw-memory";
+    if (existsSync(join(memoryDir, ".git"))) {
+      execFileSync("git", ["pull", "--rebase", "--autostash"], {
+        cwd: memoryDir,
+        encoding: "utf-8",
+        timeout: 30_000,
+      });
+      console.log("[memory] Pulled latest from git");
+    } else {
+      execFileSync("gh", ["repo", "clone", repo, memoryDir], {
+        encoding: "utf-8",
+        timeout: 30_000,
+        env: { ...process.env, GITHUB_TOKEN: undefined },
+      });
+      console.log(`[memory] Cloned ${repo} → ${memoryDir}`);
+    }
+    ensureMemoryDirs(memoryDir);
+    return memoryDir;
   }
+
+  const memoryDir = realpathSync(mkdtempSync(join(tmpdir(), "claw-memory-")));
+  ensureMemoryDirs(memoryDir);
+  console.log(`[memory] Using temporary directory: ${memoryDir}`);
+  return memoryDir;
 }
 
-export function ensureMemoryDirs(memoryDir: string): void {
+function ensureMemoryDirs(memoryDir: string): void {
   mkdirSync(join(memoryDir, "daily"), { recursive: true });
   mkdirSync(join(memoryDir, "users"), { recursive: true });
 }
@@ -132,6 +147,5 @@ Rules:
 - Update ${memoryDir}/MEMORY.md ONLY for permanent, high-value learnings (build commands, repo conventions, recurring gotchas). Keep MEMORY.md under 4KB — consolidate, don't just append.
 - If nothing worth saving, do nothing.${isGitRepo ? "\n- After writing, use the `push-memory` skill to validate, commit, and push." : ""}
 
-Keep entries concise. One line per learning. Don't duplicate what's already in memory.
-Reply with only "done" when finished.`;
+Keep entries concise. One line per learning. Don't duplicate what's already in memory.`;
 }

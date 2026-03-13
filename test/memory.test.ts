@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadMemoryContext, ensureMemoryDirs } from "../src/memory.js";
+import { loadMemoryContext } from "../src/memory.js";
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `memory-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -16,7 +16,8 @@ describe("loadMemoryContext", () => {
 
   beforeEach(() => {
     memoryDir = makeTmpDir();
-    ensureMemoryDirs(memoryDir);
+    mkdirSync(join(memoryDir, "daily"), { recursive: true });
+    mkdirSync(join(memoryDir, "users"), { recursive: true });
   });
 
   afterEach(() => {

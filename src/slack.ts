@@ -68,12 +68,9 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
 
     });
 
-    if (submission === "thread-busy") {
-      await say({ text: "I'm still working on your previous request in this thread.", thread_ts: threadTs });
-      return;
-    }
-
-    if (submission.queued) {
+    if (submission.status === "queued-behind-thread") {
+      // No message — the reaction is enough
+    } else if (submission.queued) {
       await say({ text: "I'm busy right now but your request is queued — I'll get to it shortly.", thread_ts: threadTs });
     }
 

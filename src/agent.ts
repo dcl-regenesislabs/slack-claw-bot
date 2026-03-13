@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
 import {
@@ -20,7 +21,6 @@ import { buildPrompt } from "./prompt.js";
 import {
   loadMemoryContext,
   buildMemorySavePrompt,
-  ensureMemoryDirs,
   ensureQmd,
   reindexMemory,
 } from "./memory.js";
@@ -41,7 +41,7 @@ interface AgentConfig {
   model?: string;
   upstashRedisUrl?: string;
   upstashRedisToken?: string;
-  dataDir?: string;
+  memoryDir?: string;
 }
 
 export interface RunOptions {
@@ -90,13 +90,12 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   if (config.githubToken) process.env.GITHUB_TOKEN = config.githubToken;
   defaultModelId = config.model || "claude-sonnet-4-5";
 
-  if (config.dataDir) {
-    sessionDir = join(config.dataDir, "sessions");
-    memoryDir = join(config.dataDir, "memory");
-    mkdirSync(sessionDir, { recursive: true });
-    ensureMemoryDirs(memoryDir);
+  if (config.memoryDir) {
+    memoryDir = config.memoryDir;
     ensureQmd(memoryDir);
   }
+  sessionDir = join(tmpdir(), "claw-sessions");
+  mkdirSync(sessionDir, { recursive: true });
 
   if (config.upstashRedisUrl && config.upstashRedisToken) {
     redisConfig = { url: config.upstashRedisUrl, token: config.upstashRedisToken };
@@ -123,8 +122,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   const memoryContent = memoryDir ? loadMemoryContext(memoryDir, options.username) : "";
   if (memoryDir) {
     console.log(`[memory] Loaded context for ${options.username} (${memoryContent.length} chars)`);
+    if (process.env.DEBUG && memoryContent) console.log(`[debug] memory context:\n${memoryContent}`);
   } else {
-    console.log("[memory] No dataDir configured — memory disabled");
+    console.log("[memory] No memoryDir configured — memory disabled");
   }
 
   const { session } = await createSession(modelId, memoryContent, sessionManager);
@@ -136,6 +136,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
       : await buildNewPrompt(options);
 
     if (options.events) subscribeToTextDeltas(session, options.events);
+    if (process.env.DEBUG) subscribeToDebugLogs(session);
 
     // 2. Run agent
     console.log(`[agent] running (model: ${modelId}, prompt: ${prompt.slice(0, 200)})`);
@@ -328,6 +329,31 @@ function subscribeToTextDeltas(session: AgentSession, events: EventEmitter): voi
   session.subscribe((event: AgentSessionEvent) => {
     if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
       events.emit("text", event.assistantMessageEvent.delta);
+    }
+  });
+}
+
+function subscribeToDebugLogs(session: AgentSession): void {
+  session.subscribe((event: AgentSessionEvent) => {
+    switch (event.type) {
+      case "tool_execution_start":
+        console.log(`[debug] tool:start ${event.toolName}`, JSON.stringify(event.args).slice(0, 200));
+        break;
+      case "tool_execution_end":
+        console.log(`[debug] tool:end ${event.toolName}`, event.isError ? "ERROR" : "ok", JSON.stringify(event.result).slice(0, 200));
+        break;
+      case "turn_start":
+        console.log("[debug] turn:start");
+        break;
+      case "turn_end":
+        console.log("[debug] turn:end");
+        break;
+      case "message_start":
+        console.log(`[debug] message:start (${event.message.role})`);
+        break;
+      case "message_end":
+        console.log(`[debug] message:end (${event.message.role})`);
+        break;
     }
   });
 }

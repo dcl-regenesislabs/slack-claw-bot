@@ -58,7 +58,6 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `UPSTASH_REDIS_REST_TOKEN` | No | Upstash Redis token |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
-| `DATA_DIR` | No | Local data directory (default: `/data/claw`) |
 | `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
@@ -115,7 +114,7 @@ src/
   prompt.ts         Prompt builder (extracted for testability)
   config.ts         Environment variable loading
   concurrency.ts    Agent scheduler with queue management and drain
-  memory.ts         Memory loading, validation, size enforcement, git clone/pull
+  memory.ts         Memory loading, save prompt, qmd index, git clone/pull
   cli.ts            CLI interface for local testing (REPL + one-shot)
   health.ts         Health check endpoint
 test/               Unit tests (node:test)
