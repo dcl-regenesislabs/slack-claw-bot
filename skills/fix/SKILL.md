@@ -13,6 +13,23 @@ Autonomous end-to-end workflow for fixing GitHub issues: understand the problem,
 - User says `soluciona este issue` or `fix this issue` with a URL
 - User says `fix` followed by a description of the problem
 
+## ⚠️ IMPORTANT: Creator Hub Monorepo
+
+**Creator Hub (`decentraland/creator-hub`) is a MONOREPO.**
+
+**ALL asset pack issues MUST be fixed in the creator-hub repository**, not in individual asset pack repos.
+
+The following repositories are **ARCHIVED** and should NEVER be used:
+- `decentraland/asset-packs`
+- `decentraland/asset-pack-*` (any individual asset pack repo)
+- `decentraland/inspector`
+
+**If an issue is in any archived asset pack repository:**
+1. Stop immediately
+2. Tell the user the repo is archived
+3. Direct them to open/migrate the issue to `decentraland/creator-hub`
+4. Do NOT attempt to fix in the archived repo
+
 ## Input parsing
 
 The skill receives one argument:
@@ -47,7 +64,52 @@ Use the description directly and infer repository from context if possible.
 
 ---
 
-### Step 2: Locate or clone the repository
+### Step 2: Validate repository (avoid archived repos)
+
+**IMPORTANT: Creator Hub is a monorepo. All asset packs, inspector, and creator hub issues are resolved in the creator-hub repository.**
+
+Before proceeding, check the repository name:
+
+**If the issue is in any of these archived repos:**
+- `decentraland/asset-packs`
+- `decentraland/inspector`
+- `decentraland/asset-pack-*` (any asset pack repo, e.g., asset-pack-common, asset-pack-animals, etc.)
+
+**Stop immediately and redirect:**
+
+```
+⚠️ This issue is in an archived repository.
+
+Creator Hub is now a monorepo. All asset pack, inspector, and creator hub issues 
+must be resolved in:
+https://github.com/decentraland/creator-hub
+
+Please:
+1. Check if this issue has been migrated to creator-hub
+2. If not, create a new issue in creator-hub with the same details
+3. Reference the old issue number
+
+I cannot work in archived repositories.
+```
+
+**Valid repositories to work in:**
+- `decentraland/creator-hub` — Main monorepo (includes inspector, asset packs, creator hub app)
+- `decentraland/sdk-toolchain` — SDK build tools
+- `decentraland/js-sdk-toolchain` — SDK JavaScript tooling
+- `decentraland/godot-explorer` — Mobile client
+- Any other active Decentraland repository (check it's not archived)
+
+**If unsure whether a repo is archived:**
+
+```bash
+gh repo view <org>/<repo> --json isArchived --jq .isArchived
+```
+
+If output is `true`, do not proceed with the fix.
+
+---
+
+### Step 3: Locate or clone the repository
 
 **Two execution modes:**
 
@@ -105,7 +167,7 @@ git pull origin "$default_branch"
 
 ---
 
-### Step 3: Create fix branch
+### Step 4: Create fix branch
 
 Derive branch name from issue:
 
@@ -122,7 +184,7 @@ Report: `✓ Created branch: <branch-name>`
 
 ---
 
-### Step 4: Run plan skill — analyze and create implementation plan
+### Step 5: Run plan skill — analyze and create implementation plan
 
 **Load and use the plan skill:**
 
@@ -161,7 +223,7 @@ Read `/Users/alejandralevy/Documents/decentraland/agent-server/skills/plan/SKILL
 
 ---
 
-### Step 5: Implement the fix
+### Step 6: Implement the fix
 
 **Follow the plan autonomously:**
 
@@ -176,7 +238,7 @@ After each edit, briefly describe what was changed and why it fixes the issue.
 
 ---
 
-### Step 6: Run build and tests
+### Step 7: Run build and tests
 
 **Always test before committing:**
 
@@ -211,7 +273,7 @@ Report: `✓ Build successful` or `✓ Tests passed`
 
 ---
 
-### Step 7: Commit changes
+### Step 8: Commit changes
 
 **Stage all changes:**
 
@@ -252,7 +314,7 @@ Report: `✓ Committed changes`
 
 ---
 
-### Step 8: Push branch
+### Step 9: Push branch
 
 ```bash
 git push -u origin <branch-name>
@@ -262,7 +324,7 @@ Report: `✓ Pushed branch: <branch-name>`
 
 ---
 
-### Step 9: Create pull request
+### Step 10: Create pull request
 
 **Generate PR description from the plan and changes:**
 
@@ -320,18 +382,19 @@ User: fix https://github.com/decentraland/creator-hub/issues/7443
 
 Agent:
 1. ✓ Fetched issue #7443: "Custom item textures not saved"
-2. ✓ Found repo locally: /Users/alejandralevy/Documents/decentraland/creator-hub
-3. ✓ Created branch: fix/7443-texture-not-saved
-4. 📋 PLAN:
+2. ✓ Validated repository: creator-hub is active (not archived)
+3. ✓ Found repo locally: /Users/alejandralevy/Documents/decentraland/creator-hub
+4. ✓ Created branch: fix/7443-texture-not-saved
+5. 📋 PLAN:
    - Problem: Textures lost on save
    - Root cause: Missing serialization in CustomItemManager
    - Solution: Add texture serialization to saveState()
-5. ✓ Implemented fix in src/components/CustomItems/CustomItemManager.ts
-6. ✓ Build successful
-7. ✓ Tests passed
-8. ✓ Committed: fix: persist custom item textures on save
-9. ✓ Pushed branch
-10. ✓ Created PR: https://github.com/decentraland/creator-hub/pull/7450
+6. ✓ Implemented fix in src/components/CustomItems/CustomItemManager.ts
+7. ✓ Build successful
+8. ✓ Tests passed
+9. ✓ Committed: fix: persist custom item textures on save
+10. ✓ Pushed branch
+11. ✓ Created PR: https://github.com/decentraland/creator-hub/pull/7450
 
 ✅ FIX COMPLETE
 ```
@@ -388,16 +451,20 @@ Requested by <name> via Slack
 ## Context for Decentraland Creator Hub
 
 **Common repos:**
-- `decentraland/creator-hub` — Creator Hub monorepo (includes main app, inspector, assets packs)
+- `decentraland/creator-hub` — **MONOREPO** (includes main app, inspector, ALL asset packs)
 - `decentraland/sdk-toolchain` — SDK build tools
 - `decentraland/js-sdk-toolchain` — SDK JavaScript tooling
 
-**Important:** `decentraland/creator-hub` is now a **monorepo** that contains:
+**‼️ CRITICAL: Creator Hub is a MONOREPO**
+
+`decentraland/creator-hub` is a **monorepo** that contains:
 - Main Creator Hub application
 - Scene Inspector
-- Assets Packs
+- **ALL Asset Packs** (previously in separate `decentraland/asset-pack-*` repos)
 
-All issues related to inspector and assets packs are now in the creator-hub repository.
+**ANY issue related to asset packs MUST BE RESOLVED in the creator-hub repository.**
+
+The old individual asset pack repositories (`decentraland/asset-pack-common`, `decentraland/asset-pack-animals`, etc.) are **ARCHIVED** and must NOT be used for fixes.
 
 **Typical stack:**
 - TypeScript / Node.js
