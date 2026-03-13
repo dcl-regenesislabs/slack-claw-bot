@@ -10,25 +10,21 @@ Autonomous end-to-end workflow for fixing GitHub issues: understand the problem,
 ## When to use
 
 - User says `fix` followed by a GitHub issue URL (e.g., `fix https://github.com/decentraland/creator-hub/issues/123`)
-- User says `soluciona este issue` or `fix this issue` with a URL
+- User says `fix this issue` with a URL or a text description
 - User says `fix` followed by a description of the problem
 
-## ⚠️ IMPORTANT: Creator Hub Monorepo
+## IMPORTANT: Creator Hub Monorepo
 
 **Creator Hub (`decentraland/creator-hub`) is a MONOREPO.**
 
 **ALL asset pack issues MUST be fixed in the creator-hub repository**, not in individual asset pack repos.
 
-The following repositories are **ARCHIVED** and should NEVER be used:
+The following repositories axre **ARCHIVED** and should NEVER be used:
 - `decentraland/asset-packs`
-- `decentraland/asset-pack-*` (any individual asset pack repo)
-- `decentraland/inspector`
 
 **If an issue is in any archived asset pack repository:**
-1. Stop immediately
-2. Tell the user the repo is archived
-3. Direct them to open/migrate the issue to `decentraland/creator-hub`
-4. Do NOT attempt to fix in the archived repo
+1. If the issue is on the `decentraland/asset-packs` it must be fixed on the `decentraland/creator-hub` 
+2. There's no need to duplicate or create the issue again, if it's an asset-packs issue, fix it on the creator hub repo, there's a asset-packs package
 
 ## Input parsing
 
@@ -37,7 +33,7 @@ The skill receives one argument:
 1. **GitHub issue URL** — Extract issue details using `gh`
 2. **Free-text description** — Use directly as context
 
-If no argument is provided, ask: "¿Qué issue quieres que fixee? Pasa una URL de GitHub o describe el problema."
+If no argument is provided, ask: "Which issue should a fix? Please provide a description or the issue URL"
 
 ---
 
@@ -64,52 +60,7 @@ Use the description directly and infer repository from context if possible.
 
 ---
 
-### Step 2: Validate repository (avoid archived repos)
-
-**IMPORTANT: Creator Hub is a monorepo. All asset packs, inspector, and creator hub issues are resolved in the creator-hub repository.**
-
-Before proceeding, check the repository name:
-
-**If the issue is in any of these archived repos:**
-- `decentraland/asset-packs`
-- `decentraland/inspector`
-- `decentraland/asset-pack-*` (any asset pack repo, e.g., asset-pack-common, asset-pack-animals, etc.)
-
-**Stop immediately and redirect:**
-
-```
-⚠️ This issue is in an archived repository.
-
-Creator Hub is now a monorepo. All asset pack, inspector, and creator hub issues 
-must be resolved in:
-https://github.com/decentraland/creator-hub
-
-Please:
-1. Check if this issue has been migrated to creator-hub
-2. If not, create a new issue in creator-hub with the same details
-3. Reference the old issue number
-
-I cannot work in archived repositories.
-```
-
-**Valid repositories to work in:**
-- `decentraland/creator-hub` — Main monorepo (includes inspector, asset packs, creator hub app)
-- `decentraland/sdk-toolchain` — SDK build tools
-- `decentraland/js-sdk-toolchain` — SDK JavaScript tooling
-- `decentraland/godot-explorer` — Mobile client
-- Any other active Decentraland repository (check it's not archived)
-
-**If unsure whether a repo is archived:**
-
-```bash
-gh repo view <org>/<repo> --json isArchived --jq .isArchived
-```
-
-If output is `true`, do not proceed with the fix.
-
----
-
-### Step 3: Locate or clone the repository
+### Step 2: Locate or clone the repository
 
 **Two execution modes:**
 
@@ -167,7 +118,7 @@ git pull origin "$default_branch"
 
 ---
 
-### Step 4: Create fix branch
+### Step 3: Create fix branch
 
 Derive branch name from issue:
 
@@ -184,7 +135,7 @@ Report: `✓ Created branch: <branch-name>`
 
 ---
 
-### Step 5: Run plan skill — analyze and create implementation plan
+### Step 4: Run plan skill — analyze and create implementation plan
 
 **Load and use the plan skill:**
 
@@ -223,7 +174,7 @@ Read `/Users/alejandralevy/Documents/decentraland/agent-server/skills/plan/SKILL
 
 ---
 
-### Step 6: Implement the fix
+### Step 5: Implement the fix
 
 **Follow the plan autonomously:**
 
@@ -238,7 +189,7 @@ After each edit, briefly describe what was changed and why it fixes the issue.
 
 ---
 
-### Step 7: Run build and tests
+### Step 6: Run build and tests
 
 **Always test before committing:**
 
@@ -249,7 +200,10 @@ Determine the project type and run appropriate commands:
 npm ci  # install dependencies if needed
 npm run build  # or npm run compile
 npm test  # run test suite
+npm lint 
 ```
+
+For node, TS projects, make sure that take all the checks that willl run on github actions once the PR is created and run all of them o make sure everything works correctly
 
 **Go:**
 ```bash
@@ -347,19 +301,7 @@ gh pr create \
 
 $(git diff origin/$default_branch..HEAD --stat)
 
-## Testing
 
-✓ Build successful
-✓ Tests passing
-<Additional manual testing if done>
-
-## Closes
-
-Fixes <GitHub issue URL>
-
----
-
-🤖 Created via Slack with Claude"
 ```
 
 **Capture PR URL and report:**
@@ -452,7 +394,6 @@ Requested by <name> via Slack
 
 **Common repos:**
 - `decentraland/creator-hub` — **MONOREPO** (includes main app, inspector, ALL asset packs)
-- `decentraland/sdk-toolchain` — SDK build tools
 - `decentraland/js-sdk-toolchain` — SDK JavaScript tooling
 
 **‼️ CRITICAL: Creator Hub is a MONOREPO**
@@ -460,16 +401,8 @@ Requested by <name> via Slack
 `decentraland/creator-hub` is a **monorepo** that contains:
 - Main Creator Hub application
 - Scene Inspector
-- **ALL Asset Packs** (previously in separate `decentraland/asset-pack-*` repos)
+- **Asset Packs** (previously in separate `decentraland/asset-packs` repos)
 
 **ANY issue related to asset packs MUST BE RESOLVED in the creator-hub repository.**
-
-The old individual asset pack repositories (`decentraland/asset-pack-common`, `decentraland/asset-pack-animals`, etc.) are **ARCHIVED** and must NOT be used for fixes.
-
-**Typical stack:**
-- TypeScript / Node.js
-- React for UI
-- Build: `npm run build`
-- Tests: `npm test`
 
 **Important:** If you don't have context for a Decentraland repo, read the README.md first to understand the project structure, build commands, and testing approach.
