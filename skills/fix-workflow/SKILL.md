@@ -5,7 +5,7 @@ description: End-to-end workflow for fixing GitHub issues. Accepts a GitHub issu
 
 # Fix Issue Workflow (Autonomous)
 
-Autonomous end-to-end workflow for fixing GitHub issues: understand the problem, find/clone the repo, create a branch, plan the solution, implement it, test it, commit, and create the PR.
+Autonomous end-to-end workflow for fixing GitHub issues: fetch the issue, find/clone the repo, create a branch, run plan and work workflows, and create the PR.
 
 ## When to use
 
@@ -19,11 +19,11 @@ Autonomous end-to-end workflow for fixing GitHub issues: understand the problem,
 
 **ALL asset pack issues MUST be fixed in the creator-hub repository**, not in individual asset pack repos.
 
-The following repositories axre **ARCHIVED** and should NEVER be used:
+The following repositories are **ARCHIVED** and should NEVER be used:
 - `decentraland/asset-packs`
 
 **If an issue is in any archived asset pack repository:**
-1. If the issue is on the `decentraland/asset-packs` it must be fixed on the `decentraland/creator-hub` 
+1. If the issue is on the `decentraland/asset-packs` it must be fixed on the `decentraland/creator-hub`
 2. There's no need to duplicate or create the issue again, if it's an asset-packs issue, fix it on the creator hub repo, there's a asset-packs package
 
 ## Input parsing
@@ -33,7 +33,7 @@ The skill receives one argument:
 1. **GitHub issue URL** — Extract issue details using `gh`
 2. **Free-text description** — Use directly as context
 
-If no argument is provided, ask: "Which issue should a fix? Please provide a description or the issue URL"
+If no argument is provided, ask: "Which issue should I fix? Please provide a description or the issue URL"
 
 ---
 
@@ -72,22 +72,19 @@ Use the description directly and infer repository from context if possible.
 When running via CLI, check in the parent directory of the agent-server:
 
 ```bash
-# Get parent directory of agent-server
 parent_dir=$(dirname "$(pwd)")
 
-# Check if repo exists in parent directory
 if [ -d "$parent_dir/<repo-name>" ]; then
   cd "$parent_dir/<repo-name>"
   git fetch origin
-  echo "✓ Found repo locally: $parent_dir/<repo-name>"
+  echo "Found repo locally: $parent_dir/<repo-name>"
 else
-  # Not found locally, proceed to clone
-  echo "⚠ Repo not found locally, cloning..."
+  echo "Repo not found locally, cloning..."
   temp_dir=$(mktemp -d)
   cd "$temp_dir"
   gh repo clone <org>/<repo-name>
   cd <repo-name>
-  echo "✓ Cloned repo to temp directory: $temp_dir/<repo-name>"
+  echo "Cloned repo to temp directory: $temp_dir/<repo-name>"
 fi
 ```
 
@@ -122,223 +119,142 @@ git pull origin "$default_branch"
 
 Derive branch name from issue:
 
-- **From GitHub issue:** `fix/<issue-number>-<kebab-case-short-title>`  
+- **From GitHub issue:** `fix/<issue-number>-<kebab-case-short-title>`
   Example: `fix/7443-texture-not-saved`
-- **From description:** `fix/<kebab-case-description>`  
+- **From description:** `fix/<kebab-case-description>`
   Example: `fix/custom-item-texture-bug`
 
 ```bash
 git checkout -b <branch-name> "origin/$default_branch"
 ```
 
-Report: `✓ Created branch: <branch-name>`
+---
+
+### Step 4: Ensure Compound Engineering plugin is installed
+
+```bash
+if ! claude plugins list 2>/dev/null | grep -q compound-engineering; then
+  claude plugins install compound-engineering
+fi
+```
+
+If installation fails, report the error and stop. The plan and work workflows require this plugin.
 
 ---
 
-### Step 4: Run plan skill — analyze and create implementation plan
+### Step 5: Run `/compound-engineering:workflows:plan`
 
-**Load and use the plan skill:**
-
-Read `/Users/alejandralevy/Documents/decentraland/agent-server/skills/plan/SKILL.md` and follow its workflow to:
-
-1. **Understand the problem** — Read issue body, analyze what's broken
-2. **Explore the codebase** — Find relevant files, components, modules
-3. **Search for context:**
-   - Grep for error messages, function names, component names
-   - Look at recent commits related to the area
-   - Check for similar issues or PRs
-4. **Identify root cause** — Determine why it's broken
-5. **Propose solution** — Describe the fix approach
-
-**Output the plan clearly:**
+**Invoke the plan workflow directly, passing the issue context as the argument.** Do NOT analyze the issue yourself — let the workflow handle everything:
 
 ```
-📋 PLAN
-
-**Problem:** <concise summary>
-
-**Root Cause:** <what's causing the issue>
-
-**Affected Files:**
-- src/components/Foo.ts
-- src/utils/Bar.ts
-
-**Solution Approach:**
-1. <Step 1>
-2. <Step 2>
-3. <Step 3>
-
-**Testing Strategy:**
-- <How to verify the fix>
+/compound-engineering:workflows:plan <paste the full issue title + body here as the argument>
 ```
+
+The workflow will autonomously:
+- Research the codebase
+- Find relevant files and patterns
+- Identify the root cause
+- Create a plan document in `docs/plans/`
+- Ask what to do next
+
+**When prompted for next steps, select "Start /workflows:work".**
 
 ---
 
-### Step 5: Implement the fix
+### Step 6: Run `/compound-engineering:workflows:work`
 
-**Follow the plan autonomously:**
+**Invoke the work workflow directly, passing the plan file path.** Do NOT implement anything yourself — let the workflow handle everything:
 
-- Use `read` to examine the affected files
-- Use `edit` to make precise changes
-- Use `write` if creating new files
-- Make changes incrementally, one logical step at a time
+```
+/compound-engineering:workflows:work docs/plans/<the-plan-file-created-in-step-5>.md
+```
 
-**Verify changes:**
-
-After each edit, briefly describe what was changed and why it fixes the issue.
+The workflow will autonomously:
+- Break the plan into tasks
+- Implement all changes
+- Run tests and type checks
+- Create commits
 
 ---
 
-### Step 6: Run build and tests
+### Step 7: Final CI verification
 
-**Always test before committing:**
+After the work workflow completes, run the same checks that GitHub Actions will run. Look at `.github/workflows/` to find the CI checks, then run them locally:
 
-Determine the project type and run appropriate commands:
-
-**Node.js / TypeScript:**
+**Node.js / TypeScript (typical):**
 ```bash
-npm ci  # install dependencies if needed
-npm run build  # or npm run compile
-npm test  # run test suite
-npm lint 
+npm run build
+npm test
+npm run lint
+npm run typecheck
 ```
 
-For node, TS projects, make sure that take all the checks that willl run on github actions once the PR is created and run all of them o make sure everything works correctly
+**If anything fails:** fix it, commit, and re-run until everything passes.
 
-**Go:**
-```bash
-go build ./...
-go test ./...
-```
-
-**Python:**
-```bash
-pip install -r requirements.txt
-pytest
-```
-
-**If build or tests fail:**
-- Analyze the error
-- Fix the issue
-- Re-run tests
-- **Never proceed to commit if tests fail**
-
-Report: `✓ Build successful` or `✓ Tests passed`
+**Do NOT proceed if checks fail.**
 
 ---
 
-### Step 8: Commit changes
+### Step 8: Push and create PR
 
-**Stage all changes:**
-
-```bash
-git add -A
-```
-
-**Create conventional commit:**
-
-```bash
-git commit -m "<type>: <short description>
-
-<optional longer explanation>
-
-Fixes: <GitHub issue URL or #number>"
-```
-
-Commit types:
-- `fix` — Bug fixes
-- `feat` — New features
-- `refactor` — Code improvements without changing behavior
-- `test` — Test additions or fixes
-- `docs` — Documentation changes
-
-Example:
-```
-fix: persist custom item textures on save
-
-Previously, textures were lost when saving custom items because
-the texture state wasn't being serialized to the scene file.
-
-Added texture serialization to CustomItemManager.saveState().
-
-Fixes: #7443
-```
-
-Report: `✓ Committed changes`
-
----
-
-### Step 9: Push branch
+**Push the branch:**
 
 ```bash
 git push -u origin <branch-name>
 ```
 
-Report: `✓ Pushed branch: <branch-name>`
-
----
-
-### Step 10: Create pull request
-
-**Generate PR description from the plan and changes:**
+**Create the PR.** Build the description from the commits and plan:
 
 ```bash
 gh pr create \
-  --title "<type>: <concise title matching commit>" \
-  --body "## Summary
+  --title "<type>: <concise title>" \
+  --body "$(cat <<'EOF'
+## Summary
 
-<Brief explanation of what was fixed>
+<1-3 bullet points from the plan and commits>
 
-## Problem
+## Root Cause
 
-<What was broken and why>
-
-## Solution
-
-<What was changed to fix it>
+<From the plan document>
 
 ## Changes
 
-$(git diff origin/$default_branch..HEAD --stat)
+<From git diff --stat>
 
+## Testing
 
+<What was verified — build, tests, lint, typecheck>
+
+## Closes
+
+<GitHub issue URL or "Fixes #number">
+
+---
+🤖 Created via Slack with Claude
+EOF
+)"
 ```
 
-**Capture PR URL and report:**
-
-```
-✅ FIX COMPLETE
-
-Branch: <branch-name>
-PR: <PR URL>
-
-<Brief summary of what was done>
-```
+**Report the PR URL.**
 
 ---
 
 ## Example flow
 
 ```
-User: fix https://github.com/decentraland/creator-hub/issues/7443
+User: fix https://github.com/decentraland/creator-hub/issues/170
 
 Agent:
-1. ✓ Fetched issue #7443: "Custom item textures not saved"
-2. ✓ Validated repository: creator-hub is active (not archived)
-3. ✓ Found repo locally: /Users/alejandralevy/Documents/decentraland/creator-hub
-4. ✓ Created branch: fix/7443-texture-not-saved
-5. 📋 PLAN:
-   - Problem: Textures lost on save
-   - Root cause: Missing serialization in CustomItemManager
-   - Solution: Add texture serialization to saveState()
-6. ✓ Implemented fix in src/components/CustomItems/CustomItemManager.ts
-7. ✓ Build successful
-8. ✓ Tests passed
-9. ✓ Committed: fix: persist custom item textures on save
-10. ✓ Pushed branch
-11. ✓ Created PR: https://github.com/decentraland/creator-hub/pull/7450
+1. Fetched issue #170: "Fix hide image action"
+2. Found repo locally: /path/to/creator-hub
+3. Created branch: fix/170-hide-image-action
+4. Compound Engineering plugin verified
+5. Ran /workflows:plan → created docs/plans/2026-03-13-fix-hide-image-action-plan.md
+6. Ran /workflows:work → implemented fix, tests pass
+7. CI checks passed (build, test, lint, typecheck)
+8. Created PR: https://github.com/decentraland/creator-hub/pull/1200
 
-✅ FIX COMPLETE
+FIX COMPLETE
 ```
 
 ---
@@ -347,31 +263,25 @@ Agent:
 
 - **Never force push** (`git push -f`)
 - **Never push directly to main/master**
-- **Always run tests before committing** — do not proceed if tests fail
+- **Always run tests before creating PR**
 - **Never commit secrets, tokens, or .env files**
-- **Get user confirmation before destructive operations**
 - **If cloning temporarily, work in isolated temp directory**
 
 ---
 
 ## Error Handling
 
-**If tests fail:**
-1. Analyze error output
-2. Fix the issue
-3. Re-run tests
-4. Only proceed when tests pass
+**If Compound Engineering plugin fails to install:**
+- Report the error and stop. Do not attempt manual fallback.
 
-**If build fails:**
-1. Read error messages
-2. Check for missing dependencies
-3. Fix compilation errors
-4. Re-run build
+**If /workflows:plan fails:**
+- Check error output, retry once. If it fails again, report to user.
+
+**If /workflows:work fails or tests fail:**
+- Analyze errors, fix issues, re-run the failing step.
 
 **If PR creation fails:**
-1. Check if branch was pushed successfully
-2. Verify GitHub CLI auth: `gh auth status`
-3. Try again or report error to user
+- Check `gh auth status`, verify branch was pushed, retry.
 
 ---
 
@@ -396,7 +306,7 @@ Requested by <name> via Slack
 - `decentraland/creator-hub` — **MONOREPO** (includes main app, inspector, ALL asset packs)
 - `decentraland/js-sdk-toolchain` — SDK JavaScript tooling
 
-**‼️ CRITICAL: Creator Hub is a MONOREPO**
+**CRITICAL: Creator Hub is a MONOREPO**
 
 `decentraland/creator-hub` is a **monorepo** that contains:
 - Main Creator Hub application
@@ -405,4 +315,4 @@ Requested by <name> via Slack
 
 **ANY issue related to asset packs MUST BE RESOLVED in the creator-hub repository.**
 
-**Important:** If you don't have context for a Decentraland repo, read the README.md first to understand the project structure, build commands, and testing approach.
+**Important:** If you don't have context for a Decentraland repo, read the README.md and CLAUDE.md first to understand the project structure, build commands, and testing approach.
