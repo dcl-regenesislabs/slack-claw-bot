@@ -1,12 +1,14 @@
 export type SubmitResult =
-  | "thread-busy"
-  | { status: "accepted"; done: Promise<void>; queued: boolean };
+  | { status: "accepted"; done: Promise<void>; queued: boolean }
+  | { status: "queued-behind-thread"; done: Promise<void> };
 
 export class AgentScheduler {
   private activeThreads = new Set<string>();
+  private threadQueues = new Map<string, Array<() => Promise<void>>>();
   private running = 0;
   private waitQueue: Array<() => void> = [];
   private maxConcurrent: number;
+  private drainResolvers: Array<() => void> = [];
 
   constructor(maxConcurrent = 3) {
     this.maxConcurrent = maxConcurrent;
@@ -14,7 +16,8 @@ export class AgentScheduler {
 
   submit(threadId: string, work: () => Promise<void>): SubmitResult {
     if (this.activeThreads.has(threadId)) {
-      return "thread-busy";
+      const done = this.enqueueForThread(threadId, work);
+      return { status: "queued-behind-thread", done };
     }
 
     const queued = this.running >= this.maxConcurrent;
@@ -22,6 +25,36 @@ export class AgentScheduler {
     const done = this.execute(threadId, work);
 
     return { status: "accepted", done, queued };
+  }
+
+  async drain(timeoutMs: number): Promise<void> {
+    if (this.activeThreads.size === 0) return;
+
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      this.drainResolvers.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  private enqueueForThread(threadId: string, work: () => Promise<void>): Promise<void> {
+    let queue = this.threadQueues.get(threadId);
+    if (!queue) {
+      queue = [];
+      this.threadQueues.set(threadId, queue);
+    }
+    return new Promise<void>((resolve, reject) => {
+      queue!.push(async () => {
+        try {
+          await work();
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
   }
 
   private async execute(threadId: string, work: () => Promise<void>): Promise<void> {
@@ -34,8 +67,42 @@ export class AgentScheduler {
       await work();
     } finally {
       this.running--;
+
+      // Run next queued work for this thread, if any
+      const queue = this.threadQueues.get(threadId);
+      const next = queue?.shift();
+      if (queue?.length === 0) this.threadQueues.delete(threadId);
+
+      if (next) {
+        this.running++;
+        next().finally(() => {
+          this.running--;
+          this.finishThread(threadId);
+        });
+      } else {
+        this.finishThread(threadId);
+      }
+    }
+  }
+
+  private finishThread(threadId: string): void {
+    const queue = this.threadQueues.get(threadId);
+    const next = queue?.shift();
+    if (queue?.length === 0) this.threadQueues.delete(threadId);
+
+    if (next) {
+      this.running++;
+      next().finally(() => {
+        this.running--;
+        this.finishThread(threadId);
+      });
+    } else {
       this.activeThreads.delete(threadId);
       this.waitQueue.shift()?.();
+
+      if (this.activeThreads.size === 0 && this.drainResolvers.length > 0) {
+        for (const resolve of this.drainResolvers.splice(0)) resolve();
+      }
     }
   }
 }

@@ -1,15 +1,24 @@
 import "dotenv/config";
 import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
-import { initAgent, runAgent, REVIEW_MODEL, PR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
+import { initAgent, runAgent, detectReviewModel } from "./agent.js";
+import { resolveMemoryDir } from "./memory.js";
 
 const dryRun = process.argv.includes("--dry-run");
 const positionalArgs = process.argv.slice(2).filter((a) => a !== "--dry-run");
+
+let memoryDir: string | undefined;
+try {
+  memoryDir = resolveMemoryDir(process.env.MEMORY_REPO);
+} catch (err) {
+  console.error("[cli] Failed to set up memory:", err);
+}
 
 await initAgent({
   anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
   githubToken: process.env.GITHUB_TOKEN,
   model: process.env.MODEL,
+  memoryDir,
 });
 
 function streamingEvents(): EventEmitter {
@@ -18,39 +27,47 @@ function streamingEvents(): EventEmitter {
   return events;
 }
 
-function detectReviewModel(content: string): string | undefined {
-  const isReview =
-    PR_URL_PATTERN.test(content) ||
-    REVIEW_KEYWORD_PATTERN.test(content);
-  return isReview ? REVIEW_MODEL : undefined;
+function makeRunOptions(content: string, threadTs?: string) {
+  const ts = threadTs || `cli-${Date.now()}`;
+  return {
+    threadTs: ts,
+    eventTs: ts,
+    userId: "cli-user",
+    username: "cli-user",
+    newMessage: content,
+    fetchThread: async () => content,
+    fetchThreadSince: async () => "",
+    dryRun,
+    model: detectReviewModel(content),
+    events: streamingEvents(),
+  };
 }
 
 if (positionalArgs.length > 0) {
-  // One-shot mode
-  const threadContent = positionalArgs.join(" ");
+  const content = positionalArgs.join(" ");
   if (dryRun) console.log("Dry run enabled — agent will not execute commands");
 
   try {
-    await runAgent({ threadContent, dryRun, model: detectReviewModel(threadContent), events: streamingEvents() });
+    await runAgent(makeRunOptions(content));
     console.log();
   } catch (err) {
     console.error("Error:", err instanceof Error ? err.message : err);
     process.exit(1);
   }
 } else {
-  // Interactive REPL mode
   console.log("CLI test mode");
   if (dryRun) console.log("Dry run enabled — agent will not execute commands");
   console.log("Type your message (multi-line: end with an empty line):\n");
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const lines: string[] = [];
+  const replThreadTs = `cli-${Date.now()}`;
 
   rl.on("line", (line) => {
     if (line === "" && lines.length > 0) {
-      const threadContent = lines.join("\n");
+      const content = lines.join("\n");
       lines.length = 0;
-      handleInput(threadContent);
+      handleInput(content);
     } else {
       lines.push(line);
     }
@@ -58,12 +75,12 @@ if (positionalArgs.length > 0) {
 
   rl.on("close", () => process.exit(0));
 
-  async function handleInput(threadContent: string) {
+  async function handleInput(content: string) {
     rl.pause();
     console.log("\n--- Agent running ---\n");
 
     try {
-      await runAgent({ threadContent, dryRun, model: detectReviewModel(threadContent), events: streamingEvents() });
+      await runAgent(makeRunOptions(content, replThreadTs));
       console.log("\n\n--- Done ---\n");
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : err);

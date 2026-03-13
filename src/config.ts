@@ -11,6 +11,7 @@ export interface Config {
   upstashRedisToken?: string;
   logChannelId?: string;
   healthPort?: number;
+  memoryRepo?: string;
 }
 
 export function loadConfig(): Config {
@@ -25,6 +26,7 @@ export function loadConfig(): Config {
     upstashRedisToken: process.env.UPSTASH_REDIS_REST_TOKEN,
     logChannelId: process.env.LOG_CHANNEL_ID,
     healthPort: process.env.HEALTH_PORT ? parseInt(process.env.HEALTH_PORT, 10) : undefined,
+    memoryRepo: process.env.MEMORY_REPO,
   };
 }
 

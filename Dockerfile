@@ -1,6 +1,12 @@
-FROM node:20-alpine
+FROM node:20-slim
 
-RUN apk add --no-cache tini github-cli
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini git build-essential cmake curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN GH_VERSION=2.67.0 \
+    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+       | tar xz -C /usr/local --strip-components=1
 
 WORKDIR /app
 
@@ -12,5 +18,5 @@ COPY src/ src/
 COPY prompts/ prompts/
 COPY skills/ skills/
 
-ENTRYPOINT ["/sbin/tini", "--"]
+ENTRYPOINT ["tini", "--"]
 CMD ["npx", "tsx", "src/index.ts"]
