@@ -44,6 +44,7 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
       const { text: response, cost, tokens } = await runAgent({
         threadTs,
         eventTs: event.ts,
+        userId: event.user || "unknown",
         username: userName,
         newMessage: text,
         fetchThread: () => fetchThread(client, event.channel, threadTs),

@@ -47,6 +47,7 @@ interface AgentConfig {
 export interface RunOptions {
   threadTs: string;
   eventTs: string;
+  userId: string;
   username: string;
   newMessage: string;
   fetchThread: () => Promise<string>;
@@ -119,9 +120,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
   const modelId = options.model || defaultModelId;
   const { sessionManager, isResumed } = await resolveSession(options.threadTs);
-  const memoryContent = memoryDir ? loadMemoryContext(memoryDir, options.username) : "";
+  const memoryContent = memoryDir ? loadMemoryContext(memoryDir, options.userId, options.username) : "";
   if (memoryDir) {
-    console.log(`[memory] Loaded context for ${options.username} (${memoryContent.length} chars)`);
+    console.log(`[memory] Loaded context for ${options.username} (${options.userId}) (${memoryContent.length} chars)`);
     if (process.env.DEBUG && memoryContent) console.log(`[debug] memory context:\n${memoryContent}`);
   } else {
     console.log("[memory] No memoryDir configured — memory disabled");
@@ -148,7 +149,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     const usedTools = hasToolCalls(session.messages);
     const hasSaveMarker = rawResponse.includes(SAVE_MARKER);
     if (usedTools || hasSaveMarker) {
-      await saveMemory(session, options.username);
+      await saveMemory(session, options.userId, options.username);
     } else {
       console.log("[agent] Skipping memory save — no tools used and no [SAVE] marker");
     }
@@ -257,7 +258,7 @@ function createMemoryExtension(content: string): ExtensionFactory {
   };
 }
 
-async function saveMemory(session: AgentSession, username: string): Promise<void> {
+async function saveMemory(session: AgentSession, userId: string, username: string): Promise<void> {
   if (!memoryDir) return;
 
   const timer = setTimeout(() => {
@@ -266,7 +267,7 @@ async function saveMemory(session: AgentSession, username: string): Promise<void
   }, 60_000);
 
   try {
-    await session.prompt(buildMemorySavePrompt(username, memoryDir));
+    await session.prompt(buildMemorySavePrompt(userId, username, memoryDir));
     console.log("[memory] Save complete");
   } catch (err) {
     console.error("[agent] Memory save failed:", err);

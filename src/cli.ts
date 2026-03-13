@@ -32,6 +32,7 @@ function makeRunOptions(content: string, threadTs?: string) {
   return {
     threadTs: ts,
     eventTs: ts,
+    userId: "cli-user",
     username: "cli-user",
     newMessage: content,
     fetchThread: async () => content,
