@@ -5,6 +5,7 @@ import { runAgent, syncAuth, detectReviewModel } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
 
 const nameCache = new Map<string, string>();
+let homeTeamId: string | null = null;
 
 function isSlackError(err: unknown): err is { data?: { error?: string } } {
   return typeof err === "object" && err !== null && "data" in err;
@@ -92,6 +93,16 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
   });
 
   await app.start();
+
+  // Resolve our workspace's team ID so we can reject Slack Connect users from other orgs
+  try {
+    const auth = await app.client.auth.test();
+    homeTeamId = auth.team_id ?? null;
+    console.log(`[slack] Home team: ${homeTeamId}`);
+  } catch (err) {
+    console.error("[slack] Failed to resolve home team ID:", err);
+  }
+
   console.log("Slack bot is running");
   return app;
 }
@@ -144,7 +155,9 @@ async function isExternalOrGuest(client: WebClient, userId: string): Promise<boo
   try {
     const info = await client.users.info({ user: userId });
     const user = info.user;
-    const denied = Boolean(user?.is_restricted || user?.is_ultra_restricted || user?.is_stranger);
+    const isGuest = Boolean(user?.is_restricted || user?.is_ultra_restricted || user?.is_stranger);
+    const isExternalTeam = Boolean(homeTeamId && user?.team_id && user.team_id !== homeTeamId);
+    const denied = isGuest || isExternalTeam;
     authCache.set(userId, { denied, cachedAt: Date.now() });
 
     const name = info.user?.real_name || info.user?.name;
