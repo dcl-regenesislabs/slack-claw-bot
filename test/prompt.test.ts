@@ -38,4 +38,22 @@ describe("buildPrompt", () => {
     const result = buildPrompt("hello");
     assert.ok(!result.includes("Triggered by:"));
   });
+
+  it("wraps content in slack-message tags when isFollowUp is true", () => {
+    const result = buildPrompt("new message", false, undefined, true);
+    assert.ok(result.includes("<slack-message>\nnew message\n</slack-message>"));
+    assert.ok(!result.includes("<slack-thread>"));
+  });
+
+  it("uses slack-thread tags when isFollowUp is false", () => {
+    const result = buildPrompt("thread content", false, undefined, false);
+    assert.ok(result.includes("<slack-thread>"));
+    assert.ok(!result.includes("<slack-message>"));
+  });
+
+  it("includes triggeredBy in follow-up prompt", () => {
+    const result = buildPrompt("msg", false, "Alice", true);
+    assert.ok(result.includes("Triggered by: Alice"));
+    assert.ok(result.includes("<slack-message>"));
+  });
 });
