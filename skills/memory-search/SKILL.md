@@ -14,13 +14,13 @@ Use `qmd` to search across shared memory files (daily logs, shared knowledge). T
 ### Quick keyword search
 
 ```bash
-qmd --index claw-memory search "PR review" -n 5
+npx qmd --index claw-memory search "PR review" -n 5
 ```
 
 ### Full document output
 
 ```bash
-qmd --index claw-memory search "deployment" --full
+npx qmd --index claw-memory search "deployment" --full
 ```
 
 ### Direct file access

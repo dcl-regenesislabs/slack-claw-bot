@@ -31,7 +31,7 @@ src/
   - Agent tools: `createCodingTools(cwd)` provides bash, read, edit, and write tools
   - Extensions: `before_agent_start` injects memory context into system prompt
 - **Sessions**: each Slack thread maps to a session file (`SessionManager.open()`). Follow-ups resume the session instead of re-processing the full thread.
-- **Memory**: persistent memory — `shared/MEMORY.md` (shared), `users/` (per-user), `shared/daily/` (logs). When `MEMORY_REPO` is set, cloned to `/tmp/claw-memory` on startup; otherwise uses a temp dir. Loaded at start of each run, saved via post-task prompt. `qmd` (BM25 keyword search) indexes only `shared/` so user files stay private; the agent searches via `qmd --index claw-memory search`. Git-backed repos are committed+pushed by the agent via the `push-memory` skill.
+- **Memory**: persistent memory — `shared/MEMORY.md` (shared), `users/` (per-user), `shared/daily/` (logs). When `MEMORY_REPO` is set, cloned to `/tmp/claw-memory` on startup; otherwise uses a temp dir. Loaded at start of each run, saved via post-task prompt. `qmd` (BM25 keyword search) indexes only `shared/` so user files stay private; the agent searches via `npx qmd --index claw-memory search`. Git-backed repos are committed+pushed by the agent via the `push-memory` skill.
 - **Concurrency**: bounded agent pool (`MAX_CONCURRENT_AGENTS`) with a queue. `drain()` for graceful shutdown.
 - **Skills**: prompt-based tool definitions in `skills/` (create-issue, github, memory-search, mobile-project, pr-review, reflect, repos, triage)
 - **System prompt**: `prompts/system.md`
