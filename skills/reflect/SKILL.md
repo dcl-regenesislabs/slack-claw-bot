@@ -11,15 +11,15 @@ Use this skill when asked to review recent learnings or improve your own skills.
 
 1. Use the `memory-search` skill to find recent patterns and learnings, or read the last 7 days of daily logs directly from the memory base directory provided in context:
    ```bash
-   ls -t <memory_base_dir>/daily/ | head -7
+   ls -t <memory_base_dir>/shared/daily/ | head -7
    ```
 
 2. Read each file and identify:
    - Recurring patterns or mistakes
-   - Knowledge that should be promoted to MEMORY.md
-   - Outdated entries in MEMORY.md that should be removed
+   - Knowledge that should be promoted to shared/MEMORY.md
+   - Outdated entries in shared/MEMORY.md that should be removed
 
-3. Update MEMORY.md if needed — consolidate, don't just append.
+3. Update shared/MEMORY.md if needed — consolidate, don't just append.
 
 ## Self-improvement via PR
 

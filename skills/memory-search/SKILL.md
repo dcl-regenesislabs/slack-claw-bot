@@ -1,6 +1,6 @@
 ---
 name: memory-search
-description: Search older daily logs and memory files for past context
+description: Search older daily logs and memory files for past context via npx qmd
 ---
 
 # Memory Search
@@ -9,7 +9,7 @@ Use this skill when you need context from past runs beyond today.
 
 ## How to search
 
-Use `qmd` to search across shared memory files (daily logs, shared knowledge). The search index covers `shared/` only — user-specific files under `users/` are not indexed. The index name and memory base directory are provided in your context.
+Use `npx qmd` to search across shared memory files (daily logs, shared knowledge). The search index covers `shared/` only — user-specific files under `users/` are not indexed. The index name and memory base directory are provided in your context.
 
 ### Quick keyword search
 

@@ -39,7 +39,7 @@ You have a persistent memory stored on disk. Memory is loaded into your context 
 
 ### Searching older memory
 
-Use the `memory-search` skill to search past daily logs, user notes, and shared knowledge via `qmd`.
+Use the `memory-search` skill to search past daily logs, user notes, and shared knowledge via `npx qmd`.
 
 **Always search memory before responding** when:
 - The user references something from a past conversation ("remember when...", "last time...", "we discussed...")
