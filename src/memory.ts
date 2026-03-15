@@ -45,7 +45,7 @@ function ensureCollection(memDir: string): void {
 export function ensureQmd(memDir: string): void {
   if (qmdReady) return;
   try {
-    ensureCollection(memDir);
+    ensureCollection(join(memDir, "shared"));
     qmdReady = true;
     qmd("update");
     console.log("[memory] qmd index updated");
@@ -96,7 +96,7 @@ export function resolveMemoryDir(repo?: string): string {
 }
 
 function ensureMemoryDirs(memoryDir: string): void {
-  mkdirSync(join(memoryDir, "daily"), { recursive: true });
+  mkdirSync(join(memoryDir, "shared", "daily"), { recursive: true });
   mkdirSync(join(memoryDir, "users"), { recursive: true });
 }
 
@@ -116,9 +116,9 @@ export function loadMemoryContext(memoryDir: string, userId: string, username: s
   const today = new Date().toISOString().slice(0, 10);
 
   const sources: Array<{ type: string; relativePath: string }> = [
-    { type: "shared", relativePath: "MEMORY.md" },
+    { type: "shared", relativePath: "shared/MEMORY.md" },
     { type: "user", relativePath: `users/${userId}.md` },
-    { type: "daily", relativePath: `daily/${today}.md` },
+    { type: "daily", relativePath: `shared/daily/${today}.md` },
   ];
 
   for (const { type, relativePath } of sources) {
@@ -134,7 +134,7 @@ export function loadMemoryContext(memoryDir: string, userId: string, username: s
   return blocks.join("\n");
 }
 
-export function buildMemorySavePrompt(userId: string, username: string, memoryDir: string): string {
+export function buildMemorySavePrompt(memoryDir: string, userId: string, username: string): string {
   const today = new Date().toISOString().slice(0, 10);
 
   const isGitRepo = existsSync(join(memoryDir, ".git"));
@@ -144,9 +144,9 @@ export function buildMemorySavePrompt(userId: string, username: string, memoryDi
 The current user is ${username} (${userId}).
 
 Rules:
-- Append to ${memoryDir}/daily/${today}.md: what you did, what you learned, what failed
-- Update ${memoryDir}/users/${userId}.md: if you learned about this user's preferences, patterns, or areas of work
-- Update ${memoryDir}/MEMORY.md ONLY for permanent, high-value learnings (build commands, repo conventions, recurring gotchas). Keep MEMORY.md under 4KB — consolidate, don't just append.
+- Append to ${memoryDir}/shared/daily/${today}.md: what you did, what you learned, what failed. NEVER write user-specific information here (preferences, personal details, names tied to opinions). Daily logs are searchable by all users.
+- Update ${memoryDir}/users/${userId}.md: user-specific preferences, patterns, personal details, and areas of work go HERE. This file is private to the user and not searchable by others.
+- Update ${memoryDir}/shared/MEMORY.md ONLY for permanent, high-value learnings (build commands, repo conventions, recurring gotchas). Keep MEMORY.md under 4KB — consolidate, don't just append.
 - If nothing worth saving, do nothing.${isGitRepo ? "\n- After writing, use the `push-memory` skill to validate, commit, and push." : ""}
 
 Keep entries concise. One line per learning. Don't duplicate what's already in memory.`;

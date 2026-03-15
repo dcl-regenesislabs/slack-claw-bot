@@ -31,7 +31,7 @@ src/
   - Agent tools: `createCodingTools(cwd)` provides bash, read, edit, and write tools
   - Extensions: `before_agent_start` injects memory context into system prompt
 - **Sessions**: each Slack thread maps to a session file (`SessionManager.open()`). Follow-ups resume the session instead of re-processing the full thread.
-- **Memory**: persistent memory — MEMORY.md (shared), users/ (per-user), daily/ (logs). When `MEMORY_REPO` is set, cloned to `/tmp/claw-memory` on startup; otherwise uses a temp dir. Loaded at start of each run, saved via post-task prompt. `qmd` (BM25 keyword search) indexes memory files; the agent searches via `qmd --index claw-memory search`. Git-backed repos are committed+pushed by the agent via the `push-memory` skill.
+- **Memory**: persistent memory — `shared/MEMORY.md` (shared), `users/` (per-user), `shared/daily/` (logs). When `MEMORY_REPO` is set, cloned to `/tmp/claw-memory` on startup; otherwise uses a temp dir. Loaded at start of each run, saved via post-task prompt. `qmd` (BM25 keyword search) indexes only `shared/` so user files stay private; the agent searches via `qmd --index claw-memory search`. Git-backed repos are committed+pushed by the agent via the `push-memory` skill.
 - **Concurrency**: bounded agent pool (`MAX_CONCURRENT_AGENTS`) with a queue. `drain()` for graceful shutdown.
 - **Skills**: prompt-based tool definitions in `skills/` (create-issue, github, memory-search, mobile-project, pr-review, reflect, repos, triage)
 - **System prompt**: `prompts/system.md`
@@ -39,10 +39,11 @@ src/
 ## Memory directory
 
 ```
-/tmp/claw-memory/          (cloned from MEMORY_REPO, or temp dir)
-  MEMORY.md                Shared permanent knowledge (≤4KB)
-  daily/YYYY-MM-DD.md      Daily run logs (≤8KB/day)
-  users/{username}.md      Per-user preferences (≤2KB/user)
+/tmp/claw-memory/              (cloned from MEMORY_REPO, or temp dir)
+  shared/                      qmd indexes ONLY this subtree
+    MEMORY.md                  Shared permanent knowledge (≤4KB)
+    daily/YYYY-MM-DD.md        Daily run logs (≤8KB/day)
+  users/{userId}.md            Per-user preferences (≤2KB/user, NOT indexed)
 ```
 
 Sessions are ephemeral, stored in `/tmp/claw-sessions/`.

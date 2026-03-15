@@ -33,9 +33,9 @@ You have a persistent memory stored on disk. Memory is loaded into your context 
 
 ### Memory files
 
-- `MEMORY.md` — shared permanent knowledge. Update only for high-value, reusable facts (build commands, repo conventions, recurring gotchas). Keep under 4KB. Consolidate entries — merge similar ones, remove outdated ones.
-- `users/{username}.md` — per-user preferences and patterns. Keep under 2KB per user.
-- `daily/YYYY-MM-DD.md` — daily run log. Append what you did, learned, and what failed. Keep under 8KB per day.
+- `shared/MEMORY.md` — shared permanent knowledge. Update only for high-value, reusable facts (build commands, repo conventions, recurring gotchas). Keep under 4KB. Consolidate entries — merge similar ones, remove outdated ones.
+- `users/{userId}.md` — per-user preferences and patterns. Keep under 2KB per user. Not included in search index.
+- `shared/daily/YYYY-MM-DD.md` — daily run log. Append what you did, learned, and what failed. Keep under 8KB per day.
 
 ### Searching older memory
 

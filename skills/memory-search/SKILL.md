@@ -9,7 +9,7 @@ Use this skill when you need context from past runs beyond today.
 
 ## How to search
 
-Use `qmd` to search across all memory files (daily logs, user notes, shared knowledge). The index name and memory base directory are provided in your context.
+Use `qmd` to search across shared memory files (daily logs, shared knowledge). The search index covers `shared/` only — user-specific files under `users/` are not indexed. The index name and memory base directory are provided in your context.
 
 ### Quick keyword search
 
@@ -29,10 +29,10 @@ You can also read files directly using the memory base directory from context:
 
 ```bash
 # Read a specific day
-cat <memory_base_dir>/daily/2026-03-01.md
+cat <memory_base_dir>/shared/daily/2026-03-01.md
 
 # List recent daily logs
-ls -t <memory_base_dir>/daily/ | head -7
+ls -t <memory_base_dir>/shared/daily/ | head -7
 ```
 
 ## When to use

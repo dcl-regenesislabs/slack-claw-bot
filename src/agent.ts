@@ -267,7 +267,7 @@ async function saveMemory(session: AgentSession, userId: string, username: strin
   }, 60_000);
 
   try {
-    await session.prompt(buildMemorySavePrompt(userId, username, memoryDir));
+    await session.prompt(buildMemorySavePrompt(memoryDir, userId, username));
     console.log("[memory] Save complete");
   } catch (err) {
     console.error("[agent] Memory save failed:", err);
