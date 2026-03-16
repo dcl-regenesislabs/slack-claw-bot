@@ -98,6 +98,7 @@ export function resolveMemoryDir(repo?: string): string {
 function ensureMemoryDirs(memoryDir: string): void {
   mkdirSync(join(memoryDir, "shared", "daily"), { recursive: true });
   mkdirSync(join(memoryDir, "users"), { recursive: true });
+  mkdirSync(join(memoryDir, "skills"), { recursive: true });
 }
 
 export function loadMemoryContext(memoryDir: string, userId: string, username: string): string {
