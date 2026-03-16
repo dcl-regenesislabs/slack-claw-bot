@@ -56,4 +56,35 @@ describe("buildPrompt", () => {
     assert.ok(result.includes("Triggered by: Alice"));
     assert.ok(result.includes("<slack-message>"));
   });
+
+  it("appends attached files section when files are provided", () => {
+    const files = [
+      { name: "data.csv", mimetype: "text/csv", url: "https://files.slack.com/data.csv" },
+      { name: "image.png", mimetype: "image/png", url: "https://files.slack.com/image.png" },
+    ];
+    const result = buildPrompt("hello", false, undefined, false, files);
+    assert.ok(result.includes("## Attached Files"));
+    assert.ok(result.includes("**data.csv** (text/csv)"));
+    assert.ok(result.includes("**image.png** (image/png)"));
+    assert.ok(result.includes("$SLACK_BOT_TOKEN"));
+    assert.ok(result.includes("https://files.slack.com/data.csv"));
+  });
+
+  it("includes files in follow-up prompts", () => {
+    const files = [{ name: "report.pdf", mimetype: "application/pdf", url: "https://files.slack.com/report.pdf" }];
+    const result = buildPrompt("check this", false, undefined, true, files);
+    assert.ok(result.includes("<slack-message>"));
+    assert.ok(result.includes("## Attached Files"));
+    assert.ok(result.includes("**report.pdf**"));
+  });
+
+  it("omits files section when files array is empty", () => {
+    const result = buildPrompt("hello", false, undefined, false, []);
+    assert.ok(!result.includes("## Attached Files"));
+  });
+
+  it("omits files section when files is undefined", () => {
+    const result = buildPrompt("hello", false, undefined, false, undefined);
+    assert.ok(!result.includes("## Attached Files"));
+  });
 });

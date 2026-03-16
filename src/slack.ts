@@ -2,6 +2,7 @@ import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
 import { runAgent, syncAuth, detectReviewModel } from "./agent.js";
+import type { FileAttachment } from "./prompt.js";
 import { AgentScheduler } from "./concurrency.js";
 
 const nameCache = new Map<string, string>();
@@ -11,7 +12,8 @@ function isSlackError(err: unknown): err is { data?: { error?: string } } {
   return typeof err === "object" && err !== null && "data" in err;
 }
 
-interface SlackMessage { text?: string; ts?: string; user?: string }
+interface SlackFile { name?: string; mimetype?: string; url_private_download?: string }
+interface SlackMessage { text?: string; ts?: string; user?: string; files?: SlackFile[] }
 
 export function createScheduler(maxConcurrent: number): AgentScheduler {
   return new AgentScheduler(maxConcurrent);
@@ -34,14 +36,16 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
       return;
     }
 
+    const files = extractAttachments((event as any).files);
+
     const userName = event.user ? await resolveUserName(client, event.user) : "unknown";
     const channelName = await resolveChannelName(client, event.channel);
-    console.log(`[slack] ${userName} in #${channelName}: ${text}`);
+    console.log(`[slack] ${userName} in #${channelName}: ${text}${files?.length ? ` (${files.length} file(s))` : ""}`);
 
     const submission = scheduler.submit(threadTs, async () => {
       await react(client, event.channel, event.ts, "rl-bonk-doge");
 
-      const { text: response, cost, tokens } = await runAgent({
+      const { text: response, cost, tokens, done } = await runAgent({
         threadTs,
         eventTs: event.ts,
         userId: event.user || "unknown",
@@ -51,8 +55,10 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
         fetchThreadSince: (oldest) => fetchThreadSince(client, event.channel, threadTs, oldest),
         triggeredBy: userName,
         model: detectReviewModel(text),
+        files,
       });
 
+      // Reply to Slack immediately — memory save continues in background
       await syncAuth();
       await unreact(client, event.channel, event.ts, "rl-bonk-doge");
 
@@ -68,6 +74,8 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
         await postAuditLog(client, config.logChannelId, event, text, { status: "ok", cost, tokens });
       }
 
+      // Wait for memory save before releasing the scheduler slot
+      await done;
     });
 
     if (submission.status === "queued-behind-thread") {
@@ -216,6 +224,17 @@ async function postAuditLog(
   }
 }
 
+// --- File Attachments ---
+
+function extractAttachments(files?: SlackFile[]): FileAttachment[] | undefined {
+  if (!files?.length) return undefined;
+  const attachments = files
+    .filter((f): f is SlackFile & { name: string; mimetype: string; url_private_download: string } =>
+      Boolean(f.name && f.mimetype && f.url_private_download))
+    .map((f) => ({ name: f.name, mimetype: f.mimetype, url: f.url_private_download }));
+  return attachments.length ? attachments : undefined;
+}
+
 // --- Formatting ---
 
 export function markdownToMrkdwn(text: string): string {
@@ -259,7 +278,15 @@ async function formatMessages(client: WebClient, messages: SlackMessage[]): Prom
     .map((m) => {
       const name = userNames.get(m.user || "") || "unknown";
       const ts = m.ts ? new Date(parseFloat(m.ts) * 1000).toISOString() : "";
-      return `[${name}] (${ts}): ${m.text || ""}`;
+      let line = `[${name}] (${ts}): ${m.text || ""}`;
+      if (m.files?.length) {
+        const fileList = m.files
+          .filter((f) => f.name)
+          .map((f) => `[attached: ${f.name}${f.mimetype ? ` (${f.mimetype})` : ""}]`)
+          .join(" ");
+        if (fileList) line += ` ${fileList}`;
+      }
+      return line;
     })
     .join("\n");
 }

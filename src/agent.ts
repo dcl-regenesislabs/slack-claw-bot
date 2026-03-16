@@ -17,7 +17,7 @@ import {
   type CustomEntry,
 } from "@mariozechner/pi-coding-agent";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import { buildPrompt } from "./prompt.js";
+import { buildPrompt, type FileAttachment } from "./prompt.js";
 import {
   loadMemoryContext,
   buildMemorySavePrompt,
@@ -56,12 +56,15 @@ export interface RunOptions {
   triggeredBy?: string;
   events?: EventEmitter;
   model?: string;
+  files?: FileAttachment[];
 }
 
 export interface RunResult {
   text: string;
   cost: number;
   tokens: number;
+  /** Resolves when memory save + session cleanup are complete. */
+  done: Promise<void>;
 }
 
 // --- Module State ---
@@ -144,23 +147,28 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     await session.prompt(prompt);
     const rawResponse = session.getLastAssistantText() || "";
 
-    // 3. Save memory if the agent signaled [SAVE] or used tools
+    // 3. Save memory async — response goes back to Slack immediately
     sessionManager.appendCustomEntry("slack_last_seen_ts", { ts: options.eventTs });
     const usedTools = hasToolCalls(session.messages);
     const hasSaveMarker = rawResponse.includes(SAVE_MARKER);
-    if (usedTools || hasSaveMarker) {
-      await saveMemory(session, options.userId, options.username);
-    } else {
+
+    const shouldSave = usedTools || hasSaveMarker;
+    if (!shouldSave) {
       console.log("[agent] Skipping memory save — no tools used and no [SAVE] marker");
+      session.dispose();
     }
+    const done = shouldSave
+      ? saveMemory(session, options.userId, options.username).finally(() => session.dispose())
+      : Promise.resolve();
 
     const response = rawResponse.replace(/\n?\[SAVE\]\s*$/g, "").trimEnd();
 
     const { cost, tokens } = computeUsage(session.messages);
     console.log(`[agent] done — ${tokens} tokens, $${cost.toFixed(4)}`);
-    return { text: response, cost, tokens };
-  } finally {
+    return { text: response, cost, tokens, done };
+  } catch (err) {
     session.dispose();
+    throw err;
   }
 }
 
@@ -217,7 +225,7 @@ async function createSession(modelId: string, memoryContent: string, sessionMana
 
 async function buildNewPrompt(options: RunOptions): Promise<string> {
   const threadContent = await options.fetchThread();
-  return buildPrompt(threadContent, options.dryRun, options.triggeredBy);
+  return buildPrompt(threadContent, options.dryRun, options.triggeredBy, undefined, options.files);
 }
 
 async function buildResumePrompt(options: RunOptions, sessionManager: SessionManager): Promise<string> {
@@ -232,7 +240,7 @@ async function buildResumePrompt(options: RunOptions, sessionManager: SessionMan
       );
     }
   }
-  return buildPrompt(options.newMessage, options.dryRun, options.triggeredBy, true);
+  return buildPrompt(options.newMessage, options.dryRun, options.triggeredBy, true, options.files);
 }
 
 function findLastSeenTs(sessionManager: SessionManager): string | null {
