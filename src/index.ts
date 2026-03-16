@@ -13,6 +13,7 @@ import { startHealthServer } from "./health.js";
 import { resolveMemoryDir } from "./memory.js";
 
 const config = loadConfig();
+if (process.env.DEBUG) console.log("[debug] Debug mode enabled");
 
 if (config.healthPort) {
   startHealthServer(config.healthPort);
