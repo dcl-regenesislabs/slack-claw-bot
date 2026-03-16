@@ -1,30 +1,21 @@
 ---
 name: fix
-description: End-to-end workflow for fixing GitHub issues. Accepts a GitHub issue URL or description, creates a branch, plans the fix, implements it, runs tests, and creates a PR. Use when the user says "fix <issue-url>" or "fix <description>".
+description: End-to-end workflow for fixing GitHub issues in any repository. Accepts a GitHub issue URL or description, creates a branch, reads repo context, plans the fix, implements it, runs tests, and creates a PR. Use when the user says "fix <issue-url>" or "fix <description>".
 ---
 
 # Fix Issue Workflow (Autonomous)
 
-Autonomous end-to-end workflow for fixing GitHub issues: fetch the issue, find/clone the repo, create a branch, run plan and work workflows, and create the PR.
+Autonomous end-to-end workflow for fixing GitHub issues in any repository: fetch the issue, find/clone the repo, read repo context, create a branch, run plan and work workflows, and create the PR.
+
+## CRITICAL: Never act without reading repo context first
+
+Do **NOT** skip the context-reading step. Every repository has its own conventions, build system, and architecture. The workflow **must** read the repo's documentation before planning or implementing anything.
 
 ## When to use
 
-- User says `fix` followed by a GitHub issue URL (e.g., `fix https://github.com/decentraland/creator-hub/issues/123`)
+- User says `fix` followed by a GitHub issue URL (e.g., `fix https://github.com/decentraland/some-repo/issues/123`)
 - User says `fix this issue` with a URL or a text description
 - User says `fix` followed by a description of the problem
-
-## IMPORTANT: Creator Hub Monorepo
-
-**Creator Hub (`decentraland/creator-hub`) is a MONOREPO.**
-
-**ALL asset pack issues MUST be fixed in the creator-hub repository**, not in individual asset pack repos.
-
-The following repositories are **ARCHIVED** and should NEVER be used:
-- `decentraland/asset-packs`
-
-**If an issue is in any archived asset pack repository:**
-1. If the issue is on the `decentraland/asset-packs` it must be fixed on the `decentraland/creator-hub`
-2. There's no need to duplicate or create the issue again, if it's an asset-packs issue, fix it on the creator hub repo, there's a asset-packs package
 
 ## Input parsing
 
@@ -51,12 +42,14 @@ Extract:
 - `title` — Issue title
 - `body` — Full description
 - `number` — Issue number
-- `repository` — Full repo name (e.g., `decentraland/creator-hub`)
+- `repository` — Full repo name (e.g., `decentraland/some-repo`)
 - `labels` — Issue labels for context
 
 **If input is free text:**
 
 Use the description directly and infer repository from context if possible.
+
+**Resolve the target repository:** Check the `repos` skill for aliases and redirects. Some repositories are archived and issues must be fixed in a different repo. If the issue's repository is archived or redirected, use the target repo instead.
 
 ---
 
@@ -97,7 +90,6 @@ temp_dir=$(mktemp -d)
 cd "$temp_dir"
 gh repo clone <org>/<repo-name>
 cd <repo-name>
-echo "✓ Cloned repo to temp directory: $temp_dir/<repo-name>"
 ```
 
 **Switch to default branch and update:**
@@ -115,7 +107,39 @@ git pull origin "$default_branch"
 
 ---
 
-### Step 3: Create fix branch
+### Step 3: Read repo context (MANDATORY)
+
+**Before planning or writing any code, read the repo's own documentation.** This step is non-negotiable — every repo has different conventions, build tools, and architecture.
+
+Read these files in order (skip any that don't exist):
+
+```bash
+# 1. CLAUDE.md — agent-specific instructions, build commands, architecture, conventions
+cat CLAUDE.md 2>/dev/null
+
+# 2. README.md — project overview, setup, tech stack
+cat README.md 2>/dev/null
+
+# 3. CI configuration — understand what checks will run
+ls .github/workflows/ 2>/dev/null && cat .github/workflows/*.yml 2>/dev/null
+
+# 4. Agent context docs (some repos have these)
+cat docs/ai-agent-context.md 2>/dev/null
+```
+
+**From these files, extract and note:**
+- **Build commands** — how to build the project (e.g., `npm run build`, `cargo build`, `make`)
+- **Test commands** — how to run tests (e.g., `npm test`, `cargo test`, `pytest`)
+- **Lint/typecheck commands** — what quality checks exist
+- **Project structure** — where source code, tests, and configs live
+- **Conventions** — coding style, branch naming, commit message format
+- **Monorepo structure** — if applicable, which packages exist and how they relate
+
+**These extracted details will be used in Steps 5, 6, and 7.** If `CLAUDE.md` exists, its instructions take precedence over defaults.
+
+---
+
+### Step 4: Create fix branch
 
 Derive branch name from issue:
 
@@ -130,24 +154,14 @@ git checkout -b <branch-name> "origin/$default_branch"
 
 ---
 
-### Step 4: Ensure Compound Engineering plugin is installed
-
-```bash
-if ! claude plugins list 2>/dev/null | grep -q compound-engineering; then
-  claude plugins install compound-engineering
-fi
-```
-
-If installation fails, report the error and stop. The plan and work workflows require this plugin.
-
----
-
 ### Step 5: Run `/compound-engineering:workflows:plan`
 
-**Invoke the plan workflow directly, passing the issue context as the argument.** Do NOT analyze the issue yourself — let the workflow handle everything:
+**IMPORTANT: This is NOT the local `plan` skill.** Use the Compound Engineering workflow `/compound-engineering:workflows:plan` (invoked via the Skill tool), NOT the local `plan` skill from `skills/plan/SKILL.md`. The local `plan` skill is for Decentraland backend service architecture — it is unrelated to this step.
+
+**Invoke the Compound Engineering plan workflow, passing the issue context AND the repo context you gathered in Step 3:**
 
 ```
-/compound-engineering:workflows:plan <paste the full issue title + body here as the argument>
+/compound-engineering:workflows:plan <issue title + body> — Repo context: <key details from CLAUDE.md/README: tech stack, build commands, project structure>
 ```
 
 The workflow will autonomously:
@@ -157,13 +171,13 @@ The workflow will autonomously:
 - Create a plan document in `docs/plans/`
 - Ask what to do next
 
-**When prompted for next steps, select "Start /workflows:work".**
+**When prompted for next steps, respond with "Start /workflows:work" to continue autonomously.** Do not wait for user input — this is an autonomous workflow.
 
 ---
 
 ### Step 6: Run `/compound-engineering:workflows:work`
 
-**Invoke the work workflow directly, passing the plan file path.** Do NOT implement anything yourself — let the workflow handle everything:
+**Invoke the work workflow, passing the plan file path:**
 
 ```
 /compound-engineering:workflows:work docs/plans/<the-plan-file-created-in-step-5>.md
@@ -179,9 +193,24 @@ The workflow will autonomously:
 
 ### Step 7: Final CI verification
 
-After the work workflow completes, run the same checks that GitHub Actions will run. Look at `.github/workflows/` to find the CI checks, then run them locally:
+After the work workflow completes, run the **repo's actual CI checks** — not hardcoded commands.
 
-**Node.js / TypeScript (typical):**
+**Use the context from Step 3 to determine the correct commands:**
+
+1. Check `CLAUDE.md` for explicit build/test/lint commands
+2. Check `.github/workflows/*.yml` for the CI steps
+3. If neither exists, infer from the project type:
+
+| Indicator | Build | Test | Lint | Typecheck |
+|-----------|-------|------|------|-----------|
+| `package.json` | `npm run build` | `npm test` | `npm run lint` | `npm run typecheck` |
+| `Cargo.toml` | `cargo build` | `cargo test` | `cargo clippy -- -D warnings` | _(included in build)_ |
+| `requirements.txt` / `pyproject.toml` | — | `pytest` | `ruff check .` | `mypy .` |
+| `go.mod` | `go build ./...` | `go test ./...` | `golangci-lint run` | _(included in build)_ |
+| `Makefile` | Check for `make build`, `make test`, `make lint` targets | | | |
+
+**Run the commands identified above.** Example for a Node.js project:
+
 ```bash
 npm run build
 npm test
@@ -223,7 +252,7 @@ gh pr create \
 
 ## Testing
 
-<What was verified — build, tests, lint, typecheck>
+<What was verified — list the actual commands run and their results>
 
 ## Closes
 
@@ -245,10 +274,10 @@ EOF
 User: fix https://github.com/decentraland/creator-hub/issues/170
 
 Agent:
-1. Fetched issue #170: "Fix hide image action"
+1. Fetched issue #170: "Fix hide image action" (repo: decentraland/creator-hub)
 2. Found repo locally: /path/to/creator-hub
-3. Created branch: fix/170-hide-image-action
-4. Compound Engineering plugin verified
+3. Read repo context: CLAUDE.md (monorepo, npm workspaces, build: npm run build, test: npm test)
+4. Created branch: fix/170-hide-image-action
 5. Ran /workflows:plan → created docs/plans/2026-03-13-fix-hide-image-action-plan.md
 6. Ran /workflows:work → implemented fix, tests pass
 7. CI checks passed (build, test, lint, typecheck)
@@ -271,8 +300,8 @@ FIX COMPLETE
 
 ## Error Handling
 
-**If Compound Engineering plugin fails to install:**
-- Report the error and stop. Do not attempt manual fallback.
+**If repo context files don't exist:**
+- Proceed with caution. Use project type indicators (package.json, Cargo.toml, etc.) to infer conventions. Note in the PR that the repo lacks documentation.
 
 **If /workflows:plan fails:**
 - Check error output, retry once. If it fails again, report to user.
@@ -297,22 +326,3 @@ If triggered by a Slack user (when "Triggered by" is in the prompt), add:
 ```
 Requested by <name> via Slack
 ```
-
----
-
-## Context for Decentraland Creator Hub
-
-**Common repos:**
-- `decentraland/creator-hub` — **MONOREPO** (includes main app, inspector, ALL asset packs)
-- `decentraland/js-sdk-toolchain` — SDK JavaScript tooling
-
-**CRITICAL: Creator Hub is a MONOREPO**
-
-`decentraland/creator-hub` is a **monorepo** that contains:
-- Main Creator Hub application
-- Scene Inspector
-- **Asset Packs** (previously in separate `decentraland/asset-packs` repos)
-
-**ANY issue related to asset packs MUST BE RESOLVED in the creator-hub repository.**
-
-**Important:** If you don't have context for a Decentraland repo, read the README.md and CLAUDE.md first to understand the project structure, build commands, and testing approach.
