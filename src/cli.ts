@@ -48,7 +48,8 @@ if (positionalArgs.length > 0) {
   if (dryRun) console.log("Dry run enabled — agent will not execute commands");
 
   try {
-    await runAgent(makeRunOptions(content));
+    const result = await runAgent(makeRunOptions(content));
+    await result.done;
     console.log();
   } catch (err) {
     console.error("Error:", err instanceof Error ? err.message : err);
@@ -80,7 +81,8 @@ if (positionalArgs.length > 0) {
     console.log("\n--- Agent running ---\n");
 
     try {
-      await runAgent(makeRunOptions(content, replThreadTs));
+      const result = await runAgent(makeRunOptions(content, replThreadTs));
+      await result.done;
       console.log("\n\n--- Done ---\n");
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : err);
