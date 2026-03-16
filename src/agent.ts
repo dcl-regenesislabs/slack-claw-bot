@@ -10,13 +10,22 @@ import {
   DefaultResourceLoader,
   AuthStorage,
   ModelRegistry,
-  createCodingTools,
+  createWriteTool,
+  createEditTool,
+  createBashTool,
+  createReadTool,
+  type WriteOperations,
+  type EditOperations,
+  type BashSpawnContext,
   type ExtensionFactory,
   type AgentSession,
   type AgentSessionEvent,
   type CustomEntry,
 } from "@mariozechner/pi-coding-agent";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
+import { writeFile, mkdir, readFile, access } from "node:fs/promises";
+import { resolve, relative } from "node:path";
+import { constants } from "node:fs";
 import { buildPrompt, type FileAttachment } from "./prompt.js";
 import {
   loadMemoryContext,
@@ -27,6 +36,100 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectDir = join(__dirname, "..");
+
+// --- Guarded Tools ---
+
+const PROTECTED_PREFIXES = ["src/", "test/", "node_modules/"];
+const PROTECTED_FILES = ["package.json", "package-lock.json", "tsconfig.json", ".auth.json"];
+
+function isProtectedPath(absolutePath: string): boolean {
+  const abs = resolve(absolutePath);
+  const rel = relative(projectDir, abs);
+  // Outside the project dir — not protected (rel starts with ".." or is absolute when no common root)
+  if (rel.startsWith("..") || rel === abs) return false;
+  for (const prefix of PROTECTED_PREFIXES) {
+    if (rel.startsWith(prefix) || rel === prefix.slice(0, -1)) return true;
+  }
+  for (const file of PROTECTED_FILES) {
+    if (rel === file) return true;
+  }
+  // .env* files
+  if (/^\.env/.test(rel)) return true;
+  return false;
+}
+
+function createGuardedTools(cwd: string): AgentTool<any>[] {
+  // Read tool — unrestricted
+  const read = createReadTool(cwd);
+
+  // Write tool — blocks protected paths
+  const guardedWriteOps: WriteOperations = {
+    async writeFile(absolutePath: string, content: string) {
+      if (isProtectedPath(absolutePath)) {
+        throw new Error(`Blocked: cannot write to protected project file "${relative(projectDir, absolutePath)}". Project source files (src/, test/, package.json, etc.) are read-only.`);
+      }
+      await mkdir(dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, content, "utf-8");
+    },
+    async mkdir(dir: string) {
+      if (isProtectedPath(dir)) {
+        throw new Error(`Blocked: cannot create directory in protected path "${relative(projectDir, dir)}".`);
+      }
+      await mkdir(dir, { recursive: true });
+    },
+  };
+  const write = createWriteTool(cwd, { operations: guardedWriteOps });
+
+  // Edit tool — blocks protected paths
+  const guardedEditOps: EditOperations = {
+    async readFile(absolutePath: string) {
+      return readFile(absolutePath);
+    },
+    async writeFile(absolutePath: string, content: string) {
+      if (isProtectedPath(absolutePath)) {
+        throw new Error(`Blocked: cannot edit protected project file "${relative(projectDir, absolutePath)}". Project source files (src/, test/, package.json, etc.) are read-only.`);
+      }
+      await writeFile(absolutePath, content, "utf-8");
+    },
+    async access(absolutePath: string) {
+      await access(absolutePath, constants.R_OK | constants.W_OK);
+    },
+  };
+  const edit = createEditTool(cwd, { operations: guardedEditOps });
+
+  // Bash tool — best-effort guard against writes to protected paths
+  const WRITE_PATTERNS = [">", ">>", "tee ", "cp ", "mv ", "rm ", "sed -i", "chmod ", "chown "];
+  const bash = createBashTool(cwd, {
+    spawnHook(ctx: BashSpawnContext) {
+      const cmd = ctx.command;
+      for (const pattern of WRITE_PATTERNS) {
+        if (!cmd.includes(pattern)) continue;
+        // Check if the command references a protected path
+        for (const prefix of PROTECTED_PREFIXES) {
+          // Match paths like src/foo, ./src/foo, or absolute paths
+          const prefixName = prefix.slice(0, -1); // "src" from "src/"
+          if (new RegExp(`(^|\\s|/)(\\./)?${prefixName}(/|\\s|$)`).test(cmd) ||
+              cmd.includes(join(projectDir, prefix))) {
+            throw new Error(`Blocked: bash command appears to write to protected path "${prefixName}/". Project source files are read-only.`);
+          }
+        }
+        for (const file of PROTECTED_FILES) {
+          if (new RegExp(`(^|\\s|/)(\\./)?${file.replace(".", "\\.")}(\\s|$)`).test(cmd) ||
+              cmd.includes(join(projectDir, file))) {
+            throw new Error(`Blocked: bash command appears to write to protected file "${file}". Project config files are read-only.`);
+          }
+        }
+        // .env files
+        if (/(^|\s|\/)(\.\/)?\.env/.test(cmd) || cmd.includes(join(projectDir, ".env"))) {
+          throw new Error("Blocked: bash command appears to write to a .env file.");
+        }
+      }
+      return ctx;
+    },
+  });
+
+  return [read, bash, edit, write];
+}
 
 // --- Types ---
 
@@ -200,7 +303,10 @@ async function createSession(modelId: string, memoryContent: string, sessionMana
   const cwd = process.cwd();
   const resourceLoader = new DefaultResourceLoader({
     cwd,
-    additionalSkillPaths: [join(projectDir, "skills")],
+    additionalSkillPaths: [
+      join(projectDir, "skills"),
+      ...(memoryDir ? [join(memoryDir, "skills")] : []),
+    ],
     systemPrompt,
     extensionFactories: memoryContent ? [createMemoryExtension(memoryContent)] : [],
     noExtensions: true,
@@ -217,7 +323,7 @@ async function createSession(modelId: string, memoryContent: string, sessionMana
     sessionManager,
     settingsManager: SettingsManager.inMemory(),
     resourceLoader,
-    tools: createCodingTools(cwd),
+    tools: createGuardedTools(cwd),
   });
 }
 
