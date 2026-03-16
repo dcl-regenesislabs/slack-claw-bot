@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts",
+    "dev": "DEBUG=true tsx watch src/index.ts",
     "cli": "tsx src/cli.ts",
     "test": "node --import tsx --test test/*.test.ts"
   },
