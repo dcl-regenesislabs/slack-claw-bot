@@ -85,6 +85,11 @@ export function resolveMemoryDir(repo?: string): string {
       });
       console.log(`[memory] Cloned ${repo} → ${memoryDir}`);
     }
+    execFileSync("gh", ["auth", "setup-git"], {
+      encoding: "utf-8",
+      timeout: 10_000,
+    });
+    console.log("[memory] Registered gh credential helper for git");
     ensureMemoryDirs(memoryDir);
     return memoryDir;
   }
