@@ -1,27 +1,11 @@
-name: CI on PR
+name: CI/CD on PR
 
 on:
   pull_request:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: yarn
-
-      - run: yarn install --frozen-lockfile
-
-      - name: Type check
-        run: yarn tsc --noEmit
-
-      - name: Test
-        run: yarn test
-
-      - name: Build Docker image
-        run: docker build -t slack-claw-bot:test .
+    uses: decentraland/platform-actions/.github/workflows/apps-pr.yml@main
+    with:
+      service-name: agent-server
+    secrets: inherit

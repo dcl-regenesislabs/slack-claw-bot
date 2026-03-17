@@ -57,7 +57,7 @@ async function main() {
 
     rl.on("close", () => process.exit(0));
 
-    async function handleInput(threadContent: string) {
+    const handleInput = async (threadContent: string) => {
       rl.pause();
       console.log("\n--- Agent running ---\n");
 
