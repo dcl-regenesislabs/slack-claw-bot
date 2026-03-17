@@ -74,7 +74,10 @@ export async function startSlackBot(config: Config): Promise<void> {
     const submission = scheduler.submit(threadTs, async () => {
       await react("hourglass_flowing_sand");
 
-      const threadContent = await fetchThread(client, event.channel, threadTs);
+      let threadContent = await fetchThread(client, event.channel, threadTs);
+      if (skill === "schedule") {
+        threadContent = `[Schedule Context] channel: ${event.channel}\n\n${threadContent}`;
+      }
       const isReview =
         PR_URL_PATTERN.test(threadContent) ||
         REVIEW_KEYWORD_PATTERN.test(text);
@@ -308,6 +311,7 @@ function detectSkill(text: string): string {
   if (/\btriage\b/.test(t)) return "triage";
   if (/\bcreate\b.+\bissue\b/.test(t) || /\bopen\b.+\bissue\b/.test(t)) return "create-issue";
   if (/^fix\b/.test(t)) return "fix";
+  if (/^schedule[\s:]/.test(t) || /\blist\s+schedules\b/.test(t)) return "schedule";
   return "general";
 }
 
