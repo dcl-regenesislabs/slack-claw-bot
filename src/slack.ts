@@ -307,6 +307,7 @@ function detectSkill(text: string): string {
   if (/\bpr[\s-]?review\b/.test(t) || (/\breview\b/.test(t) && /\bpr\b/.test(t))) return "pr-review";
   if (/\btriage\b/.test(t)) return "triage";
   if (/\bcreate\b.+\bissue\b/.test(t) || /\bopen\b.+\bissue\b/.test(t)) return "create-issue";
+  if (/^fix\b/.test(t)) return "fix";
   return "general";
 }
 
