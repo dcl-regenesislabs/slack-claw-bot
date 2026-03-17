@@ -49,11 +49,32 @@ Extract:
 
 Use the description directly and infer repository from context if possible.
 
-**Resolve the target repository:** Check the `repos` skill for aliases and redirects. Some repositories are archived and issues must be fixed in a different repo. If the issue's repository is archived or redirected, use the target repo instead.
+---
+
+### Step 2: Determine the correct target repository
+
+**The repo where the issue lives is NOT always the repo where the fix belongs.** You MUST consult the `repos` skill before proceeding.
+
+**Step 2a — Read the `repos` skill.** It contains:
+- Repository dependency graph (which repos consume which)
+- Package-to-repo mapping (which packages live in which repo)
+- Cross-repo fix patterns (common cases where the fix belongs elsewhere)
+- Archived repos and their replacements
+
+**Step 2b — Match the issue against the dependency graph:**
+- Read the issue title, body, comments, error messages, and stack traces
+- Identify any packages, libraries, or components mentioned
+- Cross-reference against the `repos` skill's package table to find the **source repo**
+
+**Step 2c — Decide:**
+- If the affected code lives in a different repo → use **that** repo for Steps 3-9
+- If the fix spans multiple repos → create a PR in **each** repo, cross-referencing them
+- If unclear → clone the issue's repo first, investigate the code (Step 4), and switch if the root cause traces to a dependency
+- Always link back to the original issue URL in PR descriptions
 
 ---
 
-### Step 2: Locate or clone the repository
+### Step 3: Locate or clone the target repository
 
 **Two execution modes:**
 
@@ -107,7 +128,7 @@ git pull origin "$default_branch"
 
 ---
 
-### Step 3: Read repo context (MANDATORY)
+### Step 4: Read repo context (MANDATORY)
 
 **Before planning or writing any code, read the repo's own documentation.** This step is non-negotiable — every repo has different conventions, build tools, and architecture.
 
@@ -135,11 +156,11 @@ cat docs/ai-agent-context.md 2>/dev/null
 - **Conventions** — coding style, branch naming, commit message format
 - **Monorepo structure** — if applicable, which packages exist and how they relate
 
-**These extracted details will be used in Steps 5, 6, and 7.** If `CLAUDE.md` exists, its instructions take precedence over defaults.
+**These extracted details will be used in Steps 6, 7, and 8.** If `CLAUDE.md` exists, its instructions take precedence over defaults.
 
 ---
 
-### Step 4: Create fix branch
+### Step 5: Create fix branch
 
 Derive branch name from issue:
 
@@ -154,11 +175,11 @@ git checkout -b <branch-name> "origin/$default_branch"
 
 ---
 
-### Step 5: Run `/compound-engineering:workflows:plan`
+### Step 6: Run `/compound-engineering:workflows:plan`
 
 **IMPORTANT: This is NOT the local `plan` skill.** Use the Compound Engineering workflow `/compound-engineering:workflows:plan` (invoked via the Skill tool), NOT the local `plan` skill from `skills/plan/SKILL.md`. The local `plan` skill is for Decentraland backend service architecture — it is unrelated to this step.
 
-**Invoke the Compound Engineering plan workflow, passing the issue context AND the repo context you gathered in Step 3:**
+**Invoke the Compound Engineering plan workflow, passing the issue context AND the repo context you gathered in Step 4:**
 
 ```
 /compound-engineering:workflows:plan <issue title + body> — Repo context: <key details from CLAUDE.md/README: tech stack, build commands, project structure>
@@ -175,12 +196,12 @@ The workflow will autonomously:
 
 ---
 
-### Step 6: Run `/compound-engineering:workflows:work`
+### Step 7: Run `/compound-engineering:workflows:work`
 
 **Invoke the work workflow, passing the plan file path:**
 
 ```
-/compound-engineering:workflows:work docs/plans/<the-plan-file-created-in-step-5>.md
+/compound-engineering:workflows:work docs/plans/<the-plan-file-created-in-step-6>.md
 ```
 
 The workflow will autonomously:
@@ -191,11 +212,11 @@ The workflow will autonomously:
 
 ---
 
-### Step 7: Final CI verification
+### Step 8: Final CI verification
 
 After the work workflow completes, run the **repo's actual CI checks** — not hardcoded commands.
 
-**Use the context from Step 3 to determine the correct commands:**
+**Use the context from Step 4 to determine the correct commands:**
 
 1. Check `CLAUDE.md` for explicit build/test/lint commands
 2. Check `.github/workflows/*.yml` for the CI steps
@@ -224,7 +245,24 @@ npm run typecheck
 
 ---
 
-### Step 8: Push and create PR
+### Step 9: Push and create PR
+
+**This step is MANDATORY — the workflow is not complete until the PR is created.**
+
+**Ensure you are in the target repo directory** (the repo where you made the fix, which may differ from where the issue was filed):
+
+```bash
+# Verify you're in the right repo
+git remote get-url origin
+```
+
+**Before pushing, remove the plan file from the commit.** The plan is a working document — only push the actual code changes:
+
+```bash
+# Remove plan file from git tracking (do NOT delete the file, just unstage it)
+git rm --cached docs/plans/*.md 2>/dev/null
+git commit -m "remove plan from tracked files" 2>/dev/null
+```
 
 **Push the branch:**
 
@@ -232,10 +270,11 @@ npm run typecheck
 git push -u origin <branch-name>
 ```
 
-**Create the PR.** Build the description from the commits and plan:
+**Create the PR in the target repo.** Always use `--repo` to be explicit:
 
 ```bash
 gh pr create \
+  --repo <org>/<target-repo-name> \
   --title "<type>: <concise title>" \
   --body "$(cat <<'EOF'
 ## Summary
@@ -256,7 +295,7 @@ gh pr create \
 
 ## Closes
 
-<GitHub issue URL or "Fixes #number">
+<Original issue URL — e.g., https://github.com/decentraland/creator-hub/issues/123>
 
 ---
 🤖 Created via Slack with Claude
@@ -264,7 +303,9 @@ EOF
 )"
 ```
 
-**Report the PR URL.**
+**Cross-repo fix:** If the issue was filed in repo A but the fix is in repo B, the PR is created in repo B. Use the full original issue URL in the "Closes" section — GitHub will link them cross-repo.
+
+**Report the PR URL. The workflow is NOT complete without a PR.**
 
 ---
 
@@ -275,13 +316,33 @@ User: fix https://github.com/decentraland/creator-hub/issues/170
 
 Agent:
 1. Fetched issue #170: "Fix hide image action" (repo: decentraland/creator-hub)
-2. Found repo locally: /path/to/creator-hub
-3. Read repo context: CLAUDE.md (monorepo, npm workspaces, build: npm run build, test: npm test)
-4. Created branch: fix/170-hide-image-action
-5. Ran /workflows:plan → created docs/plans/2026-03-13-fix-hide-image-action-plan.md
-6. Ran /workflows:work → implemented fix, tests pass
-7. CI checks passed (build, test, lint, typecheck)
-8. Created PR: https://github.com/decentraland/creator-hub/pull/1200
+2. Analyzed issue → fix belongs in creator-hub (not a dependency issue)
+3. Found repo locally: /path/to/creator-hub
+4. Read repo context: CLAUDE.md (monorepo, npm workspaces, build: npm run build, test: npm test)
+5. Created branch: fix/170-hide-image-action
+6. Ran /compound-engineering:workflows:plan → created docs/plans/2026-03-13-fix-hide-image-action-plan.md
+7. Ran /compound-engineering:workflows:work → implemented fix, tests pass
+8. CI checks passed (build, test, lint, typecheck)
+9. Created PR: https://github.com/decentraland/creator-hub/pull/1200
+
+FIX COMPLETE
+```
+
+**Cross-repo example (fix belongs in a different repo than the issue):**
+
+```
+User: fix https://github.com/org/app/issues/456
+
+Agent:
+1. Fetched issue #456: "CLI crashes on deploy" (repo: org/app)
+2. Analyzed issue → root cause is in @org/sdk-toolchain dependency, fix belongs in org/sdk-toolchain
+3. Cloned org/sdk-toolchain
+4. Read repo context: CLAUDE.md (monorepo, build: rush build, test: rush test)
+5. Created branch: fix/456-cli-deploy-crash
+6. Ran /compound-engineering:workflows:plan → created plan
+7. Ran /compound-engineering:workflows:work → implemented fix, tests pass
+8. CI checks passed
+9. Created PR in org/sdk-toolchain linking back to org/app#456
 
 FIX COMPLETE
 ```
