@@ -6,6 +6,7 @@ import type {
   IMetricsComponent,
   IFetchComponent
 } from '@well-known-components/interfaces'
+import type { ICacheStorageComponent } from '@dcl/core-commons'
 import { metricDeclarations } from './metrics.js'
 
 export type GlobalContext = {
@@ -25,11 +26,14 @@ export type BaseComponents = {
 }
 
 // Components used at runtime
-export type AppComponents = BaseComponents
+export type AppComponents = BaseComponents & {
+  redis?: ICacheStorageComponent
+}
 
 // Components used in tests
 export type TestComponents = BaseComponents & {
   localFetch: IFetchComponent
+  redis?: ICacheStorageComponent
 }
 
 // Simplifies typings of HTTP handlers

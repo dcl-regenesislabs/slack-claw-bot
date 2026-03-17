@@ -7,6 +7,7 @@ import {
 import { createLogComponent } from '@well-known-components/logger'
 import { createMetricsComponent } from '@well-known-components/metrics'
 import { createFetchComponent } from '@well-known-components/fetch-component'
+import { createRedisComponent } from '@dcl/redis-component'
 import { AppComponents, GlobalContext } from './types.js'
 import { metricDeclarations } from './metrics.js'
 
@@ -20,6 +21,9 @@ export async function initComponents(): Promise<AppComponents> {
   const statusChecks = await createStatusCheckComponent({ server, config })
   const fetcher = createFetchComponent()
 
+  const redisHost = await config.getString('REDIS_HOST')
+  const redis = redisHost ? await createRedisComponent(redisHost, { logs }) : undefined
+
   await instrumentHttpServerWithPromClientRegistry({ metrics, server, config, registry: metrics.registry! })
 
   return {
@@ -28,6 +32,7 @@ export async function initComponents(): Promise<AppComponents> {
     server,
     metrics,
     fetcher,
-    statusChecks
+    statusChecks,
+    redis
   }
 }

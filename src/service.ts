@@ -9,7 +9,7 @@ import { Cron } from 'croner'
 
 export async function main(program: Lifecycle.EntryPointParameters<AppComponents | TestComponents>) {
   const { components, startComponents } = program
-  const { config, logs } = components
+  const { config, logs, redis } = components
   const logger = logs.getLogger('service')
 
   // Pre-load config (WKC config is async — resolve upfront for downstream modules)
@@ -20,8 +20,6 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     anthropicOAuthRefreshToken: await config.getString('ANTHROPIC_OAUTH_REFRESH_TOKEN'),
     model: await config.getString('MODEL'),
     maxConcurrentAgents: (await config.getNumber('MAX_CONCURRENT_AGENTS')) ?? 3,
-    upstashRedisUrl: await config.getString('UPSTASH_REDIS_REST_URL'),
-    upstashRedisToken: await config.getString('UPSTASH_REDIS_REST_TOKEN'),
     logChannelId: await config.getString('LOG_CHANNEL_ID'),
     notionToken: await config.getString('NOTION_TOKEN'),
     notionShapeDbId: await config.getString('NOTION_SHAPE_DB_ID'),
@@ -35,8 +33,7 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     anthropicOAuthRefreshToken: slackConfig.anthropicOAuthRefreshToken,
     githubToken: slackConfig.githubToken,
     model: slackConfig.model,
-    upstashRedisUrl: slackConfig.upstashRedisUrl,
-    upstashRedisToken: slackConfig.upstashRedisToken,
+    redis,
     sentryAuthToken: slackConfig.sentryAuthToken,
     sentryOrg: slackConfig.sentryOrg
   })
