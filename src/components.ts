@@ -33,6 +33,6 @@ export async function initComponents(): Promise<AppComponents> {
     metrics,
     fetcher,
     statusChecks,
-    redis
+    ...(redis ? { redis } : {})
   }
 }
