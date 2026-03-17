@@ -1,4 +1,7 @@
 {
+  "enabledPlugins": {
+    "compound-engineering": true
+  },
   "hooks": {
     "PreToolUse": [
       {
