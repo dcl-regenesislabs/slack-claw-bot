@@ -6,3 +6,4 @@ sessions/
 .auth.json
 .DS_Store
 tmp/
+data/

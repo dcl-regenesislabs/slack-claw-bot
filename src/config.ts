@@ -13,4 +13,6 @@ export interface Config {
   notionToken?: string
   notionShapeDbId?: string
   notionShapeParentId?: string
+  sentryAuthToken?: string
+  sentryOrg?: string
 }

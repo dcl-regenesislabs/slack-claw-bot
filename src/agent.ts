@@ -27,6 +27,8 @@ interface AgentConfig {
   model?: string;
   upstashRedisUrl?: string;
   upstashRedisToken?: string;
+  sentryAuthToken?: string;
+  sentryOrg?: string;
 }
 
 export interface RunOptions {
@@ -59,6 +61,12 @@ let lastAuthSnapshot: string | null = null;
 export async function initAgent(config: AgentConfig): Promise<void> {
   if (config.githubToken) {
     process.env.GITHUB_TOKEN = config.githubToken;
+  }
+  if (config.sentryAuthToken) {
+    process.env.SENTRY_AUTH_TOKEN = config.sentryAuthToken;
+  }
+  if (config.sentryOrg) {
+    process.env.SENTRY_ORG = config.sentryOrg;
   }
 
   modelId = config.model || "claude-sonnet-4-5";

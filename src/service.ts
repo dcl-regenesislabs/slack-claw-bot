@@ -1,8 +1,11 @@
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { Lifecycle } from '@well-known-components/interfaces'
 import { setupRouter } from './controllers/routes.js'
 import { AppComponents, GlobalContext, TestComponents } from './types.js'
-import { initAgent } from './agent.js'
+import { initAgent, runAgent, syncAuth } from './agent.js'
 import { startSlackBot } from './slack.js'
+import { AgentScheduler } from './concurrency.js'
+import { Cron } from 'croner'
 
 export async function main(program: Lifecycle.EntryPointParameters<AppComponents | TestComponents>) {
   const { components, startComponents } = program
@@ -22,7 +25,9 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     logChannelId: await config.getString('LOG_CHANNEL_ID'),
     notionToken: await config.getString('NOTION_TOKEN'),
     notionShapeDbId: await config.getString('NOTION_SHAPE_DB_ID'),
-    notionShapeParentId: await config.getString('NOTION_SHAPE_PARENT_ID')
+    notionShapeParentId: await config.getString('NOTION_SHAPE_PARENT_ID'),
+    sentryAuthToken: await config.getString('SENTRY_AUTH_TOKEN'),
+    sentryOrg: await config.getString('SENTRY_ORG')
   }
 
   logger.info('Initializing Claude agent...')
@@ -31,11 +36,16 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     githubToken: slackConfig.githubToken,
     model: slackConfig.model,
     upstashRedisUrl: slackConfig.upstashRedisUrl,
-    upstashRedisToken: slackConfig.upstashRedisToken
+    upstashRedisToken: slackConfig.upstashRedisToken,
+    sentryAuthToken: slackConfig.sentryAuthToken,
+    sentryOrg: slackConfig.sentryOrg
   })
 
   logger.info('Starting Slack bot...')
   await startSlackBot(slackConfig)
+
+  // Schedule runner — checks schedules.json every 60s and fires due tasks
+  startScheduleRunner(slackConfig.slackBotToken, logger)
 
   const globalContext: GlobalContext = { components }
   const router = await setupRouter(globalContext)
@@ -45,4 +55,121 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
 
   await startComponents()
   logger.info('Service started')
+}
+
+// ---------------------------------------------------------------------------
+// Schedule runner
+// ---------------------------------------------------------------------------
+
+interface Schedule {
+  id: string
+  cron: string
+  task: string
+  description: string
+  channel: string
+  createdBy: string
+  createdAt: string
+  enabled: boolean
+  runCount: number
+  lastRunAt: string | null
+  lastRunStatus: string | null
+}
+
+interface ScheduleFile {
+  schedules: Schedule[]
+}
+
+const SCHEDULES_PATH =
+  process.env.NODE_ENV === 'production' && existsSync('/data')
+    ? '/data/schedules.json'
+    : 'data/schedules.json'
+
+const NO_OUTPUT_SENTINEL = 'NO_OUTPUT'
+
+function readSchedules(): ScheduleFile {
+  if (!existsSync(SCHEDULES_PATH)) return { schedules: [] }
+  try {
+    return JSON.parse(readFileSync(SCHEDULES_PATH, 'utf-8'))
+  } catch {
+    return { schedules: [] }
+  }
+}
+
+function updateScheduleStats(id: string, status: string): void {
+  const file = readSchedules()
+  const entry = file.schedules.find((s) => s.id === id)
+  if (!entry) return
+  entry.runCount = (entry.runCount || 0) + 1
+  entry.lastRunAt = new Date().toISOString()
+  entry.lastRunStatus = status
+  writeFileSync(SCHEDULES_PATH, JSON.stringify(file, null, 2), 'utf-8')
+}
+
+function startScheduleRunner(slackBotToken: string, logger: any): void {
+  const scheduler = new AgentScheduler(1) // separate lane, max 1 concurrent
+
+  setInterval(async () => {
+    const file = readSchedules()
+    if (!file.schedules.length) return
+
+    const now = new Date()
+
+    for (const schedule of file.schedules) {
+      if (!schedule.enabled) continue
+
+      try {
+        const cron = new Cron(schedule.cron)
+        // Find the next scheduled time after (now - 60s); if it's in the past, it's due
+        const since = new Date(now.getTime() - 60_000)
+        const next = cron.nextRun(since)
+        if (!next || next > now) continue
+
+        logger.info(`[schedule] Firing "${schedule.description}" (${schedule.id})`)
+
+        const threadId = `schedule-${schedule.id}`
+        const submission = scheduler.submit(threadId, async () => {
+          try {
+            const { text } = await runAgent({
+              threadContent: schedule.task,
+              triggeredBy: `schedule:${schedule.id}`
+            })
+            await syncAuth()
+
+            // Post result to Slack unless sentinel
+            if (text && !text.trim().startsWith(NO_OUTPUT_SENTINEL)) {
+              await fetch('https://slack.com/api/chat.postMessage', {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${slackBotToken}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  channel: schedule.channel,
+                  text: (() => {
+                    const footer = `\n\n_Schedule: ${schedule.description} · \`${schedule.cron}\` · ID: ${schedule.id}_`
+                    const body = text.length > 3000 ? text.slice(0, 3000) + '\n...(truncated)' : text
+                    return body + footer
+                  })()
+                })
+              })
+            }
+
+            updateScheduleStats(schedule.id, 'ok')
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : 'unknown error'
+            logger.error(`[schedule] Error running "${schedule.description}": ${msg}`)
+            updateScheduleStats(schedule.id, `error: ${msg}`)
+          }
+        })
+
+        if (submission === 'thread-busy') {
+          logger.warn(`[schedule] "${schedule.description}" still running, skipping`)
+        }
+      } catch (err) {
+        logger.error(`[schedule] Bad cron for "${schedule.id}": ${err}`)
+      }
+    }
+  }, 60_000)
+
+  logger.info(`[schedule] Runner started, checking ${SCHEDULES_PATH} every 60s`)
 }
