@@ -90,6 +90,7 @@ export function resolveMemoryDir(repo?: string): string {
       timeout: 10_000,
     });
     console.log("[memory] Registered gh credential helper for git");
+    configureGitIdentity(memoryDir);
     ensureMemoryDirs(memoryDir);
     return memoryDir;
   }
@@ -98,6 +99,27 @@ export function resolveMemoryDir(repo?: string): string {
   ensureMemoryDirs(memoryDir);
   console.log(`[memory] Using temporary directory: ${memoryDir}`);
   return memoryDir;
+}
+
+function configureGitIdentity(memoryDir: string): void {
+  try {
+    const raw = execFileSync("gh", ["api", "user", "--jq", "{id,login,name}"], {
+      encoding: "utf-8",
+      timeout: 10_000,
+    }).trim();
+    const { id, login, name } = JSON.parse(raw);
+    const gitName = name || login;
+    const gitEmail = `${id}+${login}@users.noreply.github.com`;
+    execFileSync("git", ["config", "user.name", gitName], {
+      cwd: memoryDir, encoding: "utf-8", timeout: 5_000,
+    });
+    execFileSync("git", ["config", "user.email", gitEmail], {
+      cwd: memoryDir, encoding: "utf-8", timeout: 5_000,
+    });
+    console.log(`[memory] Git identity: ${gitName} <${gitEmail}>`);
+  } catch (err) {
+    console.warn("[memory] Could not configure git identity:", (err as Error).message);
+  }
 }
 
 function ensureMemoryDirs(memoryDir: string): void {
