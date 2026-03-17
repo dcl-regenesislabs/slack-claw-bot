@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
@@ -12,6 +13,29 @@ const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"
 const TEXT_EXTENSIONS = new Set([".md", ".txt"]);
 
 let botToken: string;
+
+const SCHEDULES_PATH =
+  process.env.NODE_ENV === "production" && existsSync("/data")
+    ? "/data/schedules.json"
+    : "data/schedules.json";
+
+function patchScheduleChannels(channelId: string): void {
+  if (!existsSync(SCHEDULES_PATH)) return;
+  try {
+    const file = JSON.parse(readFileSync(SCHEDULES_PATH, "utf-8"));
+    let changed = false;
+    for (const s of file.schedules ?? []) {
+      if (!s.channel) {
+        s.channel = channelId;
+        changed = true;
+        console.log(`[slack] Patched schedule ${s.id} with channel ${channelId}`);
+      }
+    }
+    if (changed) writeFileSync(SCHEDULES_PATH, JSON.stringify(file, null, 2), "utf-8");
+  } catch (err) {
+    console.error("[slack] Failed to patch schedule channels:", err);
+  }
+}
 
 export async function startSlackBot(config: Config): Promise<void> {
   const app = new App({
@@ -88,6 +112,9 @@ export async function startSlackBot(config: Config): Promise<void> {
         model,
       });
       await syncAuth();
+      if (skill === "schedule") {
+        patchScheduleChannels(event.channel);
+      }
 
       await unreact("hourglass_flowing_sand");
       if (response) {
@@ -311,7 +338,8 @@ function detectSkill(text: string): string {
   if (/\btriage\b/.test(t)) return "triage";
   if (/\bcreate\b.+\bissue\b/.test(t) || /\bopen\b.+\bissue\b/.test(t)) return "create-issue";
   if (/^fix\b/.test(t)) return "fix";
-  if (/^schedule[\s:]/.test(t) || /\blist\s+schedules\b/.test(t)) return "schedule";
+  if (/^s[ch]edule[\s:]/.test(t) || /\bschedul\w*\b/.test(t) || /\blist\s+schedules\b/.test(t)) return "schedule";
+  if (/\bsentry\b/.test(t)) return "sentry";
   return "general";
 }
 

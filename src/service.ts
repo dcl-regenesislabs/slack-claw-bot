@@ -25,7 +25,9 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     logChannelId: await config.getString('LOG_CHANNEL_ID'),
     notionToken: await config.getString('NOTION_TOKEN'),
     notionShapeDbId: await config.getString('NOTION_SHAPE_DB_ID'),
-    notionShapeParentId: await config.getString('NOTION_SHAPE_PARENT_ID')
+    notionShapeParentId: await config.getString('NOTION_SHAPE_PARENT_ID'),
+    sentryAuthToken: await config.getString('SENTRY_AUTH_TOKEN'),
+    sentryOrg: await config.getString('SENTRY_ORG')
   }
 
   logger.info('Initializing Claude agent...')
@@ -34,7 +36,9 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     githubToken: slackConfig.githubToken,
     model: slackConfig.model,
     upstashRedisUrl: slackConfig.upstashRedisUrl,
-    upstashRedisToken: slackConfig.upstashRedisToken
+    upstashRedisToken: slackConfig.upstashRedisToken,
+    sentryAuthToken: slackConfig.sentryAuthToken,
+    sentryOrg: slackConfig.sentryOrg
   })
 
   logger.info('Starting Slack bot...')
@@ -115,12 +119,10 @@ function startScheduleRunner(slackBotToken: string, logger: any): void {
 
       try {
         const cron = new Cron(schedule.cron)
-        const prev = cron.previousRun(now)
-        if (!prev) continue
-
-        // Check if the previous run falls within the last 60 seconds
-        const diffMs = now.getTime() - prev.getTime()
-        if (diffMs < 0 || diffMs >= 60_000) continue
+        // Find the next scheduled time after (now - 60s); if it's in the past, it's due
+        const since = new Date(now.getTime() - 60_000)
+        const next = cron.nextRun(since)
+        if (!next || next > now) continue
 
         logger.info(`[schedule] Firing "${schedule.description}" (${schedule.id})`)
 
@@ -143,7 +145,11 @@ function startScheduleRunner(slackBotToken: string, logger: any): void {
                 },
                 body: JSON.stringify({
                   channel: schedule.channel,
-                  text: text.length > 3000 ? text.slice(0, 3000) + '\n...(truncated)' : text
+                  text: (() => {
+                    const footer = `\n\n_Schedule: ${schedule.description} · \`${schedule.cron}\` · ID: ${schedule.id}_`
+                    const body = text.length > 3000 ? text.slice(0, 3000) + '\n...(truncated)' : text
+                    return body + footer
+                  })()
                 })
               })
             }
