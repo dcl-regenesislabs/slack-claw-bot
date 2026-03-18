@@ -11,22 +11,19 @@ import {
   ModelRegistry,
   createCodingTools,
 } from "@mariozechner/pi-coding-agent";
+import type { ICacheStorageComponent } from "@dcl/core-commons";
 import { buildPrompt } from "./prompt.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectDir = join(__dirname, "..");
 
-interface RedisConfig {
-  url: string;
-  token: string;
-}
+const REDIS_KEY = "anthropic_auth";
 
 interface AgentConfig {
   anthropicOAuthRefreshToken?: string;
   githubToken?: string;
   model?: string;
-  upstashRedisUrl?: string;
-  upstashRedisToken?: string;
+  redis?: ICacheStorageComponent;
   sentryAuthToken?: string;
   sentryOrg?: string;
 }
@@ -51,12 +48,12 @@ export interface RunResult {
 
 let authStorage: AuthStorage | null = null;
 let modelId: string;
+let redisComponent: ICacheStorageComponent | null = null;
+let lastAuthSnapshot: string | null = null;
 
 const authPath = process.env.NODE_ENV === "production" && existsSync("/data")
   ? "/data/.auth.json"
   : join(projectDir, ".auth.json");
-let redisConfig: RedisConfig | null = null;
-let lastAuthSnapshot: string | null = null;
 
 export async function initAgent(config: AgentConfig): Promise<void> {
   if (config.githubToken) {
@@ -70,12 +67,9 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   }
 
   modelId = config.model || "claude-sonnet-4-5";
+  redisComponent = config.redis ?? null;
 
-  if (config.upstashRedisUrl && config.upstashRedisToken) {
-    redisConfig = { url: config.upstashRedisUrl, token: config.upstashRedisToken };
-  }
-
-  const stored = redisConfig ? await redisGet(redisConfig) : null;
+  const stored = redisComponent ? await redisComponent.get<string>(REDIS_KEY) : null;
 
   if (stored) {
     console.log("[agent] Loaded auth state from Redis");
@@ -99,39 +93,14 @@ export async function initAgent(config: AgentConfig): Promise<void> {
 }
 
 export async function syncAuth(): Promise<void> {
-  if (!redisConfig || !existsSync(authPath)) return;
+  if (!redisComponent || !existsSync(authPath)) return;
 
   const data = readFileSync(authPath, "utf-8");
   if (data === lastAuthSnapshot) return;
 
   lastAuthSnapshot = data;
-  await redisSet(redisConfig, data);
+  await redisComponent.set(REDIS_KEY, data);
   console.log("[agent] Auth token rotated — synced to Redis");
-}
-
-async function redisGet(cfg: RedisConfig): Promise<string | null> {
-  try {
-    const res = await fetch(`${cfg.url}/get/anthropic_auth`, {
-      headers: { Authorization: `Bearer ${cfg.token}` },
-    });
-    const body = await res.json() as { result: string | null };
-    return body.result ?? null;
-  } catch (err) {
-    console.error("[agent] Failed to load from Redis:", err);
-    return null;
-  }
-}
-
-async function redisSet(cfg: RedisConfig, value: string): Promise<void> {
-  try {
-    await fetch(cfg.url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${cfg.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(["SET", "anthropic_auth", value]),
-    });
-  } catch (err) {
-    console.error("[agent] Failed to save to Redis:", err);
-  }
 }
 
 export async function runAgent(options: RunOptions): Promise<RunResult> {

@@ -7,8 +7,6 @@ export interface Config {
   anthropicOAuthRefreshToken?: string
   model?: string
   maxConcurrentAgents: number
-  upstashRedisUrl?: string
-  upstashRedisToken?: string
   logChannelId?: string
   notionToken?: string
   notionShapeDbId?: string
