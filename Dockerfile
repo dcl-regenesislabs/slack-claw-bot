@@ -29,6 +29,7 @@ COPY --from=builder /app/package.json package.json
 # Runtime assets read by agent at startup
 COPY prompts/ prompts/
 COPY skills/ skills/
+COPY .env.default .env.default
 
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "--enable-source-maps", "--abort-on-uncaught-exception", "--unhandled-rejections=strict", "dist/index.js"]

@@ -28,6 +28,14 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     sentryOrg: await config.getString('SENTRY_ORG')
   }
 
+  const globalContext: GlobalContext = { components }
+  const router = await setupRouter(globalContext)
+  components.server.use(router.middleware())
+  components.server.use(router.allowedMethods())
+  components.server.setContext(globalContext)
+
+  await startComponents()
+
   logger.info('Initializing Claude agent...')
   await initAgent({
     anthropicOAuthRefreshToken: slackConfig.anthropicOAuthRefreshToken,
@@ -44,13 +52,6 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
   // Schedule runner — checks schedules.json every 60s and fires due tasks
   startScheduleRunner(slackConfig.slackBotToken, logger)
 
-  const globalContext: GlobalContext = { components }
-  const router = await setupRouter(globalContext)
-  components.server.use(router.middleware())
-  components.server.use(router.allowedMethods())
-  components.server.setContext(globalContext)
-
-  await startComponents()
   logger.info('Service started')
 }
 
