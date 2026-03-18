@@ -5,6 +5,12 @@ import type { Config } from "./config.js";
 import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
 
+const SKILL_MODELS: Partial<Record<string, string>> = {
+  'pr-review': 'claude-opus-4-6',
+  'shape': 'claude-opus-4-6',
+  'plan': 'claude-opus-4-6'
+}
+
 const nameCache = new Map<string, string>();
 const pendingResponses = new Map<string, string>();
 
@@ -102,10 +108,9 @@ export async function startSlackBot(config: Config): Promise<void> {
       if (skill === "schedule") {
         threadContent = `[Schedule Context] channel: ${event.channel}\n\n${threadContent}`;
       }
-      const isReview =
-        PR_URL_PATTERN.test(threadContent) ||
-        REVIEW_KEYWORD_PATTERN.test(text);
-      const model = isReview ? REVIEW_MODEL : undefined;
+      const model =
+        SKILL_MODELS[skill] ??
+        (PR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
       const { text: response, cost, tokens } = await runAgent({
         threadContent,
         triggeredBy: userName,
