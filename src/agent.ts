@@ -69,7 +69,7 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   modelId = config.model || "claude-sonnet-4-5";
   redisComponent = config.redis ?? null;
 
-  const stored = redisComponent ? await redisComponent.get<string>(REDIS_KEY) : null;
+  const stored = redisComponent ? await redisComponent.get<string>(REDIS_KEY).catch(() => null) : null;
 
   if (stored) {
     console.log("[agent] Loaded auth state from Redis");
@@ -99,7 +99,9 @@ export async function syncAuth(): Promise<void> {
   if (data === lastAuthSnapshot) return;
 
   lastAuthSnapshot = data;
-  await redisComponent.set(REDIS_KEY, data);
+  await redisComponent.set(REDIS_KEY, data).catch((err: unknown) => {
+    console.error("[agent] Failed to sync auth to Redis:", err);
+  });
   console.log("[agent] Auth token rotated — synced to Redis");
 }
 
