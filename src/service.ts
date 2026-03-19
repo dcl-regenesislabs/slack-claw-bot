@@ -25,7 +25,9 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     notionShapeDbId: await config.getString('NOTION_SHAPE_DB_ID'),
     notionShapeParentId: await config.getString('NOTION_SHAPE_PARENT_ID'),
     sentryAuthToken: await config.getString('SENTRY_AUTH_TOKEN'),
-    sentryOrg: await config.getString('SENTRY_ORG')
+    sentryOrg: await config.getString('SENTRY_ORG'),
+    gitlabTokenDcl: await config.getString('GITLAB_TOKEN_DCL'),
+    gitlabTokenOps: await config.getString('GITLAB_TOKEN_OPS')
   }
 
   const globalContext: GlobalContext = { components }
@@ -43,7 +45,9 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     model: slackConfig.model,
     redis,
     sentryAuthToken: slackConfig.sentryAuthToken,
-    sentryOrg: slackConfig.sentryOrg
+    sentryOrg: slackConfig.sentryOrg,
+    gitlabTokenDcl: slackConfig.gitlabTokenDcl,
+    gitlabTokenOps: slackConfig.gitlabTokenOps
   })
 
   logger.info('Starting Slack bot...')
