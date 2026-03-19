@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@dcl/jarvis": "^1.4.0",
+    "@aws-sdk/client-s3": "^3.0.0",
     "@dcl/redis-component": "^3.0.1",
     "@mariozechner/pi-coding-agent": "^0.55.0",
     "@slack/bolt": "^4.1.0",
