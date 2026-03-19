@@ -146,6 +146,15 @@ ls .github/workflows/ 2>/dev/null && cat .github/workflows/*.yml 2>/dev/null
 
 # 4. Agent context docs (some repos have these)
 cat docs/ai-agent-context.md 2>/dev/null
+
+# 5. Repo-specific skills (some repos define .claude/skills with domain-specific patterns)
+if [ -d .claude/skills ]; then
+  echo "=== Repo skills ==="
+  for skill in .claude/skills/*/SKILL.md; do
+    echo "--- $skill ---"
+    cat "$skill"
+  done
+fi
 ```
 
 **From these files, extract and note:**
@@ -156,7 +165,7 @@ cat docs/ai-agent-context.md 2>/dev/null
 - **Conventions** — coding style, branch naming, commit message format
 - **Monorepo structure** — if applicable, which packages exist and how they relate
 
-**These extracted details will be used in Steps 6, 7, and 8.** If `CLAUDE.md` exists, its instructions take precedence over defaults.
+**These extracted details will be used in Steps 6, 7, and 8.** If `CLAUDE.md` exists, its instructions take precedence over defaults. If the repo has `.claude/skills/`, read the skills relevant to the area you're fixing — they contain domain-specific patterns, conventions, and architectural guidance that are critical for correct implementation.
 
 ---
 

@@ -7,6 +7,7 @@ description: Repository aliases, dependencies, and cross-repo relationships. Con
 
 | Alias | Repository | Description |
 |-------|-----------|-------------|
+| explorer | decentraland/unity-explorer | Unity desktop Explorer client |
 | bevy | decentraland/bevy-explorer | Bevy-based explorer client |
 | mobile | decentraland/godot-explorer | Godot mobile explorer |
 | creator-hub | decentraland/creator-hub | Creator Hub monorepo (includes inspector, asset packs) |
@@ -36,6 +37,7 @@ The following repositories are **ARCHIVED** and should NEVER be used for fixes:
 | `decentraland/creator-hub` | `decentraland/js-sdk-toolchain` | `@dcl/sdk`, `@dcl/ecs`, `@dcl/sdk-commands`, `@dcl/inspector`, CLI tooling |
 | `decentraland/creator-hub` | (internal packages) | Asset packs, scene templates, inspector UI |
 | `decentraland/godot-explorer` | (self-contained) | Rust `lib/` (core systems) + Godot `godot/` (UI, scripts) |
+| `decentraland/unity-explorer` | (self-contained) | Unity/C# desktop Explorer client (ECS, plugins, ClearScript V8 scene runtime) |
 | `decentraland/bevy-explorer` | (self-contained) | Bevy-based explorer, Rust only |
 
 ### Key packages and where they live

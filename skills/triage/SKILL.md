@@ -5,7 +5,9 @@ description: Triage and label GitHub issues based on content analysis.
 
 # Issue Triage
 
-Analyze the issue content and apply appropriate labels. For repo-specific label lists (e.g. `decentraland/godot-explorer`), refer to the mobile-project skill.
+Analyze the issue content and apply appropriate labels. For repo-specific label lists:
+- `decentraland/godot-explorer` — refer to the mobile-project skill
+- `decentraland/unity-explorer` — refer to the explorer-project skill
 
 ## General Labels
 

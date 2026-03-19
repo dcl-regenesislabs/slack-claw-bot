@@ -117,3 +117,17 @@ When summarizing a PR (not doing a full review):
 5. **Ready to merge?** — give a clear yes/no/not-yet assessment with reasoning
 
 Keep summaries concise. Focus on what matters for deciding whether to merge.
+
+## Repo-specific review checklist
+
+### `decentraland/unity-explorer`
+
+When reviewing PRs in unity-explorer, also check:
+
+- **Naming** — PascalCase for types/methods/properties, camelCase for locals/params, `I` prefix for interfaces, `Async` suffix for async methods
+- **No LINQ in hot paths** — Use loops for performance-critical code; LINQ allocates
+- **Memory** — Prefer structs, object pooling, `IReadOnlyCollection` for public APIs, no boxing, `StringBuilder` over string concat, static lambdas to avoid closures
+- **ECS patterns** — Proper component cleanup on removal/entity destroy/world dispose; structural changes must happen last in queries (refs invalidated by archetype moves); systems must be allocation-free in Update
+- **Async** — `SuppressToResultAsync` for detached UniTask flows; prefer `IsCancellationRequested` over `ThrowIfCancellationRequested`; `SafeCancelAndDispose()` for CancellationTokenSource
+- **Logging** — Uses `ReportHub` (not `Debug.Log`); verify correct `ReportCategory`
+- **Tests** — AAA pattern, NUnit + NSubstitute, `UnitySystemTestBase` for ECS system tests
