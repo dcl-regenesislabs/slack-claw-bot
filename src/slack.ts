@@ -346,7 +346,7 @@ function detectSkill(text: string): string {
   if (/^s[ch]edule[\s:]/.test(t) || /\bschedul\w*\b/.test(t) || /\blist\s+schedules\b/.test(t)) return "schedule";
   if (/\bsentry\b/.test(t)) return "sentry";
   if (/\bcheck\b.+\bpointer\b/.test(t) || /\bpointer\s+consistency\b/.test(t) || /\bcheck\b.+\bwearables\b/.test(t) || /\bcheck\b.+\basset\s+bundles?\b/.test(t)) return "dcl-consistency";
-  if (/\b(dau|mau|wau|retention|active users?|wallets?|marketplace|metric|attribution|new wallets?)\b/i.test(t)) return "data-query";
+  if (/^data[\s:]/.test(t)) return "data-query";
   return "general";
 }
 
