@@ -43,31 +43,33 @@ gh api repos/{owner}/{repo}/issues/{number}/comments --jq '.[] | {user: .user.lo
 
 ## GitLab Merge Request Operations
 
-There are two GitLab groups, each with its own token:
+The GitLab API is served at the instance root: `https://dcl.tools/api/v4`. There are two groups, each with its own access token:
 
-| Group | API base | Token env var |
-|-------|----------|---------------|
-| `/dcl` | `https://dcl.tools/dcl/api/v4` | `GITLAB_TOKEN_DCL` |
-| `/ops` | `https://dcl.tools/ops/api/v4` | `GITLAB_TOKEN_OPS` |
+| Group | Token env var |
+|-------|---------------|
+| `/dcl` | `GITLAB_TOKEN_DCL` |
+| `/ops` | `GITLAB_TOKEN_OPS` |
 
 Select the correct token based on which group the MR belongs to. MR URLs look like:
 - `https://dcl.tools/dcl/{project}/-/merge_requests/{iid}`
 - `https://dcl.tools/ops/{project}/-/merge_requests/{iid}`
 
-To build API URLs, extract the project path from the MR URL and URL-encode it (replace `/` with `%2F`). For example, `group/project` becomes `group%2Fproject`.
+To build API URLs, extract the **full project path** (including the group) from the MR URL and URL-encode it (replace `/` with `%2F`). For example, for `https://dcl.tools/ops/infra/deploy/-/merge_requests/42`, the encoded project path is `ops%2Finfra%2Fdeploy`.
 
-In the examples below, `$GITLAB_TOKEN` is a placeholder — substitute `$GITLAB_TOKEN_DCL` or `$GITLAB_TOKEN_OPS` based on the MR's group.
+In the examples below:
+- `$GITLAB_TOKEN` is a placeholder — substitute `$GITLAB_TOKEN_DCL` or `$GITLAB_TOKEN_OPS` based on the MR's group
+- `$PROJECT_PATH` is the URL-encoded full project path (e.g. `ops%2Finfra%2Fdeploy`)
 
 ### View MR details
 ```bash
 curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-  "https://dcl.tools/ops/api/v4/projects/${PROJECT_ID}/merge_requests/${IID}"
+  "https://dcl.tools/api/v4/projects/${PROJECT_PATH}/merge_requests/${IID}"
 ```
 
 ### Fetch MR changes (diff)
 ```bash
 curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-  "https://dcl.tools/ops/api/v4/projects/${PROJECT_ID}/merge_requests/${IID}/changes"
+  "https://dcl.tools/api/v4/projects/${PROJECT_PATH}/merge_requests/${IID}/changes"
 ```
 
 The response includes a `diff_refs` object with `base_sha`, `start_sha`, and `head_sha` — you will need these for line-level comments.
@@ -75,19 +77,19 @@ The response includes a `diff_refs` object with `base_sha`, `start_sha`, and `he
 ### Check CI pipelines
 ```bash
 curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-  "https://dcl.tools/ops/api/v4/projects/${PROJECT_ID}/merge_requests/${IID}/pipelines"
+  "https://dcl.tools/api/v4/projects/${PROJECT_PATH}/merge_requests/${IID}/pipelines"
 ```
 
 ### List recent MRs
 ```bash
 curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-  "https://dcl.tools/ops/api/v4/projects/${PROJECT_ID}/merge_requests?state=opened&per_page=10"
+  "https://dcl.tools/api/v4/projects/${PROJECT_PATH}/merge_requests?state=opened&per_page=10"
 ```
 
 ### Read discussions and comments
 ```bash
 curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-  "https://dcl.tools/ops/api/v4/projects/${PROJECT_ID}/merge_requests/${IID}/discussions"
+  "https://dcl.tools/api/v4/projects/${PROJECT_PATH}/merge_requests/${IID}/discussions"
 ```
 
 ### Post a general comment
@@ -95,7 +97,7 @@ curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
 curl -s --request POST --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
   --header "Content-Type: application/json" \
   --data '{"body": "Review summary..."}' \
-  "https://dcl.tools/ops/api/v4/projects/${PROJECT_ID}/merge_requests/${IID}/notes"
+  "https://dcl.tools/api/v4/projects/${PROJECT_PATH}/merge_requests/${IID}/notes"
 ```
 
 ### Post line-level discussion
@@ -113,7 +115,7 @@ curl -s --request POST --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
       "new_line": 42
     }
   }' \
-  "https://dcl.tools/ops/api/v4/projects/${PROJECT_ID}/merge_requests/${IID}/discussions"
+  "https://dcl.tools/api/v4/projects/${PROJECT_PATH}/merge_requests/${IID}/discussions"
 ```
 
 ## Code review workflow

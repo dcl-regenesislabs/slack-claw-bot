@@ -1,4 +1,30 @@
-import { markdownToMrkdwn } from '../../src/slack.js'
+import { markdownToMrkdwn, detectSkill } from '../../src/slack.js'
+
+describe('detectSkill', () => {
+  it('detects "mr review" as pr-review', () => {
+    expect(detectSkill('mr review')).toBe('pr-review')
+  })
+
+  it('detects "mr-review" as pr-review', () => {
+    expect(detectSkill('mr-review')).toBe('pr-review')
+  })
+
+  it('detects "review this merge request" as pr-review', () => {
+    expect(detectSkill('review this merge request')).toBe('pr-review')
+  })
+
+  it('does not trigger pr-review on casual "merge request" mention without review', () => {
+    expect(detectSkill('what is that merge request about?')).not.toBe('pr-review')
+  })
+
+  it('detects "pr review" as pr-review', () => {
+    expect(detectSkill('pr review')).toBe('pr-review')
+  })
+
+  it('returns general for unrelated text', () => {
+    expect(detectSkill('hello world')).toBe('general')
+  })
+})
 
 describe('markdownToMrkdwn', () => {
   it('converts bold markdown to mrkdwn', () => {
