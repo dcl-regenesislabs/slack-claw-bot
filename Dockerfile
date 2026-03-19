@@ -31,5 +31,13 @@ COPY prompts/ prompts/
 COPY skills/ skills/
 COPY .env.default .env.default
 
+# Python + packages for the data skill
+RUN apk add --no-cache python3 py3-pip && \
+    pip3 install --no-cache-dir --break-system-packages \
+      snowflake-connector-python==3.18.0 \
+      cryptography==46.0.0 \
+      "dbt-metricflow[snowflake]==0.11.0" \
+      boto3
+
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "--enable-source-maps", "--abort-on-uncaught-exception", "--unhandled-rejections=strict", "dist/index.js"]
