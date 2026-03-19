@@ -3,7 +3,7 @@ import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
 import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
-import { AgentScheduler } from "./concurrency.js";
+import { AgentScheduler, DmScheduler } from "./concurrency.js";
 
 const SKILL_MODELS: Partial<Record<string, string>> = {
   'pr-review': 'claude-opus-4-6',
@@ -13,6 +13,8 @@ const SKILL_MODELS: Partial<Record<string, string>> = {
 
 const nameCache = new Map<string, string>();
 const pendingResponses = new Map<string, string>();
+
+const DM_ALLOWED_USERS = ["U01FPG03G82", "U9ETM8CJH"];
 
 const LARGE_RESPONSE_THRESHOLD = 3000;
 const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
@@ -53,6 +55,7 @@ export async function startSlackBot(config: Config): Promise<void> {
 
   botToken = config.slackBotToken;
   const scheduler = new AgentScheduler(config.maxConcurrentAgents);
+  const dmScheduler = new DmScheduler();
 
   app.action("deliver_file", async ({ action, body, ack, client }) => {
     await ack();
@@ -177,6 +180,103 @@ export async function startSlackBot(config: Config): Promise<void> {
       if (config.logChannelId) {
         postAuditLog(client, config.logChannelId, event, text, { status: "error", error: message })
           .catch((e) => console.error("[slack] Failed to post audit log:", e));
+      }
+    });
+  });
+
+  app.event("message", async ({ event, client, say }) => {
+    const e = event as any;
+    if (e.channel_type !== "im") return;
+    if (e.subtype) return;
+    if (!e.user || !e.text?.trim()) return;
+
+    if (!DM_ALLOWED_USERS.includes(e.user)) {
+      console.warn(`[slack] DM from non-allowed user ${e.user} ignored`);
+      await say({ text: "Sorry, I'm not available via DM.", thread_ts: e.ts });
+      return;
+    }
+
+    if (await isExternalOrGuest(client, e.user)) {
+      console.warn(`[slack] Denied DM from non-org user ${e.user}`);
+      return;
+    }
+
+    const text = (e.text as string).trim();
+    const threadTs: string = e.thread_ts || e.ts;
+    const userName = await resolveUserName(client, e.user);
+    const skill = detectSkill(text);
+    console.log(`[slack] DM from ${userName} [skill: ${skill}]: ${text}`);
+
+    function react(name: string): Promise<unknown> {
+      return client.reactions.add({ channel: e.channel, timestamp: e.ts, name })
+        .catch((err) => { if (err.data?.error !== "already_reacted" && err.data?.error !== "message_not_found") throw err; });
+    }
+    function unreact(name: string): Promise<unknown> {
+      return client.reactions.remove({ channel: e.channel, timestamp: e.ts, name })
+        .catch((err) => { if (err.data?.error !== "no_reaction" && err.data?.error !== "message_not_found") throw err; });
+    }
+
+    const { done, position } = dmScheduler.submit(e.user, async () => {
+      await react("hourglass_flowing_sand");
+
+      let threadContent = await fetchThread(client, e.channel, threadTs);
+      if (skill === "schedule") {
+        threadContent = `[Schedule Context] channel: ${e.channel}\n\n${threadContent}`;
+      }
+      const model =
+        SKILL_MODELS[skill] ??
+        (PR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
+      const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName, model });
+      await syncAuth();
+      if (skill === "schedule") {
+        patchScheduleChannels(e.channel);
+      }
+
+      await unreact("hourglass_flowing_sand");
+      if (response) {
+        await react("white_check_mark");
+        if (response.length > LARGE_RESPONSE_THRESHOLD) {
+          pendingResponses.set(threadTs, response);
+          const lines = response.split("\n").length;
+          await say({
+            thread_ts: threadTs,
+            text: "This response is long — choose a format:",
+            blocks: [
+              { type: "section", text: { type: "mrkdwn", text: `This response is long (~${lines} lines). How would you like to receive it?` } },
+              { type: "actions", elements: [
+                { type: "button", text: { type: "plain_text", text: "File (.md)" }, action_id: "deliver_file", value: threadTs },
+                { type: "button", text: { type: "plain_text", text: "Inline message" }, action_id: "deliver_message", value: threadTs },
+              ]},
+            ],
+          } as any);
+        } else {
+          await say({ text: markdownToMrkdwn(response), thread_ts: threadTs });
+        }
+      } else {
+        await react("warning");
+        await say({ text: "I wasn't able to produce a response.", thread_ts: threadTs });
+      }
+
+      if (config.logChannelId) {
+        postAuditLog(client, config.logChannelId, { channel: e.channel, ts: e.ts, user: e.user }, text, { status: "ok", cost, tokens })
+          .catch((err) => console.error("[slack] Failed to post audit log:", err));
+      }
+    });
+
+    if (position > 0) {
+      await say({ text: `I'm busy but your request is queued (#${position + 1}) — I'll get to it shortly.`, thread_ts: threadTs });
+    }
+
+    done.catch(async (err) => {
+      const message = err instanceof Error ? err.message : "Unknown error occurred";
+      console.error("[slack] DM agent error:", err);
+      await client.reactions.remove({ channel: e.channel, timestamp: e.ts, name: "hourglass_flowing_sand" }).catch(() => {});
+      await client.reactions.add({ channel: e.channel, timestamp: e.ts, name: "x" }).catch(() => {});
+      await say({ text: `Something went wrong: ${message}`, thread_ts: threadTs });
+
+      if (config.logChannelId) {
+        postAuditLog(client, config.logChannelId, { channel: e.channel, ts: e.ts, user: e.user }, text, { status: "error", error: message })
+          .catch((err2) => console.error("[slack] Failed to post audit log:", err2));
       }
     });
   });
