@@ -774,7 +774,7 @@
   dependencies:
     "@well-known-components/interfaces" "^1.5.2"
 
-"@dcl/jarvis@^1.5.0":
+"@dcl/jarvis@^1.4.0":
   version "1.4.0"
   resolved "https://registry.yarnpkg.com/@dcl/jarvis/-/jarvis-1.4.0.tgz#df9e5528ae90f128aefaebf62a716c84b1203061"
   integrity sha512-oKULcaREfWqBsTn7O6toN3nV5bg3Bfu3JeNN7rj6GWZCiS1dnf/BcaTkCyGBuzaQ3m50NkHSYU57oKlKk4YkFA==
