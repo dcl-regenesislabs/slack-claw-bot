@@ -8,7 +8,10 @@ import { AgentScheduler, DmScheduler } from "./concurrency.js";
 const SKILL_MODELS: Partial<Record<string, string>> = {
   'pr-review': 'claude-opus-4-6',
   'shape': 'claude-opus-4-6',
-  'plan': 'claude-opus-4-6'
+  'plan': 'claude-opus-4-6',
+  'fix': 'claude-opus-4-6',
+  'incident': 'claude-opus-4-6',
+  'sentry': 'claude-opus-4-6'
 }
 
 const nameCache = new Map<string, string>();
