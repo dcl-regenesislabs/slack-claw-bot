@@ -3,42 +3,165 @@ name: data
 description: Answer Decentraland data questions about DAU, MAU, retention, marketplace, attribution, and any other metric or SQL query against the data warehouse.
 ---
 
-## Trigger
+## Privacy
 
-Activate when the message asks about user metrics (DAU, MAU, WAU, retention,
-active users, wallets), marketplace (sales, volume, NFTs, trades), attribution
-(new wallets, marketing vs direct, campaigns), or any data/analytics question
-about Decentraland.
+Never reveal implementation details to the user: file paths, environment variable names, script contents, connection parameters, or any internal configuration. Respond with results and high-level descriptions only.
 
 ---
 
-## Key loading helper
+## Trigger
 
-All steps that connect to Snowflake use this logic to load the RSA private key:
+**Activate for:**
+- User metrics: DAU, MAU, WAU, retention, active users, unique wallets, sessions
+- Marketplace: sales, volume, NFTs, trades, listings, collections, transaction counts
+- Attribution: new wallets, marketing vs direct, campaign performance, referral sources
+- Any question that requires querying the Decentraland data warehouse
 
-```python
+**Do NOT activate for:**
+- General Decentraland product questions (roadmap, features, governance)
+- Infrastructure or engineering questions (servers, deployments, uptime)
+- Questions about other platforms or protocols unrelated to Decentraland data
+
+---
+
+## Step 0 — Bootstrap
+
+Run this **once per session** before any other step. Downloads S3 artifacts, writes the reusable key-loading helper, and writes dbt config files.
+
+```bash
+python3 << 'BOOTSTRAP'
+import os, json, base64, sys
+
+# ── Validate required env vars ───────────────────────────────────────────────
+_missing = [v for v in ['SNOWFLAKE_ACCOUNT','SNOWFLAKE_USER','SNOWFLAKE_ROLE','SNOWFLAKE_DATABASE','SNOWFLAKE_WAREHOUSE'] if not os.environ.get(v)]
+if _missing:
+    print(f'[ERROR] Missing required env vars: {", ".join(_missing)}', flush=True); sys.exit(1)
+if not any(os.environ.get(v) for v in ['SNOWFLAKE_PRIVATE_KEY','SNOWFLAKE_PRIVATE_KEY_B64','SNOWFLAKE_PRIVATE_KEY_PATH']):
+    print('[ERROR] No private key source configured', flush=True); sys.exit(1)
+
+# ── Download S3 artifacts ────────────────────────────────────────────────────
+bucket = os.environ.get('DBT_DOCS_S3_BUCKET')
+artifacts_ok = True
+if bucket:
+    import boto3
+    s3 = boto3.client('s3')
+    os.makedirs('./data/target', exist_ok=True)
+    for s3_key, local_path in [
+        ('semantic_manifest.json', './data/target/semantic_manifest.json'),
+        ('llm-index.md',          './data/llm-index.md'),
+    ]:
+        try:
+            s3.download_file(bucket, s3_key, local_path)
+            print(f'[OK] {s3_key}')
+        except Exception as e:
+            print(f'[WARN] {s3_key} not available: {e}')
+            if s3_key == 'semantic_manifest.json':
+                artifacts_ok = False
+else:
+    print('[WARN] DBT_DOCS_S3_BUCKET not set — skipping artifact download')
+    artifacts_ok = False
+
+if not artifacts_ok:
+    print('[ERROR] semantic_manifest.json is required. Cannot proceed with metric queries without it.')
+
+# ── Write reusable key-loading helper ────────────────────────────────────────
+os.makedirs('./data', exist_ok=True)
+with open('./data/sf_key_helper.py', 'w') as f:
+    f.write('''\
 import os, base64
-from cryptography.hazmat.primitives.serialization import load_pem_private_key, Encoding, PrivateFormat, NoEncryption
+from cryptography.hazmat.primitives.serialization import (
+    load_pem_private_key, Encoding, PrivateFormat, NoEncryption)
 
-def load_snowflake_key():
-    key_raw = os.environ.get('SNOWFLAKE_PRIVATE_KEY') or os.environ.get('SNOWFLAKE_PRIVATE_KEY_B64')
+def _load_key_bytes():
+    key_raw = os.environ.get("SNOWFLAKE_PRIVATE_KEY") or os.environ.get("SNOWFLAKE_PRIVATE_KEY_B64")
     if key_raw:
         try:
-            key_bytes = base64.b64decode(key_raw)
+            return base64.b64decode(key_raw)
         except Exception:
-            key_bytes = key_raw.encode()
-    else:
-        key_path = os.environ.get('SNOWFLAKE_PRIVATE_KEY_PATH')
-        if not key_path:
-            raise RuntimeError('No Snowflake private key configured. Set SNOWFLAKE_PRIVATE_KEY or SNOWFLAKE_PRIVATE_KEY_PATH.')
-        with open(key_path, 'rb') as f:
-            key_bytes = f.read()
+            return key_raw.encode()
+    key_path = os.environ.get("SNOWFLAKE_PRIVATE_KEY_PATH")
+    if not key_path:
+        raise RuntimeError(
+            "No Snowflake private key configured. "
+            "Set SNOWFLAKE_PRIVATE_KEY, SNOWFLAKE_PRIVATE_KEY_B64, or SNOWFLAKE_PRIVATE_KEY_PATH.")
+    with open(key_path, "rb") as f:
+        return f.read()
+
+def _parse_key(key_bytes):
     try:
-        key_obj = load_pem_private_key(key_bytes, password=None)
+        return load_pem_private_key(key_bytes, password=None)
     except TypeError:
-        key_obj = load_pem_private_key(key_bytes, password=b'')
-    return key_obj.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
+        return load_pem_private_key(key_bytes, password=b"")
+
+def load_snowflake_key_der():
+    """Return the Snowflake private key as DER bytes (for snowflake-connector)."""
+    return _parse_key(_load_key_bytes()).private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
+
+def write_decrypted_pem(path="/tmp/snowflake_key.p8"):
+    """Write an unencrypted PEM key to disk (needed by the mf CLI). Returns the path."""
+    pem = _parse_key(_load_key_bytes()).private_bytes(Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption())
+    with open(path, "wb") as f:
+        f.write(pem)
+    os.chmod(path, 0o600)
+    return path
+
+def cleanup_pem(path="/tmp/snowflake_key.p8"):
+    """Remove the decrypted key file from disk."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+''')
+print('[OK] sf_key_helper.py written')
+
+# ── Write dbt config files ───────────────────────────────────────────────────
+with open('./data/profiles.yml', 'w') as f:
+    f.write('''\
+decentraland:
+  target: prod
+  outputs:
+    prod:
+      type: snowflake
+      account: {account}
+      user: {user}
+      private_key_path: /tmp/snowflake_key.p8
+      role: {role}
+      database: {database}
+      warehouse: {warehouse}
+      schema: PROD
+      threads: 4
+      client_session_keep_alive: false
+'''.format(
+    account=os.environ.get('SNOWFLAKE_ACCOUNT', ''),
+    user=os.environ.get('SNOWFLAKE_USER', ''),
+    role=os.environ.get('SNOWFLAKE_ROLE', ''),
+    database=os.environ.get('SNOWFLAKE_DATABASE', ''),
+    warehouse=os.environ.get('SNOWFLAKE_WAREHOUSE', ''),
+))
+print('[OK] profiles.yml')
+
+with open('./data/dbt_project.yml', 'w') as f:
+    f.write('name: decentraland\nversion: "1.0.0"\nconfig-version: 2\nprofile: decentraland\nmodel-paths: ["models"]\n')
+print('[OK] dbt_project.yml')
+
+# ── List available metrics ───────────────────────────────────────────────────
+manifest_path = './data/target/semantic_manifest.json'
+if os.path.exists(manifest_path):
+    with open(manifest_path) as f:
+        m = json.load(f)
+    metrics = sorted(x['name'] for x in m.get('metrics', []))
+    print(f'\nAvailable metrics ({len(metrics)}):')
+    for name in metrics:
+        print(f'  - {name}')
+else:
+    print('\n[WARN] No semantic manifest — metric queries will fail.')
+
+print('\nBootstrap complete.')
+BOOTSTRAP
 ```
+
+If bootstrap fails on the Snowflake key, stop and report:
+> "I can't connect to Snowflake — the private key is missing or misconfigured."
 
 ---
 
@@ -53,117 +176,94 @@ Read the message carefully and classify it as one of:
 
 ## Step 2A — Metric query
 
-First, generate config files and list available metrics:
+### 2A.1 — Prepare the key file
 
 ```bash
 python3 -c "
-import os, json, base64, boto3
-from cryptography.hazmat.primitives.serialization import load_pem_private_key, Encoding, PrivateFormat, NoEncryption
-
-# Download fresh artifacts from S3 if available
-bucket = os.environ.get('DBT_DOCS_S3_BUCKET')
-if bucket:
-    s3 = boto3.client('s3')
-    os.makedirs('./data/target', exist_ok=True)
-    for s3_key, local_path in [
-        ('semantic_manifest.json', './data/target/semantic_manifest.json'),
-        ('llm-index.md', './data/llm-index.md'),
-    ]:
-        try:
-            s3.download_file(bucket, s3_key, local_path)
-        except Exception as e:
-            print(f'[S3] {s3_key} not available ({e})')
-
-# Load key
-key_raw = os.environ.get('SNOWFLAKE_PRIVATE_KEY') or os.environ.get('SNOWFLAKE_PRIVATE_KEY_B64')
-if key_raw:
-    try:
-        key_bytes = base64.b64decode(key_raw)
-    except Exception:
-        key_bytes = key_raw.encode()
-else:
-    key_path = os.environ.get('SNOWFLAKE_PRIVATE_KEY_PATH')
-    if not key_path:
-        raise RuntimeError('No Snowflake private key configured. Set SNOWFLAKE_PRIVATE_KEY or SNOWFLAKE_PRIVATE_KEY_PATH.')
-    with open(key_path, 'rb') as f:
-        key_bytes = f.read()
-
-# Write DECRYPTED key to disk (mf CLI requires an unencrypted file)
-from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
-try:
-    _key_obj = load_pem_private_key(key_bytes, password=None)
-except TypeError:
-    _key_obj = load_pem_private_key(key_bytes, password=b'')
-unencrypted_pem = _key_obj.private_bytes(
-    Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption())
-with open('/tmp/snowflake_key.p8', 'wb') as f:
-    f.write(unencrypted_pem)
-os.chmod('/tmp/snowflake_key.p8', 0o600)
-
-# Generate profiles.yml
-os.makedirs('./data', exist_ok=True)
-with open('./data/profiles.yml', 'w') as f:
-    f.write('''decentraland:
-  target: prod
-  outputs:
-    prod:
-      type: snowflake
-      account: {account}
-      user: {user}
-      private_key_path: /tmp/snowflake_key.p8
-      role: {role}
-      database: {database}
-      warehouse: {warehouse}
-      schema: PROD
-      threads: 4
-      client_session_keep_alive: false
-      insecure_mode: true
-'''.format(
-    account=os.environ.get('SNOWFLAKE_ACCOUNT'),
-    user=os.environ.get('SNOWFLAKE_USER'),
-    role=os.environ.get('SNOWFLAKE_ROLE'),
-    database=os.environ.get('SNOWFLAKE_DATABASE'),
-    warehouse=os.environ.get('SNOWFLAKE_WAREHOUSE'),
-))
-
-# Generate minimal dbt_project.yml
-with open('./data/dbt_project.yml', 'w') as f:
-    f.write('name: decentraland\nversion: \"1.0.0\"\nconfig-version: 2\nprofile: decentraland\nmodel-paths: [\"models\"]\n')
-
-# List available metrics
-with open('./data/target/semantic_manifest.json') as f:
-    m = json.load(f)
-for metric in sorted(x['name'] for x in m.get('metrics', [])):
-    print(metric)
-print('Config files generated successfully.')
+import sys; sys.path.insert(0, './data')
+from sf_key_helper import write_decrypted_pem
+write_decrypted_pem()
+print('Key file ready.')
 "
 ```
 
-Then query the metric using MetricFlow:
+### 2A.2 — Resolve grain from the semantic manifest
+
+**Ambiguity rule:** If you're less than 80% sure which metric maps to the question, list the top 2–3 candidate metrics from the manifest and ask the user to confirm before running any query.
+
+Run this to resolve the correct grain for the chosen metric:
 
 ```bash
-# Single date
-DBT_PROJECT_DIR=./data DBT_PROFILES_DIR=./data \
-mf query --metrics METRIC_NAME --group-by metric_time__day \
-  --start-time YYYY-MM-DD --end-time YYYY-MM-DD \
-  --csv /tmp/mf_result.csv --quiet && \
-python3 -c "import csv,json; print(json.dumps(list(csv.DictReader(open('/tmp/mf_result.csv'))), indent=2))"
+python3 -c "
+import json
+with open('./data/target/semantic_manifest.json') as f:
+    m = json.load(f)
 
-# Date range (monthly grain for MAU)
+metric_name = 'METRIC_NAME'
+
+# Find the metric
+metric = next((x for x in m.get('metrics', []) if x['name'] == metric_name), None)
+if not metric:
+    print(f'Metric not found: {metric_name}')
+    exit(1)
+
+# Get the measure name from type_params
+tp = metric.get('type_params', {})
+measure_name = (tp.get('measure') or {}).get('name') or \
+               (tp.get('numerator') or {}).get('name')
+
+# Find the semantic model that owns this measure
+grain = None
+for sm in m.get('semantic_models', []):
+    measures = [x['name'] for x in sm.get('measures', [])]
+    if measure_name in measures:
+        default_dim = sm.get('defaults', {}).get('agg_time_dimension')
+        for dim in sm.get('dimensions', []):
+            if dim['name'] == default_dim and dim.get('type') == 'time':
+                grain = dim.get('type_params', {}).get('time_granularity')
+        break
+
+print(f'grain: {grain or \"day\"}')
+"
+```
+
+Use the printed grain as `metric_time__GRAIN` in the MetricFlow command:
+
+```bash
 DBT_PROJECT_DIR=./data DBT_PROFILES_DIR=./data \
-mf query --metrics METRIC_NAME --group-by metric_time__month \
-  --start-time YYYY-MM-01 --end-time YYYY-MM-DD \
+mf query --metrics METRIC_NAME --group-by metric_time__GRAIN \
+  --start-time YYYY-MM-DD --end-time YYYY-MM-DD \
   --csv /tmp/mf_result.csv --quiet && \
 python3 -c "import csv,json; print(json.dumps(list(csv.DictReader(open('/tmp/mf_result.csv'))), indent=2))"
 ```
 
-If the metric name is ambiguous, pick the best match from the list and state which one you chose.
+**Date range defaults:**
 
-If the query fails:
-- Check that the date range is within the metric's available data (2025+)
-- For MAU/monthly metrics, use `metric_time__month` as group-by
-- If Snowflake connection fails, report the error and ask the user to check Snowflake connectivity
-- If date range is not specified, use the last 2 months
+| User says | Use |
+|-----------|-----|
+| A specific date ("yesterday", "March 8") | That single date as both start and end |
+| A range ("last week", "this month") | Map to calendar start/end |
+| Nothing about dates | Last 60 days from today |
+
+### 2A.3 — Cleanup the key file
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, './data')
+from sf_key_helper import cleanup_pem
+cleanup_pem()
+"
+```
+
+### Error handling
+
+| Error | Likely cause | Action |
+|-------|-------------|--------|
+| `Metric not found` | Typo or wrong name | Show available metric list from bootstrap and ask user to pick |
+| `No data for time range` | Date before 2025 or future date | Inform user data starts in 2025; retry with valid range |
+| `Could not connect to Snowflake` | Key, account, or warehouse issue | Report the full error. Common causes: expired key, suspended warehouse |
+| `Warehouse is suspended` | Auto-suspend kicked in | Tell the user; retry once (warehouse usually auto-resumes) |
+| Any other error | Unknown | Print the full traceback — do NOT silently swallow it |
 
 ---
 
@@ -172,66 +272,19 @@ If the query fails:
 For questions that require custom data not covered by named metrics.
 **IMPORTANT: Use ONLY the tables listed below. Do NOT discover or use alternative tables.**
 
-```bash
-python3 -c "
-import snowflake.connector, json, os, base64
-from cryptography.hazmat.primitives.serialization import (
-    load_pem_private_key, Encoding, PrivateFormat, NoEncryption)
+### 2B.1 — Resolve tables BEFORE writing SQL
 
-key_raw = os.environ.get('SNOWFLAKE_PRIVATE_KEY') or os.environ.get('SNOWFLAKE_PRIVATE_KEY_B64')
-if key_raw:
-    try:
-        key_bytes = base64.b64decode(key_raw)
-    except Exception:
-        key_bytes = key_raw.encode()
-else:
-    key_path = os.environ.get('SNOWFLAKE_PRIVATE_KEY_PATH')
-    if not key_path:
-        raise RuntimeError('No Snowflake private key configured. Set SNOWFLAKE_PRIVATE_KEY or SNOWFLAKE_PRIVATE_KEY_PATH.')
-    with open(key_path, 'rb') as f:
-        key_bytes = f.read()
-
-try:
-    _key_obj = load_pem_private_key(key_bytes, password=None)
-except TypeError:
-    _key_obj = load_pem_private_key(key_bytes, password=b'')
-pk = _key_obj.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
-
-conn = snowflake.connector.connect(
-    account=os.environ.get('SNOWFLAKE_ACCOUNT'),
-    user=os.environ.get('SNOWFLAKE_USER'),
-    private_key=pk,
-    role=os.environ.get('SNOWFLAKE_ROLE'),
-    database=os.environ.get('SNOWFLAKE_DATABASE'),
-    warehouse=os.environ.get('SNOWFLAKE_WAREHOUSE'),
-    insecure_mode=True)
-
-cur = conn.cursor()
-cur.execute('''
-  SELECT ...  -- write your query here
-''')
-cols = [c[0] for c in cur.description]
-rows = cur.fetchmany(500)
-print(json.dumps([dict(zip(cols, row)) for row in rows], default=str, indent=2))
-conn.close()
-"
-```
-
-Before writing the query, resolve the table path and columns using this priority:
-
-1. **`./data/llm-index.md`** — canonical routing table with verified paths and filters. Read it first.
-2. **`./data/target/semantic_manifest.json`** — `node_relation` field gives `database.schema.table` for each semantic model.
-3. **`catalog.json` from S3** — use only if you need column details not found above:
+1. **`./data/llm-index.md`** — canonical routing table with verified paths and filters. **Read it first.**
+2. **`./data/target/semantic_manifest.json`** — the `node_relation` field gives `database.schema.table` for each semantic model.
+3. **`catalog.json` from S3** — use only when you need column-level detail not found above:
 
 ```bash
 python3 -c "
 import json, os, boto3
 bucket = os.environ.get('DBT_DOCS_S3_BUCKET')
-# Download catalog only if needed
 boto3.client('s3').download_file(bucket, 'catalog.json', '/tmp/catalog.json')
 with open('/tmp/catalog.json') as f:
     cat = json.load(f)
-# Find a model by name (case-insensitive)
 model_name = 'MODEL_NAME'
 for key, node in {**cat.get('nodes', {}), **cat.get('sources', {})}.items():
     meta = node.get('metadata', {})
@@ -242,52 +295,155 @@ for key, node in {**cat.get('nodes', {}), **cat.get('sources', {})}.items():
 "
 ```
 
-Never query `DCL.STG` for business questions.
-Never hardcode schema names — always resolve from the artifacts above.
+**If none of these sources map to the question, tell the user you don't have a verified table for it — do NOT guess or hallucinate a table path.**
+
+### 2B.2 — Hard rules for SQL
+
+- **NEVER** query `DCL.STG.*` for business questions (staging tables are raw/unreliable).
+- **NEVER** hardcode schema names — always resolve from artifacts.
+- **ALWAYS** include a `WHERE` clause scoping to a date range. Default: last 60 days.
+- **ALWAYS** add `LIMIT 500` as a safety net. If results hit 500 rows, warn the user and offer to narrow the query.
+
+### 2B.3 — Execute the query
+
+```bash
+python3 << 'SQL_QUERY'
+import snowflake.connector, json, os, sys, base64, time
+sys.path.insert(0, './data')
+from sf_key_helper import load_snowflake_key_der
+
+# Validate required env vars
+_missing = [v for v in ['SNOWFLAKE_ACCOUNT','SNOWFLAKE_USER','SNOWFLAKE_ROLE','SNOWFLAKE_DATABASE','SNOWFLAKE_WAREHOUSE'] if not os.environ.get(v)]
+if _missing:
+    print(f'Error: missing required env vars: {", ".join(_missing)}', flush=True); sys.exit(1)
+
+pk = load_snowflake_key_der()
+
+def connect():
+    return snowflake.connector.connect(
+        account=os.environ['SNOWFLAKE_ACCOUNT'],
+        user=os.environ['SNOWFLAKE_USER'],
+        private_key=pk,
+        role=os.environ['SNOWFLAKE_ROLE'],
+        database=os.environ['SNOWFLAKE_DATABASE'],
+        warehouse=os.environ['SNOWFLAKE_WAREHOUSE'],
+        login_timeout=30,
+        network_timeout=60,
+        session_parameters={
+            'QUERY_TAG': 'jarvis-data-skill',
+            'STATEMENT_TIMEOUT_IN_SECONDS': '120',
+        },
+    )
+
+query = '''
+  SELECT ...  -- write your query here
+'''
+
+for attempt in range(3):
+    try:
+        conn = connect()
+        cur = conn.cursor()
+        cur.execute(query)
+        cols = [c[0] for c in cur.description]
+        rows = cur.fetchmany(500)
+        truncated = len(rows) == 500
+        print(json.dumps([dict(zip(cols, row)) for row in rows], default=str, indent=2))
+        if truncated:
+            print('\n⚠️  Results were TRUNCATED at 500 rows. The full result set is larger.')
+        conn.close()
+        break
+    except Exception as e:
+        if attempt == 2:
+            raise
+        time.sleep(2 ** attempt)
+SQL_QUERY
+```
+
+### Error handling
+
+| Error | Action |
+|-------|--------|
+| `Object does not exist` | Wrong table path — re-check llm-index and manifest. Do NOT retry with a guessed path |
+| `SQL compilation error` | Syntax issue or bad column name — print the error, fix, and retry once |
+| Connection errors | Same as metric query error table above |
 
 ---
 
 ## Step 2C — Definition question
 
-Look up definitions in this order:
+Look up definitions in this order. Stop as soon as you find a match.
 
-**1. Semantic manifest** — contains metric descriptions defined by the data team:
+**1. Semantic manifest** — authoritative metric definitions from the data team:
 
 ```bash
 python3 -c "
 import json
 with open('./data/target/semantic_manifest.json') as f:
     m = json.load(f)
+target = 'TERM_TO_LOOK_UP'.lower()
 for metric in m.get('metrics', []):
-    print(metric['name'], '->', metric.get('description', '(no description)'))
+    if target in metric['name'].lower() or target in metric.get('description', '').lower():
+        print(f\"METRIC: {metric['name']}\")
+        print(f\"  Description: {metric.get('description', '(none)')}\")
+        print(f\"  Type: {metric.get('type', '?')}\")
+        print()
 for sm in m.get('semantic_models', []):
-    print(sm['name'], '->', sm.get('description', '(no description)'))
+    if target in sm['name'].lower() or target in sm.get('description', '').lower():
+        print(f\"MODEL: {sm['name']}\")
+        print(f\"  Description: {sm.get('description', '(none)')}\")
+        print()
 "
 ```
 
-**2. llm-index** — if `./data/llm-index.md` exists, read it for business definitions,
-table routing, and KPI calculations:
+**2. llm-index** — business definitions, table routing, and KPI calculation notes:
 
 ```bash
 cat ./data/llm-index.md 2>/dev/null || echo "[llm-index not available]"
 ```
 
-**3. Fallback** — only if neither source has the answer, use general knowledge
-about Decentraland metrics and state clearly that the definition is not from
-official documentation.
+**3. Fallback** — only if neither source has the answer, use general knowledge about Decentraland metrics. **State clearly:** "This definition is based on general knowledge, not the official Decentraland data documentation."
 
 ---
 
 ## Step 3 — Format the response
 
-Format results for Slack (mrkdwn):
-- Use `*bold*` for metric names and key numbers
-- Use ` ```code``` ` blocks for tables or raw data
-- Round large numbers: 12,345 → "~12.3K" when appropriate
-- Always state the date range and which metric/model was queried
-- If results are empty or zero, say so explicitly — don't silently skip
-- For multiple metrics, compare them in a single clear summary
+Responses go to Slack (mrkdwn syntax):
+- `*bold*` for metric names and key numbers
+- ` ```code``` ` blocks for tabular data (5+ rows)
+- Round large numbers: 12,345 → "~12.3K"; 1,234,567 → "~1.2M"
+- Always state the date range queried
+- Always state which metric or table was used as source
 
-Example response:
-> *DAU for 2026-03-08*: *2,341 wallets* (Explorer + Marketplace + Scene)
-> Source: `stg_wallet_activity_unified_daily`, bots excluded.
+### Edge cases
+
+| Scenario | How to respond |
+|----------|---------------|
+| Results are empty / all zeros | Say so explicitly: "*DAU for 2026-03-08*: *0 wallets*. No activity was recorded for this date." |
+| Results were truncated (500-row limit) | Mention it and offer to narrow the query |
+| Multiple metrics requested | Summarize in a comparison table. Include WoW or MoM changes when data allows |
+| Trend data (range of dates) | Describe the trend direction: "DAU rose from ~1.8K to ~2.3K over the period (+28%)." |
+| Metric returned but uncertain it's the right one | State which metric was used and why, so the user can correct |
+
+### Example responses
+
+**Single metric:**
+> *DAU for 2026-03-08*: *2,341 wallets*
+> Includes Explorer + Marketplace + Scene activity; bots excluded.
+> Source: `metric: active_wallets_daily`
+
+**Trend:**
+> *DAU, last 7 days (Mar 2–8):*
+> ```
+> Mar 02: 1,823
+> Mar 03: 1,912
+> Mar 08: 2,341
+> ```
+> Trend: +28% WoW. Source: `metric: active_wallets_daily`
+
+**No data:**
+> *MAU for January 2024*: No data available.
+> Metric data begins in 2025. Try a date range from 2025 onward.
+
+**Definition:**
+> *D7 retention* measures the share of new wallets that return at least once within 7 days of their first session.
+> Source: semantic manifest → `retention_d7`
