@@ -228,3 +228,69 @@ Explorer/
 - **No LINQ in hot paths** — Use loops for performance-critical code
 - **Tests** — NUnit + NSubstitute, AAA pattern, `UnitySystemTestBase` for ECS tests
 - **PR standards** — Branch naming: `feat/`, `fix/`, `chore/`; squash merge
+
+## PR & Branch Workflow
+
+### Branch Model
+
+- **`dev`** — working branch, all PRs target here
+- **`main`** — release branch, receives merges from release branches
+- **Release branches** — created via workflow: `release/YYYY-MM-DD` from `dev`, PR into `main`
+- **Sync** — after a release merges to `main`, an auto-PR syncs `main` back to `dev` (`chore/sync` branch, labeled `auto-pr`)
+
+### PR Title
+
+PRs targeting `dev` must follow **conventional commit** format:
+- `feat: add new backpack UI`
+- `fix: avatar not rendering on Mac`
+- `chore: update dependencies`
+
+CI validates the title and will block merge if it doesn't conform.
+
+### PR Template
+
+PRs must follow the repo's PR template (`.github/PULL_REQUEST_TEMPLATE.md`):
+
+**What does this PR change?**
+- What you're changing and why (describe the problem being solved)
+- Which issue this addresses (`#123` format)
+- For optimizations: performance comparisons (before vs. after)
+- For SDK features: include or link to a test scene
+- Links to relevant docs, architecture diagrams, Figma designs, screenshots
+
+**Test Instructions**
+- **Prerequisites** — checklist of required setup steps and environment/config requirements
+- **Test Steps** — numbered steps with expected results after each step
+- **Additional Testing Notes** — edge cases to verify, areas needing careful testing, known limitations
+
+QA team members may not have the same technical context — be explicit about requirements and expected outcomes.
+
+**Quality Checklist**
+- [ ] Changes have been tested locally
+- [ ] Documentation has been updated (if required)
+- [ ] Performance impact has been considered
+- [ ] For SDK features: Test scene is included
+
+### Approval Requirements
+
+- **1 DEV approval** (from `explorer-devs` team) — always required
+- **1 QA approval** (from `qa` team) — required unless `no QA needed` label is present
+- Both skipped entirely for PRs labeled `auto-pr`
+- Reviewers with pending re-review requests don't count as approved
+
+### Label-Driven CI Behavior
+
+| Label | Effect |
+|-------|--------|
+| `perf_test` | Triggers performance tests, skips regular tests, **blocks merge** (remove label to unblock) |
+| `force-build` | Runs tests even on draft PRs |
+| `clean-build` | Triggers a clean build (no cache) on the PR |
+| `automation-tests` | Creates an Alttester instrumented build and runs automated tests |
+| `no QA needed` | Makes QA approval optional |
+| `no review` | Skips Claude AI review and auto-assign |
+| `auto-pr` | Skips approval enforcement and Claude review (used by sync/release workflows) |
+| `ai-review` | Triggers Claude AI automatic review |
+
+### Claude AI Review
+
+Every PR gets a pending "Claude Review" status check. Trigger it by commenting `@claude review` on the PR. Claude analyzes code quality, bugs, security, performance, and error handling, then sets the status to pass/fail. Skipped for PRs labeled `no review` or `auto-pr`.
