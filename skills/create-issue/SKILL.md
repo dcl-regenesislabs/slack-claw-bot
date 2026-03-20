@@ -29,6 +29,8 @@ These are not mandatory — use your judgment based on the content:
 
 For bugs in `decentraland/godot-explorer`, use the bug report template defined in the mobile-project skill instead of freeform sections.
 
+For issues in `decentraland/unity-explorer`, use the appropriate template from the explorer-project skill (bug report, feature request, or tech debt) instead of freeform sections.
+
 ## Labels and Assignees
 
 Set labels and assignees at creation time rather than editing after:
@@ -38,6 +40,7 @@ gh issue create --repo {repo} --title "..." --body "..." --label "bug,Android,cl
 
 - Always add the `claw-created` label to every issue created by this bot
 - When creating issues in `decentraland/godot-explorer`, apply relevant labels from the mobile-project skill (type, platform, severity)
+- When creating issues in `decentraland/unity-explorer`, apply relevant labels from the explorer-project skill (type, severity, platform)
 - If the thread mentions who should work on the issue, assign them via `--assignee`
 
 ## Guidelines
@@ -47,4 +50,5 @@ gh issue create --repo {repo} --title "..." --body "..." --label "bug,Android,cl
 - Include relevant code snippets or error messages from the thread
 - If participants disagreed, note the different perspectives
 - Include "Requested by {name} via Slack" as the last line of the issue body, using the name from the "Triggered by" metadata. Omit if no "Triggered by" is present.
+- When creating a `0-critical` or `1-high` issue, remind the thread to escalate to #crash via `/create-incident` per the incident management process (see incident skill)
 - Always output the created issue URL as the last line, prefixed with `ISSUE_URL:`
