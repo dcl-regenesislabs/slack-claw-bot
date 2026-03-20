@@ -66,7 +66,7 @@ export async function initAgent(config: AgentConfig): Promise<void> {
     process.env.SENTRY_ORG = config.sentryOrg;
   }
 
-  modelId = config.model || "claude-sonnet-4-5";
+  modelId = config.model || "claude-sonnet-4-6";
   redisComponent = config.redis ?? null;
 
   const stored = redisComponent ? await redisComponent.get<string>(REDIS_KEY).catch(() => null) : null;
