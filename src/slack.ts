@@ -96,7 +96,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       resolveChannelName(client, event.channel),
     ]);
     const skill = detectSkill(text);
-    console.log(`[slack] Triggered by ${userName} in #${channelName} [skill: ${skill}]: ${text}`);
+    console.log(`[slack] Triggered by ${userName} (${event.user}) in #${channelName} [skill: ${skill}]: ${text}`);
 
     function react(name: string): Promise<unknown> {
       return client.reactions.add({ channel: event.channel, timestamp: event.ts, name })
@@ -119,7 +119,7 @@ export async function startSlackBot(config: Config): Promise<void> {
         (PR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
       const { text: response, cost, tokens } = await runAgent({
         threadContent,
-        triggeredBy: userName,
+        triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
         model,
       });
       await syncAuth();
@@ -450,6 +450,7 @@ function detectSkill(text: string): string {
   if (/\bsentry\b/.test(t)) return "sentry";
   if (/\bcheck\b.+\bpointer\b/.test(t) || /\bpointer\s+consistency\b/.test(t) || /\bcheck\b.+\bwearables\b/.test(t) || /\bcheck\b.+\basset\s+bundles?\b/.test(t)) return "dcl-consistency";
   if (/^data[\s:]/.test(t)) return "data-query";
+  if (/\bunban\b/.test(t) || /\bcredits?\s+ban\b/.test(t) || /\bban\s+status\b/.test(t)) return "credits-unban";
   return "general";
 }
 
