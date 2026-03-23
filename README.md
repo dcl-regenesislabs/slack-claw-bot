@@ -10,6 +10,8 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Summarizes threads and answers general questions
 - Knows common repository aliases via a built-in skill (e.g. `@bot create an issue in mobile`)
 - Creates Shape Up pitch pages in Notion from a brief idea (e.g. `@bot shape: add a leaderboard to the Explorer world map`)
+- Checks Credits ban status for any wallet (open to everyone)
+- Unbans wallets from Credits and Events Notifier (restricted to authorized users)
 
 ## Prerequisites
 
@@ -60,6 +62,8 @@ Copy `.env.default` to `.env` and fill in your values. Key variables:
 | `NOTION_TOKEN` | No | Notion integration token for reading/creating pages |
 | `NOTION_SHAPE_DB_ID` | No | Notion database ID where shape-up entries are created |
 | `NOTION_SHAPE_PARENT_ID` | No | Fallback parent page ID for plain pages |
+| `CREDITS_SERVER_API_KEY` | No | Bearer token for Credits server (required for credits-unban skill) |
+| `EVENTS_NOTIFIER_API_KEY` | No | Bearer token for Events Notifier (required for credits-unban skill) |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
@@ -116,5 +120,6 @@ test/
   integration/            Integration tests (Jest + localFetch)
 prompts/
   system.md               System prompt for the Claude agent
-skills/                   Agent skill definitions (create-issue, github, mobile-project, plan, pr-review, repos, shape, triage)
+skills/                   Agent skill definitions (create-issue, credits-unban, github, mobile-project, plan, pr-review, repos, shape, triage)
+ai-gents/                 Announcement templates and internal docs for new skills
 ```
