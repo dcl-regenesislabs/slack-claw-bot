@@ -18,7 +18,6 @@ const nameCache = new Map<string, string>();
 const pendingResponses = new Map<string, string>();
 
 const DM_ALLOWED_USERS = ["U01FPG03G82", "U9ETM8CJH"];
-const UNBAN_ALLOWED_USERS = ["U049A6A1324", "U02TPAWAUGP", "U025WCHLMN3"];
 
 const LARGE_RESPONSE_THRESHOLD = 3000;
 const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
