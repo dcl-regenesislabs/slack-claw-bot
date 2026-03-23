@@ -540,7 +540,7 @@ export function detectSkill(text: string): string {
   if (/\bcheck\b.+\bpointer\b/.test(t) || /\bpointer\s+consistency\b/.test(t) || /\bcheck\b.+\bwearables\b/.test(t) || /\bcheck\b.+\basset\s+bundles?\b/.test(t)) return "dcl-consistency";
   if (/^data[\s:]/.test(t)) return "data-query";
   if (/\bunban\b/.test(t) || /\bcredits?\s+ban\b/.test(t) || /\bban\s+status\b/.test(t)) return "credits-unban";
-  if (/\bpipeline\b/.test(t) || /\bci\s/.test(t) || /\bworkflow\b/.test(t) || /\bbuild\s+fail/.test(t)) return "pipeline";
+  if (/\bpipeline\b/.test(t) || /\bci(?:[\s/,.!?]|$)/.test(t) || /\bworkflow\b/.test(t) || /\bbuild\s+fail/.test(t)) return "pipeline";
   return "general";
 }
 
