@@ -25,7 +25,9 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     notionShapeDbId: await config.getString('NOTION_SHAPE_DB_ID'),
     notionShapeParentId: await config.getString('NOTION_SHAPE_PARENT_ID'),
     sentryAuthToken: await config.getString('SENTRY_AUTH_TOKEN'),
-    sentryOrg: await config.getString('SENTRY_ORG')
+    sentryOrg: await config.getString('SENTRY_ORG'),
+    s3Bucket: await config.getString('S3_BUCKET'),
+    awsRegion: (await config.getString('AWS_REGION')) ?? (await config.getString('AWS_DEFAULT_REGION'))
   }
 
   const globalContext: GlobalContext = { components }

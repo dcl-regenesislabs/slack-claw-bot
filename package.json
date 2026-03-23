@@ -16,6 +16,7 @@
     "lint:fix": "eslint '**/*.{js,ts}' --ignore-path .gitignore --fix"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
     "@dcl/jarvis": "^1.4.0",
     "@dcl/redis-component": "^3.0.1",
     "@mariozechner/pi-coding-agent": "^0.55.0",
