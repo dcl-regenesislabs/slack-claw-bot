@@ -99,12 +99,6 @@ export async function startSlackBot(config: Config): Promise<void> {
     const skill = detectSkill(text);
     console.log(`[slack] Triggered by ${userName} (${event.user}) in #${channelName} [skill: ${skill}]: ${text}`);
 
-    // Hard authorization check for restricted skills
-    if (skill === "credits-unban" && event.user && !UNBAN_ALLOWED_USERS.includes(event.user)) {
-      await say({ text: "Sorry, you are not authorized to use the credits unban tool.", thread_ts: threadTs });
-      return;
-    }
-
     function react(name: string): Promise<unknown> {
       return client.reactions.add({ channel: event.channel, timestamp: event.ts, name })
         .catch((err) => { if (err.data?.error !== "already_reacted" && err.data?.error !== "message_not_found") throw err; });
