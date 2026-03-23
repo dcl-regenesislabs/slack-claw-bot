@@ -4,11 +4,27 @@ import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
 import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler, DmScheduler } from "./concurrency.js";
+import {
+  isPublicChannel,
+  isNoLearning,
+  getGlobalContext,
+  saveGlobalContext,
+  saveConversationSummary,
+  truncateForInjection,
+  buildSummaryPrompt,
+  buildMemoryUpdatePrompt,
+  buildCompressionPrompt,
+  MAX_STORE_CHARS,
+  type ConversationSummary,
+} from "./memory.js";
 
 const SKILL_MODELS: Partial<Record<string, string>> = {
   'pr-review': 'claude-opus-4-6',
   'shape': 'claude-opus-4-6',
-  'plan': 'claude-opus-4-6'
+  'plan': 'claude-opus-4-6',
+  'fix': 'claude-opus-4-6',
+  'incident': 'claude-opus-4-6',
+  'sentry': 'claude-opus-4-6'
 }
 
 const nameCache = new Map<string, string>();
@@ -42,6 +58,64 @@ function patchScheduleChannels(channelId: string): void {
     if (changed) writeFileSync(SCHEDULES_PATH, JSON.stringify(file, null, 2), "utf-8");
   } catch (err) {
     console.error("[slack] Failed to patch schedule channels:", err);
+  }
+}
+
+function isChannelEligibleForMemory(channelId: string, config: Config): boolean {
+  return Boolean(config.s3Bucket) && Boolean(config.awsRegion) && isPublicChannel(channelId)
+}
+
+async function triggerMemoryUpdate(
+  config: Config,
+  channelId: string,
+  threadTs: string,
+  threadContent: string,
+  agentResponse: string
+): Promise<void> {
+  try {
+    const { text: summaryText } = await runAgent({
+      threadContent: buildSummaryPrompt(threadContent, agentResponse),
+      triggeredBy: 'memory-summarize',
+      model: config.model,
+    })
+
+    if (!summaryText || isNoLearning(summaryText)) {
+      console.log('[memory] Skipping update — interaction not worth learning from')
+      return
+    }
+
+    const summary: ConversationSummary = {
+      channelId,
+      threadTs,
+      savedAt: new Date().toISOString(),
+      summary: summaryText,
+    }
+
+    await saveConversationSummary(config.s3Bucket!, config.awsRegion!, summary)
+
+    const currentContext = await getGlobalContext(config.s3Bucket!, config.awsRegion!)
+    const { text: updatedContext } = await runAgent({
+      threadContent: buildMemoryUpdatePrompt(currentContext, summary),
+      triggeredBy: 'memory-update',
+      model: config.model,
+    })
+
+    if (updatedContext) {
+      let contextToSave = updatedContext
+      if (contextToSave.length > MAX_STORE_CHARS) {
+        console.warn('[memory] Context too large, running compression pass')
+        const { text: compressed } = await runAgent({
+          threadContent: buildCompressionPrompt(contextToSave),
+          triggeredBy: 'memory-compress',
+          model: config.model,
+        })
+        if (compressed) contextToSave = compressed
+      }
+      await saveGlobalContext(config.s3Bucket!, config.awsRegion!, contextToSave)
+      console.log('[memory] Global context updated')
+    }
+  } catch (err) {
+    console.error('[memory] Failed to update memory:', err)
   }
 }
 
@@ -93,7 +167,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       resolveChannelName(client, event.channel),
     ]);
     const skill = detectSkill(text);
-    console.log(`[slack] Triggered by ${userName} in #${channelName} [skill: ${skill}]: ${text}`);
+    console.log(`[slack] Triggered by ${userName} (${event.user}) in #${channelName} [skill: ${skill}]: ${text}`);
 
     function react(name: string): Promise<unknown> {
       return client.reactions.add({ channel: event.channel, timestamp: event.ts, name })
@@ -114,14 +188,30 @@ export async function startSlackBot(config: Config): Promise<void> {
       const model =
         SKILL_MODELS[skill] ??
         (PR_URL_PATTERN.test(threadContent) || MR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
+
+      const rawContext = isChannelEligibleForMemory(event.channel, config)
+        ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch((err) => {
+            console.error("[memory] Failed to load global context:", err);
+            return null;
+          })
+        : null;
+      const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
+
       const { text: response, cost, tokens } = await runAgent({
         threadContent,
-        triggeredBy: userName,
+        triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
         model,
+        memoryContext: memoryContext ?? undefined,
       });
       await syncAuth();
       if (skill === "schedule") {
         patchScheduleChannels(event.channel);
+      }
+
+      if (isChannelEligibleForMemory(event.channel, config) && response) {
+        triggerMemoryUpdate(config, event.channel, threadTs, threadContent, response).catch((err) =>
+          console.error("[memory] Unhandled error in triggerMemoryUpdate:", err)
+        );
       }
 
       await unreact("hourglass_flowing_sand");
@@ -447,6 +537,8 @@ export function detectSkill(text: string): string {
   if (/^s[ch]edule[\s:]/.test(t) || /\bschedul\w*\b/.test(t) || /\blist\s+schedules\b/.test(t)) return "schedule";
   if (/\bsentry\b/.test(t)) return "sentry";
   if (/\bcheck\b.+\bpointer\b/.test(t) || /\bpointer\s+consistency\b/.test(t) || /\bcheck\b.+\bwearables\b/.test(t) || /\bcheck\b.+\basset\s+bundles?\b/.test(t)) return "dcl-consistency";
+  if (/^data[\s:]/.test(t)) return "data-query";
+  if (/\bunban\b/.test(t) || /\bcredits?\s+ban\b/.test(t) || /\bban\s+status\b/.test(t)) return "credits-unban";
   return "general";
 }
 

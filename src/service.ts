@@ -27,7 +27,9 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     sentryAuthToken: await config.getString('SENTRY_AUTH_TOKEN'),
     sentryOrg: await config.getString('SENTRY_ORG'),
     gitlabTokenDcl: await config.getString('GITLAB_TOKEN_DCL'),
-    gitlabTokenOps: await config.getString('GITLAB_TOKEN_OPS')
+    gitlabTokenOps: await config.getString('GITLAB_TOKEN_OPS'),
+    s3Bucket: await config.getString('S3_BUCKET'),
+    awsRegion: (await config.getString('AWS_REGION')) ?? (await config.getString('AWS_DEFAULT_REGION'))
   }
 
   const globalContext: GlobalContext = { components }

@@ -15,4 +15,6 @@ export interface Config {
   sentryOrg?: string
   gitlabTokenDcl?: string
   gitlabTokenOps?: string
+  s3Bucket?: string
+  awsRegion?: string
 }

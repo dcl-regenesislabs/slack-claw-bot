@@ -36,6 +36,7 @@ export interface RunOptions {
   triggeredBy?: string;
   events?: EventEmitter;
   model?: string;
+  memoryContext?: string;
 }
 
 export const REVIEW_MODEL = "claude-opus-4-6";
@@ -75,7 +76,7 @@ export async function initAgent(config: AgentConfig): Promise<void> {
     process.env.GITLAB_TOKEN_OPS = config.gitlabTokenOps;
   }
 
-  modelId = config.model || "claude-sonnet-4-5";
+  modelId = config.model || "claude-sonnet-4-6";
   redisComponent = config.redis ?? null;
 
   const stored = redisComponent ? await redisComponent.get<string>(REDIS_KEY).catch(() => null) : null;
@@ -119,7 +120,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     throw new Error("Agent not initialized — call initAgent() first");
   }
 
-  const { threadContent, dryRun, triggeredBy, events } = options;
+  const { threadContent, dryRun, triggeredBy, events, memoryContext } = options;
   const effectiveModelId = options.model || modelId;
   const sessionManager = SessionManager.inMemory();
 
@@ -157,7 +158,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   });
 
   try {
-    const prompt = buildPrompt(threadContent, dryRun, triggeredBy);
+    const prompt = buildPrompt(threadContent, dryRun, triggeredBy, memoryContext);
 
     if (events) {
       subscribeToTextDeltas(session, events);
