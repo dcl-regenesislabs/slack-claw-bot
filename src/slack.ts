@@ -18,6 +18,7 @@ const nameCache = new Map<string, string>();
 const pendingResponses = new Map<string, string>();
 
 const DM_ALLOWED_USERS = ["U01FPG03G82", "U9ETM8CJH"];
+const UNBAN_ALLOWED_USERS = ["U049A6A1324", "U02TPAWAUGP", "U025WCHLMN3"];
 
 const LARGE_RESPONSE_THRESHOLD = 3000;
 const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
@@ -96,7 +97,13 @@ export async function startSlackBot(config: Config): Promise<void> {
       resolveChannelName(client, event.channel),
     ]);
     const skill = detectSkill(text);
-    console.log(`[slack] Triggered by ${userName} in #${channelName} [skill: ${skill}]: ${text}`);
+    console.log(`[slack] Triggered by ${userName} (${event.user}) in #${channelName} [skill: ${skill}]: ${text}`);
+
+    // Hard authorization check for restricted skills
+    if (skill === "credits-unban" && event.user && !UNBAN_ALLOWED_USERS.includes(event.user)) {
+      await say({ text: "Sorry, you are not authorized to use the credits unban tool.", thread_ts: threadTs });
+      return;
+    }
 
     function react(name: string): Promise<unknown> {
       return client.reactions.add({ channel: event.channel, timestamp: event.ts, name })
@@ -119,7 +126,7 @@ export async function startSlackBot(config: Config): Promise<void> {
         (PR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
       const { text: response, cost, tokens } = await runAgent({
         threadContent,
-        triggeredBy: userName,
+        triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
         model,
       });
       await syncAuth();
@@ -450,6 +457,7 @@ function detectSkill(text: string): string {
   if (/\bsentry\b/.test(t)) return "sentry";
   if (/\bcheck\b.+\bpointer\b/.test(t) || /\bpointer\s+consistency\b/.test(t) || /\bcheck\b.+\bwearables\b/.test(t) || /\bcheck\b.+\basset\s+bundles?\b/.test(t)) return "dcl-consistency";
   if (/^data[\s:]/.test(t)) return "data-query";
+  if (/\bunban\b/.test(t) || /\bcredits?\s+ban\b/.test(t) || /\bban\s+status\b/.test(t)) return "credits-unban";
   return "general";
 }
 
