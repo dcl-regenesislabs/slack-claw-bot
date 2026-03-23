@@ -26,6 +26,8 @@ interface AgentConfig {
   redis?: ICacheStorageComponent;
   sentryAuthToken?: string;
   sentryOrg?: string;
+  gitlabTokenDcl?: string;
+  gitlabTokenOps?: string;
 }
 
 export interface RunOptions {
@@ -39,6 +41,7 @@ export interface RunOptions {
 
 export const REVIEW_MODEL = "claude-opus-4-6";
 export const PR_URL_PATTERN = /github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
+export const MR_URL_PATTERN = /dcl\.tools\/(?:ops|dcl)\/(?:[^/]+\/)*[^/]+\/-\/merge_requests\/\d+/;
 export const REVIEW_KEYWORD_PATTERN = /\breview\b/i;
 
 export interface RunResult {
@@ -65,6 +68,12 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   }
   if (config.sentryOrg) {
     process.env.SENTRY_ORG = config.sentryOrg;
+  }
+  if (config.gitlabTokenDcl) {
+    process.env.GITLAB_TOKEN_DCL = config.gitlabTokenDcl;
+  }
+  if (config.gitlabTokenOps) {
+    process.env.GITLAB_TOKEN_OPS = config.gitlabTokenOps;
   }
 
   modelId = config.model || "claude-sonnet-4-6";

@@ -13,6 +13,8 @@ export interface Config {
   notionShapeParentId?: string
   sentryAuthToken?: string
   sentryOrg?: string
+  gitlabTokenDcl?: string
+  gitlabTokenOps?: string
   s3Bucket?: string
   awsRegion?: string
 }

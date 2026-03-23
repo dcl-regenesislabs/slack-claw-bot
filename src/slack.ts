@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
-import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
+import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler, DmScheduler } from "./concurrency.js";
 import {
   isPublicChannel,
@@ -187,7 +187,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       }
       const model =
         SKILL_MODELS[skill] ??
-        (PR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
+        (PR_URL_PATTERN.test(threadContent) || MR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
 
       const rawContext = isChannelEligibleForMemory(event.channel, config)
         ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch((err) => {
@@ -526,9 +526,10 @@ async function downloadTextFile(url: string): Promise<string> {
   }
 }
 
-function detectSkill(text: string): string {
+export function detectSkill(text: string): string {
   const t = text.toLowerCase().trimStart();
   if (/^shape(\s+up)?[\s:]/.test(t)) return "shape";
+  if (/\bmr[\s-]?review\b/.test(t) || (/\bmerge[\s-]?request\b/.test(t) && /\breview\b/.test(t))) return "pr-review";
   if (/\bpr[\s-]?review\b/.test(t) || (/\breview\b/.test(t) && /\bpr\b/.test(t))) return "pr-review";
   if (/\btriage\b/.test(t)) return "triage";
   if (/\bcreate\b.+\bissue\b/.test(t) || /\bopen\b.+\bissue\b/.test(t)) return "create-issue";
