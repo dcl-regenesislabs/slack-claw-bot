@@ -114,18 +114,19 @@ function startScheduleRunner(slackBotToken: string, logger: any): void {
 
   setInterval(async () => {
     const file = readSchedules()
-    if (!file.schedules.length) return
+    const enabled = file.schedules.filter((s) => s.enabled)
+    logger.info(`[schedule] Tick — ${file.schedules.length} schedules, ${enabled.length} enabled`)
+    if (!enabled.length) return
 
     const now = new Date()
 
-    for (const schedule of file.schedules) {
-      if (!schedule.enabled) continue
-
+    for (const schedule of enabled) {
       try {
         const cron = new Cron(schedule.cron)
         // Find the next scheduled time after (now - 60s); if it's in the past, it's due
         const since = new Date(now.getTime() - 60_000)
         const next = cron.nextRun(since)
+        logger.info(`[schedule] "${schedule.description}" (${schedule.id}) — next after ${since.toISOString()}: ${next?.toISOString() ?? 'none'}`)
         if (!next || next > now) continue
 
         logger.info(`[schedule] Firing "${schedule.description}" (${schedule.id})`)
@@ -168,6 +169,10 @@ function startScheduleRunner(slackBotToken: string, logger: any): void {
 
         if (submission === 'thread-busy') {
           logger.warn(`[schedule] "${schedule.description}" still running, skipping`)
+        } else {
+          submission.done.catch((err) => {
+            logger.error(`[schedule] Unhandled rejection in "${schedule.description}": ${err}`)
+          })
         }
       } catch (err) {
         logger.error(`[schedule] Bad cron for "${schedule.id}": ${err}`)
