@@ -1,4 +1,4 @@
-# slack-issue-bot
+# Agent Server
 
 AI-powered Slack bot that uses Claude to help teams manage GitHub issues through conversation. Mention the bot in a Slack thread and it will read the discussion, interact with GitHub, and reply with results.
 
