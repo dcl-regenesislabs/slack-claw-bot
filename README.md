@@ -12,6 +12,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Creates Shape Up pitch pages in Notion from a brief idea (e.g. `@bot shape: add a leaderboard to the Explorer world map`)
 - Checks Credits ban status for any wallet (open to everyone)
 - Unbans wallets from Credits and Events Notifier (restricted to authorized users)
+- Diagnoses failed CI/CD pipelines on GitHub Actions and GitLab CI — fetches logs, identifies root causes, and suggests fixes
 
 ## Prerequisites
 
