@@ -11,6 +11,7 @@ import {
   ModelRegistry,
   createCodingTools,
 } from "@mariozechner/pi-coding-agent";
+import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { ICacheStorageComponent } from "@dcl/core-commons";
 import { buildPrompt } from "./prompt.js";
 
@@ -37,6 +38,7 @@ export interface RunOptions {
   events?: EventEmitter;
   model?: string;
   memoryContext?: string;
+  customTools?: ToolDefinition[];
 }
 
 export const REVIEW_MODEL = "claude-opus-4-6";
@@ -121,7 +123,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     throw new Error("Agent not initialized — call initAgent() first");
   }
 
-  const { threadContent, dryRun, triggeredBy, events, memoryContext } = options;
+  const { threadContent, dryRun, triggeredBy, events, memoryContext, customTools } = options;
   const effectiveModelId = options.model || modelId;
   const sessionManager = SessionManager.inMemory();
 
@@ -156,6 +158,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     settingsManager: SettingsManager.inMemory(),
     resourceLoader,
     tools: createCodingTools(cwd),
+    customTools,
   });
 
   try {

@@ -1,4 +1,4 @@
-import { markdownToMrkdwn, detectSkill } from '../../src/slack.js'
+import { markdownToMrkdwn, detectSkill, extractFileUploadTag } from '../../src/slack.js'
 
 describe('detectSkill', () => {
   it('detects "mr review" as pr-review', () => {
@@ -52,3 +52,43 @@ describe('markdownToMrkdwn', () => {
     expect(markdownToMrkdwn('a * b * c')).toBe('a * b * c')
   })
 })
+
+describe('extractFileUploadTag', () => {
+  it('returns null when no tag is present', () => {
+    expect(extractFileUploadTag('Here are the results.')).toBeNull()
+  })
+
+  it('extracts path and filename from a self-closing tag', () => {
+    const response = 'Here are the results.\n<upload_file path="/tmp/data.csv" filename="results.csv"/>'
+    const directive = extractFileUploadTag(response)
+    expect(directive).not.toBeNull()
+    expect(directive!.path).toBe('/tmp/data.csv')
+    expect(directive!.filename).toBe('results.csv')
+  })
+
+  it('strips the tag from strippedText', () => {
+    const response = 'Summary text.\n<upload_file path="/tmp/data.csv" filename="results.csv"/>'
+    const directive = extractFileUploadTag(response)
+    expect(directive!.strippedText).toBe('Summary text.')
+    expect(directive!.strippedText).not.toContain('<upload_file')
+  })
+
+  it('handles tag without trailing slash', () => {
+    const response = 'Done.<upload_file path="/tmp/x.csv" filename="x.csv">'
+    const directive = extractFileUploadTag(response)
+    expect(directive).not.toBeNull()
+    expect(directive!.path).toBe('/tmp/x.csv')
+  })
+
+  it('is case-insensitive for the tag name', () => {
+    const response = '<UPLOAD_FILE path="/tmp/x.csv" filename="x.csv"/>'
+    const directive = extractFileUploadTag(response)
+    expect(directive).not.toBeNull()
+  })
+
+  it('returns strippedText equal to original when no tag present', () => {
+    // Confirm no mutation occurs when tag is absent
+    expect(extractFileUploadTag('no tag here')).toBeNull()
+  })
+})
+

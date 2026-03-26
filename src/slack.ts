@@ -1,9 +1,11 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
 import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler, DmScheduler } from "./concurrency.js";
+import { createSlackTools } from "./tools/read-slack-thread.js";
 import {
   isPublicChannel,
   isNoLearning,
@@ -30,8 +32,6 @@ const SKILL_MODELS: Partial<Record<string, string>> = {
 
 const nameCache = new Map<string, string>();
 const pendingResponses = new Map<string, string>();
-
-const DM_ALLOWED_USERS = ["U01FPG03G82", "U9ETM8CJH"];
 
 const LARGE_RESPONSE_THRESHOLD = 3000;
 const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
@@ -64,6 +64,10 @@ function patchScheduleChannels(channelId: string): void {
 
 function isChannelEligibleForMemory(channelId: string, config: Config): boolean {
   return Boolean(config.s3Bucket) && Boolean(config.awsRegion) && isPublicChannel(channelId)
+}
+
+function isMemoryReadable(config: Config): boolean {
+  return Boolean(config.s3Bucket) && Boolean(config.awsRegion)
 }
 
 async function triggerMemoryUpdate(
@@ -132,6 +136,21 @@ export async function startSlackBot(config: Config): Promise<void> {
   const scheduler = new AgentScheduler(config.maxConcurrentAgents);
   const dmScheduler = new DmScheduler();
 
+  // When a queued request starts processing, notify the user
+  scheduler.onDequeued = (threadId: string) => {
+    const meta = queuedMessages.get(threadId);
+    if (!meta) return;
+    queuedMessages.delete(threadId);
+    app.client.chat.update({
+      channel: meta.channel,
+      ts: meta.messageTs,
+      text: ":hourglass_flowing_sand: Your request is now being processed!",
+    }).catch((err) => console.error("[slack] Failed to update queued message:", err));
+  };
+
+  /** Track queued notification messages so we can update them when work starts */
+  const queuedMessages = new Map<string, { channel: string; messageTs: string }>();
+
   app.action("deliver_file", async ({ action, body, ack, client }) => {
     await ack();
     const threadTs = (action as any).value;
@@ -160,6 +179,7 @@ export async function startSlackBot(config: Config): Promise<void> {
 
     if (event.user && await isExternalOrGuest(client, event.user)) {
       console.warn(`[slack] Denied request from non-org user ${event.user}`);
+      await say({ text: "Sorry, I'm not available for external or guest users.", thread_ts: threadTs });
       return;
     }
 
@@ -190,7 +210,7 @@ export async function startSlackBot(config: Config): Promise<void> {
         SKILL_MODELS[skill] ??
         (PR_URL_PATTERN.test(threadContent) || MR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
 
-      const rawContext = isChannelEligibleForMemory(event.channel, config)
+      const rawContext = isMemoryReadable(config)
         ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch((err) => {
             console.error("[memory] Failed to load global context:", err);
             return null;
@@ -198,18 +218,21 @@ export async function startSlackBot(config: Config): Promise<void> {
         : null;
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
+      const customTools = createSlackTools(client);
       const { text: response, cost, tokens, error } = await runAgent({
         threadContent,
         triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
         model,
         memoryContext: memoryContext ?? undefined,
+        customTools,
       });
       await syncAuth();
       if (skill === "schedule") {
         patchScheduleChannels(event.channel);
       }
 
-      if (isChannelEligibleForMemory(event.channel, config) && response) {
+      const userIsGuest = event.user ? await isExternalOrGuest(client, event.user) : true;
+      if (isChannelEligibleForMemory(event.channel, config) && response && !userIsGuest) {
         triggerMemoryUpdate(config, event.channel, threadTs, threadContent, response).catch((err) =>
           console.error("[memory] Unhandled error in triggerMemoryUpdate:", err)
         );
@@ -218,9 +241,19 @@ export async function startSlackBot(config: Config): Promise<void> {
       await unreact("hourglass_flowing_sand");
       if (response) {
         await react("white_check_mark");
-        if (response.length > LARGE_RESPONSE_THRESHOLD) {
-          pendingResponses.set(threadTs, response);
-          const lines = response.split("\n").length;
+
+        // Check whether the agent embedded an <upload_file …/> directive.
+        const uploadDirective = extractFileUploadTag(response);
+        const displayResponse = uploadDirective ? uploadDirective.strippedText : response;
+
+        if (uploadDirective) {
+          // Upload the file first, then post the (stripped) text summary below.
+          await uploadAgentFile(client, uploadDirective, event.channel, threadTs);
+        }
+
+        if (displayResponse.length > LARGE_RESPONSE_THRESHOLD) {
+          pendingResponses.set(threadTs, displayResponse);
+          const lines = displayResponse.split("\n").length;
           await say({
             thread_ts: threadTs,
             text: "This response is long — choose a format:",
@@ -238,8 +271,8 @@ export async function startSlackBot(config: Config): Promise<void> {
               },
             ],
           } as any);
-        } else {
-          await say({ text: markdownToMrkdwn(response), thread_ts: threadTs });
+        } else if (displayResponse) {
+          await say({ text: markdownToMrkdwn(displayResponse), thread_ts: threadTs });
         }
       } else {
         await react("warning");
@@ -255,13 +288,19 @@ export async function startSlackBot(config: Config): Promise<void> {
       }
     });
 
-    if (submission === "thread-busy") {
-      await say({ text: "I'm still working on your previous request in this thread.", thread_ts: threadTs });
-      return;
-    }
-
-    if (submission.queued) {
-      await say({ text: "I'm busy right now but your request is queued — I'll get to it shortly.", thread_ts: threadTs });
+    if (submission.status === "queued-behind-thread") {
+      await say({ text: "I'm still working on your previous request in this thread — your new message is queued.", thread_ts: threadTs });
+    } else if (submission.queued) {
+      const pos = submission.queuePosition + 1;
+      const eta = submission.estimatedWaitSec;
+      const etaText = eta > 0 ? ` (estimated wait: ~${formatEta(eta)})` : "";
+      const msg = await say({
+        text: `Your request is queued (position #${pos})${etaText} — I'll get to it shortly.`,
+        thread_ts: threadTs,
+      });
+      if (msg?.ts) {
+        queuedMessages.set(threadTs, { channel: event.channel, messageTs: msg.ts });
+      }
     }
 
     submission.done.catch(async (err) => {
@@ -284,14 +323,9 @@ export async function startSlackBot(config: Config): Promise<void> {
     if (e.subtype) return;
     if (!e.user || !e.text?.trim()) return;
 
-    if (!DM_ALLOWED_USERS.includes(e.user)) {
-      console.warn(`[slack] DM from non-allowed user ${e.user} ignored`);
-      await say({ text: "Sorry, I'm not available via DM.", thread_ts: e.ts });
-      return;
-    }
-
     if (await isExternalOrGuest(client, e.user)) {
       console.warn(`[slack] Denied DM from non-org user ${e.user}`);
+      await say({ text: "Sorry, I'm not available for external or guest users.", thread_ts: e.ts });
       return;
     }
 
@@ -320,7 +354,17 @@ export async function startSlackBot(config: Config): Promise<void> {
       const model =
         SKILL_MODELS[skill] ??
         (PR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
-      const { text: response, cost, tokens, error } = await runAgent({ threadContent, triggeredBy: userName, model });
+
+      const rawContext = isMemoryReadable(config)
+        ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch((err) => {
+            console.error("[memory] Failed to load global context for DM:", err);
+            return null;
+          })
+        : null;
+      const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
+
+      const customTools = createSlackTools(client);
+      const { text: response, cost, tokens, error } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools });
       await syncAuth();
       if (skill === "schedule") {
         patchScheduleChannels(e.channel);
@@ -329,9 +373,17 @@ export async function startSlackBot(config: Config): Promise<void> {
       await unreact("hourglass_flowing_sand");
       if (response) {
         await react("white_check_mark");
-        if (response.length > LARGE_RESPONSE_THRESHOLD) {
-          pendingResponses.set(threadTs, response);
-          const lines = response.split("\n").length;
+
+        const uploadDirective = extractFileUploadTag(response);
+        const displayResponse = uploadDirective ? uploadDirective.strippedText : response;
+
+        if (uploadDirective) {
+          await uploadAgentFile(client, uploadDirective, e.channel, threadTs);
+        }
+
+        if (displayResponse.length > LARGE_RESPONSE_THRESHOLD) {
+          pendingResponses.set(threadTs, displayResponse);
+          const lines = displayResponse.split("\n").length;
           await say({
             thread_ts: threadTs,
             text: "This response is long — choose a format:",
@@ -343,8 +395,8 @@ export async function startSlackBot(config: Config): Promise<void> {
               ]},
             ],
           } as any);
-        } else {
-          await say({ text: markdownToMrkdwn(response), thread_ts: threadTs });
+        } else if (displayResponse) {
+          await say({ text: markdownToMrkdwn(displayResponse), thread_ts: threadTs });
         }
       } else {
         await react("warning");
@@ -470,6 +522,65 @@ async function postAuditLog(
   });
 }
 
+/** Parsed file-upload directive emitted by the agent. */
+export interface FileUploadDirective {
+  /** Absolute path to the file on disk (e.g. `/tmp/results.csv`) */
+  path: string;
+  /** Filename to show in Slack (e.g. `active_wallets_2026.csv`) */
+  filename: string;
+  /** Agent response with the `<upload_file …/>` tag stripped out */
+  strippedText: string;
+}
+
+const UPLOAD_FILE_TAG = /<upload_file\s+path="([^"]+)"\s+filename="([^"]+)"\s*\/?>/i;
+
+/**
+ * Detect and extract an `<upload_file path="…" filename="…"/>` tag from the
+ * agent response.  Returns `null` when no tag is present.
+ */
+export function extractFileUploadTag(response: string): FileUploadDirective | null {
+  const match = UPLOAD_FILE_TAG.exec(response);
+  if (!match) return null;
+  return {
+    path: match[1],
+    filename: match[2],
+    strippedText: response.replace(UPLOAD_FILE_TAG, "").trim(),
+  };
+}
+
+/**
+ * Upload a file produced by the agent to Slack and post a short summary
+ * message in the thread.  The caller is responsible for also posting
+ * `strippedText` (the response without the tag).
+ */
+async function uploadAgentFile(
+  client: WebClient,
+  directive: FileUploadDirective,
+  channel: string,
+  threadTs: string
+): Promise<void> {
+  let content: Buffer;
+  try {
+    content = await readFile(directive.path);
+  } catch (err) {
+    console.error(`[slack] Could not read agent file at ${directive.path}:`, err);
+    await client.chat.postMessage({
+      channel,
+      thread_ts: threadTs,
+      text: `⚠️ I tried to attach \`${directive.filename}\` but the file was not found on disk.`,
+    });
+    return;
+  }
+
+  await client.files.uploadV2({
+    channel_id: channel,
+    thread_ts: threadTs,
+    content: content.toString("utf-8"),
+    filename: directive.filename,
+    title: directive.filename,
+  });
+}
+
 export function markdownToMrkdwn(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, "*$1*")
@@ -531,6 +642,12 @@ async function downloadTextFile(url: string): Promise<string> {
   } catch {
     return "";
   }
+}
+
+function formatEta(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.round(seconds / 60);
+  return `${mins}min`;
 }
 
 export function detectSkill(text: string): string {
