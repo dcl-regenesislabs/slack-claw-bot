@@ -167,13 +167,12 @@ function startScheduleRunner(slackBotToken: string, logger: any): void {
           }
         })
 
-        if (submission === 'thread-busy') {
-          logger.warn(`[schedule] "${schedule.description}" still running, skipping`)
-        } else {
-          submission.done.catch((err) => {
-            logger.error(`[schedule] Unhandled rejection in "${schedule.description}": ${err}`)
-          })
+        if (submission.status === 'queued-behind-thread') {
+          logger.warn(`[schedule] "${schedule.description}" still running, queued behind thread`)
         }
+        submission.done.catch((err) => {
+          logger.error(`[schedule] Unhandled rejection in "${schedule.description}": ${err}`)
+        })
       } catch (err) {
         logger.error(`[schedule] Bad cron for "${schedule.id}": ${err}`)
       }
