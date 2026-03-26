@@ -405,6 +405,64 @@ cat ./data/llm-index.md 2>/dev/null || echo "[llm-index not available]"
 
 ---
 
+## Step 2D — Export results as CSV (when explicitly requested)
+
+When the user asks for a CSV, a Google Sheet, a downloadable file, or uses phrases like "export", "download", "attach", "upload the data", or "give me the file":
+
+1. Run the query exactly as in Step 2B.
+2. Write the results to a CSV at `/tmp/<slug>.csv` where `<slug>` is a short descriptor of the query (e.g. `active_wallets_2026`).
+3. Emit an `<upload_file>` tag **at the very end** of your response so the bot uploads it automatically.
+
+### CSV export snippet
+
+Add this block after fetching the rows in Step 2B.3:
+
+```python
+import csv, os, hashlib
+
+csv_slug = "query_results"  # replace with a descriptive slug, e.g. "active_wallets_2026"
+csv_path = f"/tmp/{csv_slug}.csv"
+
+with open(csv_path, "w", newline="", encoding="utf-8") as csv_file:
+    writer = csv.DictWriter(csv_file, fieldnames=cols)
+    writer.writeheader()
+    writer.writerows([dict(zip(cols, row)) for row in rows])
+
+print(f"[CSV] Written {len(rows)} rows to {csv_path}")
+```
+
+### Emitting the upload tag
+
+After your summary text, output the tag on its own line:
+
+```
+<upload_file path="/tmp/active_wallets_2026.csv" filename="active_wallets_2026.csv"/>
+```
+
+**Rules:**
+- The tag must be the very last thing in your response — nothing after it.
+- `path` must be the absolute path used in the export snippet above.
+- `filename` should be human-readable and include the `.csv` extension.
+- Only emit the tag when a file export was explicitly requested. Do **not** attach a CSV for every query.
+- Never mention the internal file path in the Slack response text — just say the file is attached.
+
+### Example response with CSV attachment
+
+```
+*Active Wallets 2026* — 795 wallets (10+ days active, any client)
+
+Breakdown by year first entered:
+• 2021 — 120 wallets, $647K marketplace spend
+• 2022 — 100 wallets, $236K
+…
+
+The full dataset (795 rows, 6 columns) is attached as a CSV — import it directly into Google Sheets via *File → Import*.
+
+<upload_file path="/tmp/active_wallets_2026.csv" filename="active_wallets_2026.csv"/>
+```
+
+---
+
 ## Step 3 — Format the response
 
 Responses go to Slack (mrkdwn syntax):
