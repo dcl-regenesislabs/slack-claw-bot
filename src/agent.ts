@@ -215,14 +215,18 @@ function extractError(messages: any[]): { code: string; message: string } | null
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role === "assistant" && msg.stopReason === "error" && msg.errorMessage) {
-      let detail = msg.errorMessage;
+      const raw = String(msg.errorMessage);
+      const code = raw.match(/^\d+/)?.[0] || "unknown";
+      // errorMessage may be "429 {json...}" — strip the numeric prefix before parsing
+      const jsonPart = raw.replace(/^\d+\s*/, "");
+      let detail: string;
       try {
-        const parsed = JSON.parse(detail);
-        detail = parsed?.error?.message || parsed?.message || detail;
+        const parsed = JSON.parse(jsonPart);
+        detail = parsed?.error?.message || parsed?.message || raw;
       } catch {
-        // errorMessage is not JSON, use as-is
+        detail = raw;
       }
-      return { code: String(msg.errorMessage).match(/^\d+/)?.[0] || "unknown", message: detail };
+      return { code, message: detail };
     }
   }
   return null;

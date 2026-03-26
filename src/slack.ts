@@ -277,7 +277,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       } else {
         await react("warning");
         const errDetail = error
-          ? `I wasn't able to produce a response (error ${error.code}: ${error.message}).`
+          ? `I wasn't able to produce a response (error ${error.code}: ${sanitizeForSlack(error.message)}).`
           : "I wasn't able to produce a response.";
         await say({ text: errDetail, thread_ts: threadTs });
       }
@@ -401,7 +401,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       } else {
         await react("warning");
         const errDetail = error
-          ? `I wasn't able to produce a response (error ${error.code}: ${error.message}).`
+          ? `I wasn't able to produce a response (error ${error.code}: ${sanitizeForSlack(error.message)}).`
           : "I wasn't able to produce a response.";
         await say({ text: errDetail, thread_ts: threadTs });
       }
@@ -579,6 +579,13 @@ async function uploadAgentFile(
     filename: directive.filename,
     title: directive.filename,
   });
+}
+
+const MAX_ERROR_LENGTH = 200;
+
+function sanitizeForSlack(text: string): string {
+  const escaped = text.replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]!));
+  return escaped.length > MAX_ERROR_LENGTH ? escaped.slice(0, MAX_ERROR_LENGTH) + "…" : escaped;
 }
 
 export function markdownToMrkdwn(text: string): string {
