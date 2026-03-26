@@ -6,6 +6,7 @@ import type { Config } from "./config.js";
 import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler, DmScheduler } from "./concurrency.js";
 import { createSlackTools } from "./tools/read-slack-thread.js";
+import { createInjectionReportTool } from "./tools/report-injection.js";
 import {
   isPublicChannel,
   isNoLearning,
@@ -218,7 +219,10 @@ export async function startSlackBot(config: Config): Promise<void> {
         : null;
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
-      const customTools = createSlackTools(client);
+      const customTools = [
+        ...createSlackTools(client),
+        ...(config.logChannelId ? [createInjectionReportTool(client, config.logChannelId, event)] : []),
+      ];
       const { text: response, cost, tokens } = await runAgent({
         threadContent,
         triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
@@ -360,7 +364,10 @@ export async function startSlackBot(config: Config): Promise<void> {
         : null;
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
-      const customTools = createSlackTools(client);
+      const customTools = [
+        ...createSlackTools(client),
+        ...(config.logChannelId ? [createInjectionReportTool(client, config.logChannelId, e)] : []),
+      ];
       const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools });
       await syncAuth();
       if (skill === "schedule") {
