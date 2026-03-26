@@ -50,6 +50,7 @@ export interface RunResult {
   text: string;
   cost: number;
   tokens: number;
+  error?: { code: string; message: string };
 }
 
 let authStorage: AuthStorage | null = null;
@@ -187,7 +188,13 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
     const text = session.getLastAssistantText() || "";
     console.log("[agent] result length:", text.length);
-    return { text, cost, tokens };
+
+    const error = extractError(session.messages);
+    if (error) {
+      console.error(`[agent] error detected — code=${error.code} message=${error.message}`);
+    }
+
+    return { text, cost, tokens, error: error ?? undefined };
   } finally {
     session.dispose();
   }
@@ -202,6 +209,27 @@ function subscribeToTextDeltas(session: any, events: EventEmitter): void {
       events.emit("text", event.assistantMessageEvent.delta);
     }
   });
+}
+
+function extractError(messages: any[]): { code: string; message: string } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === "assistant" && msg.stopReason === "error" && msg.errorMessage) {
+      const raw = String(msg.errorMessage);
+      const code = raw.match(/^\d+/)?.[0] || "unknown";
+      // errorMessage may be "429 {json...}" — strip the numeric prefix before parsing
+      const jsonPart = raw.replace(/^\d+\s*/, "");
+      let detail: string;
+      try {
+        const parsed = JSON.parse(jsonPart);
+        detail = parsed?.error?.message || parsed?.message || raw;
+      } catch {
+        detail = raw;
+      }
+      return { code, message: detail };
+    }
+  }
+  return null;
 }
 
 function computeUsage(messages: any[]): { cost: number; tokens: number } {

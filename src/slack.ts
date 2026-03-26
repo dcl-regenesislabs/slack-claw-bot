@@ -219,7 +219,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
       const customTools = createSlackTools(client);
-      const { text: response, cost, tokens } = await runAgent({
+      const { text: response, cost, tokens, error } = await runAgent({
         threadContent,
         triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
         model,
@@ -276,7 +276,10 @@ export async function startSlackBot(config: Config): Promise<void> {
         }
       } else {
         await react("warning");
-        await say({ text: "I wasn't able to produce a response.", thread_ts: threadTs });
+        const errDetail = error
+          ? `I wasn't able to produce a response (error ${error.code}: ${sanitizeForSlack(error.message)}).`
+          : "I wasn't able to produce a response.";
+        await say({ text: errDetail, thread_ts: threadTs });
       }
 
       if (config.logChannelId) {
@@ -361,7 +364,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
       const customTools = createSlackTools(client);
-      const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools });
+      const { text: response, cost, tokens, error } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools });
       await syncAuth();
       if (skill === "schedule") {
         patchScheduleChannels(e.channel);
@@ -397,7 +400,10 @@ export async function startSlackBot(config: Config): Promise<void> {
         }
       } else {
         await react("warning");
-        await say({ text: "I wasn't able to produce a response.", thread_ts: threadTs });
+        const errDetail = error
+          ? `I wasn't able to produce a response (error ${error.code}: ${sanitizeForSlack(error.message)}).`
+          : "I wasn't able to produce a response.";
+        await say({ text: errDetail, thread_ts: threadTs });
       }
 
       if (config.logChannelId) {
@@ -573,6 +579,13 @@ async function uploadAgentFile(
     filename: directive.filename,
     title: directive.filename,
   });
+}
+
+const MAX_ERROR_LENGTH = 200;
+
+function sanitizeForSlack(text: string): string {
+  const escaped = text.replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]!));
+  return escaped.length > MAX_ERROR_LENGTH ? escaped.slice(0, MAX_ERROR_LENGTH) + "…" : escaped;
 }
 
 export function markdownToMrkdwn(text: string): string {
