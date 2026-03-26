@@ -136,6 +136,21 @@ export async function startSlackBot(config: Config): Promise<void> {
   const scheduler = new AgentScheduler(config.maxConcurrentAgents);
   const dmScheduler = new DmScheduler();
 
+  // When a queued request starts processing, notify the user
+  scheduler.onDequeued = (threadId: string) => {
+    const meta = queuedMessages.get(threadId);
+    if (!meta) return;
+    queuedMessages.delete(threadId);
+    app.client.chat.update({
+      channel: meta.channel,
+      ts: meta.messageTs,
+      text: ":hourglass_flowing_sand: Your request is now being processed!",
+    }).catch((err) => console.error("[slack] Failed to update queued message:", err));
+  };
+
+  /** Track queued notification messages so we can update them when work starts */
+  const queuedMessages = new Map<string, { channel: string; messageTs: string }>();
+
   app.action("deliver_file", async ({ action, body, ack, client }) => {
     await ack();
     const threadTs = (action as any).value;
@@ -256,13 +271,19 @@ export async function startSlackBot(config: Config): Promise<void> {
       }
     });
 
-    if (submission === "thread-busy") {
-      await say({ text: "I'm still working on your previous request in this thread.", thread_ts: threadTs });
-      return;
-    }
-
-    if (submission.queued) {
-      await say({ text: "I'm busy right now but your request is queued — I'll get to it shortly.", thread_ts: threadTs });
+    if (submission.status === "queued-behind-thread") {
+      await say({ text: "I'm still working on your previous request in this thread — your new message is queued.", thread_ts: threadTs });
+    } else if (submission.queued) {
+      const pos = submission.queuePosition + 1;
+      const eta = submission.estimatedWaitSec;
+      const etaText = eta > 0 ? ` (estimated wait: ~${formatEta(eta)})` : "";
+      const msg = await say({
+        text: `Your request is queued (position #${pos})${etaText} — I'll get to it shortly.`,
+        thread_ts: threadTs,
+      });
+      if (msg?.ts) {
+        queuedMessages.set(threadTs, { channel: event.channel, messageTs: msg.ts });
+      }
     }
 
     submission.done.catch(async (err) => {
@@ -538,6 +559,12 @@ async function downloadTextFile(url: string): Promise<string> {
   } catch {
     return "";
   }
+}
+
+function formatEta(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.round(seconds / 60);
+  return `${mins}min`;
 }
 
 export function detectSkill(text: string): string {
