@@ -32,8 +32,6 @@ const SKILL_MODELS: Partial<Record<string, string>> = {
 const nameCache = new Map<string, string>();
 const pendingResponses = new Map<string, string>();
 
-const DM_ALLOWED_USERS = ["U01FPG03G82", "U9ETM8CJH"];
-
 const LARGE_RESPONSE_THRESHOLD = 3000;
 const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
 const TEXT_EXTENSIONS = new Set([".md", ".txt"]);
@@ -180,6 +178,7 @@ export async function startSlackBot(config: Config): Promise<void> {
 
     if (event.user && await isExternalOrGuest(client, event.user)) {
       console.warn(`[slack] Denied request from non-org user ${event.user}`);
+      await say({ text: "Sorry, I'm not available for external or guest users.", thread_ts: threadTs });
       return;
     }
 
@@ -210,7 +209,7 @@ export async function startSlackBot(config: Config): Promise<void> {
         SKILL_MODELS[skill] ??
         (PR_URL_PATTERN.test(threadContent) || MR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
 
-      const rawContext = isChannelEligibleForMemory(event.channel, config)
+      const rawContext = isMemoryReadable(config)
         ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch((err) => {
             console.error("[memory] Failed to load global context:", err);
             return null;
@@ -231,7 +230,8 @@ export async function startSlackBot(config: Config): Promise<void> {
         patchScheduleChannels(event.channel);
       }
 
-      if (isChannelEligibleForMemory(event.channel, config) && response) {
+      const userIsGuest = event.user ? await isExternalOrGuest(client, event.user) : true;
+      if (isChannelEligibleForMemory(event.channel, config) && response && !userIsGuest) {
         triggerMemoryUpdate(config, event.channel, threadTs, threadContent, response).catch((err) =>
           console.error("[memory] Unhandled error in triggerMemoryUpdate:", err)
         );
@@ -309,14 +309,9 @@ export async function startSlackBot(config: Config): Promise<void> {
     if (e.subtype) return;
     if (!e.user || !e.text?.trim()) return;
 
-    if (!DM_ALLOWED_USERS.includes(e.user)) {
-      console.warn(`[slack] DM from non-allowed user ${e.user} ignored`);
-      await say({ text: "Sorry, I'm not available via DM.", thread_ts: e.ts });
-      return;
-    }
-
     if (await isExternalOrGuest(client, e.user)) {
       console.warn(`[slack] Denied DM from non-org user ${e.user}`);
+      await say({ text: "Sorry, I'm not available for external or guest users.", thread_ts: e.ts });
       return;
     }
 
