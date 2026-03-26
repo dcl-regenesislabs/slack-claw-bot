@@ -66,6 +66,10 @@ function isChannelEligibleForMemory(channelId: string, config: Config): boolean 
   return Boolean(config.s3Bucket) && Boolean(config.awsRegion) && isPublicChannel(channelId)
 }
 
+function isMemoryReadable(config: Config): boolean {
+  return Boolean(config.s3Bucket) && Boolean(config.awsRegion)
+}
+
 async function triggerMemoryUpdate(
   config: Config,
   channelId: string,
@@ -338,7 +342,16 @@ export async function startSlackBot(config: Config): Promise<void> {
       const model =
         SKILL_MODELS[skill] ??
         (PR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
-      const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName, model });
+
+      const rawContext = isMemoryReadable(config)
+        ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch((err) => {
+            console.error("[memory] Failed to load global context for DM:", err);
+            return null;
+          })
+        : null;
+      const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
+
+      const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined });
       await syncAuth();
       if (skill === "schedule") {
         patchScheduleChannels(e.channel);

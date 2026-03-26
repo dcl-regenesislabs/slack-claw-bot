@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">9.24% </span>
+                <span class="strong">9.09% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>27/292</span>
+                <span class='fraction'>27/297</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">14.45% </span>
+                <span class="strong">13.81% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>25/173</span>
+                <span class='fraction'>25/181</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">4.25% </span>
+                <span class="strong">4.08% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>2/47</span>
+                <span class='fraction'>2/49</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">9.57% </span>
+                <span class="strong">9.39% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>25/261</span>
+                <span class='fraction'>25/266</span>
             </div>
         
             
@@ -636,7 +636,20 @@
 <a name='L571'></a><a href='#L571'>571</a>
 <a name='L572'></a><a href='#L572'>572</a>
 <a name='L573'></a><a href='#L573'>573</a>
-<a name='L574'></a><a href='#L574'>574</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L574'></a><a href='#L574'>574</a>
+<a name='L575'></a><a href='#L575'>575</a>
+<a name='L576'></a><a href='#L576'>576</a>
+<a name='L577'></a><a href='#L577'>577</a>
+<a name='L578'></a><a href='#L578'>578</a>
+<a name='L579'></a><a href='#L579'>579</a>
+<a name='L580'></a><a href='#L580'>580</a>
+<a name='L581'></a><a href='#L581'>581</a>
+<a name='L582'></a><a href='#L582'>582</a>
+<a name='L583'></a><a href='#L583'>583</a>
+<a name='L584'></a><a href='#L584'>584</a>
+<a name='L585'></a><a href='#L585'>585</a>
+<a name='L586'></a><a href='#L586'>586</a>
+<a name='L587'></a><a href='#L587'>587</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -705,12 +718,16 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -965,11 +982,20 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1277,6 +1303,10 @@ function <span class="fstat-no" title="function not covered" >isChannelEligibleF
 <span class="cstat-no" title="statement not covered" >  return Boolean(config.s3Bucket) &amp;&amp; Boolean(config.awsRegion) &amp;&amp; isPublicChannel(channelId)</span>
 }
 &nbsp;
+function <span class="fstat-no" title="function not covered" >isMemoryReadable(</span>config: Config): boolean {
+<span class="cstat-no" title="statement not covered" >  return Boolean(config.s3Bucket) &amp;&amp; Boolean(config.awsRegion)</span>
+}
+&nbsp;
 async function <span class="fstat-no" title="function not covered" >triggerMemoryUpdate(</span>
   config: Config,
   channelId: string,
@@ -1549,7 +1579,16 @@ export async function <span class="fstat-no" title="function not covered" >start
       const model =
 <span class="cstat-no" title="statement not covered" >        SKILL_MODELS[skill] ??</span>
         (PR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
-      const { text: response, cost, tokens } = <span class="cstat-no" title="statement not covered" >await runAgent({ threadContent, triggeredBy: userName, model });</span>
+&nbsp;
+      const rawContext = <span class="cstat-no" title="statement not covered" >isMemoryReadable(config)</span>
+        ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch(<span class="fstat-no" title="function not covered" >(e</span>rr) =&gt; {
+<span class="cstat-no" title="statement not covered" >            console.error("[memory] Failed to load global context for DM:", err);</span>
+<span class="cstat-no" title="statement not covered" >            return null;</span>
+          })
+        : null;
+      const memoryContext = <span class="cstat-no" title="statement not covered" >rawContext ? truncateForInjection(rawContext) : null;</span>
+&nbsp;
+      const { text: response, cost, tokens } = <span class="cstat-no" title="statement not covered" >await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined });</span>
 <span class="cstat-no" title="statement not covered" >      await syncAuth();</span>
 <span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (skill === "schedule") {</span>
 <span class="cstat-no" title="statement not covered" >        patchScheduleChannels(e.channel);</span>
@@ -1789,7 +1828,7 @@ export function detectSkill(text: string): string {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-03-26T10:24:53.034Z
+                at 2026-03-26T10:29:14.472Z
             </div>
         <script src="../prettify.js"></script>
         <script>
