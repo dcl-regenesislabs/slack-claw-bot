@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
@@ -240,9 +241,19 @@ export async function startSlackBot(config: Config): Promise<void> {
       await unreact("hourglass_flowing_sand");
       if (response) {
         await react("white_check_mark");
-        if (response.length > LARGE_RESPONSE_THRESHOLD) {
-          pendingResponses.set(threadTs, response);
-          const lines = response.split("\n").length;
+
+        // Check whether the agent embedded an <upload_file …/> directive.
+        const uploadDirective = extractFileUploadTag(response);
+        const displayResponse = uploadDirective ? uploadDirective.strippedText : response;
+
+        if (uploadDirective) {
+          // Upload the file first, then post the (stripped) text summary below.
+          await uploadAgentFile(client, uploadDirective, event.channel, threadTs);
+        }
+
+        if (displayResponse.length > LARGE_RESPONSE_THRESHOLD) {
+          pendingResponses.set(threadTs, displayResponse);
+          const lines = displayResponse.split("\n").length;
           await say({
             thread_ts: threadTs,
             text: "This response is long — choose a format:",
@@ -260,8 +271,8 @@ export async function startSlackBot(config: Config): Promise<void> {
               },
             ],
           } as any);
-        } else {
-          await say({ text: markdownToMrkdwn(response), thread_ts: threadTs });
+        } else if (displayResponse) {
+          await say({ text: markdownToMrkdwn(displayResponse), thread_ts: threadTs });
         }
       } else {
         await react("warning");
@@ -364,9 +375,17 @@ export async function startSlackBot(config: Config): Promise<void> {
       await unreact("hourglass_flowing_sand");
       if (response) {
         await react("white_check_mark");
-        if (response.length > LARGE_RESPONSE_THRESHOLD) {
-          pendingResponses.set(threadTs, response);
-          const lines = response.split("\n").length;
+
+        const uploadDirective = extractFileUploadTag(response);
+        const displayResponse = uploadDirective ? uploadDirective.strippedText : response;
+
+        if (uploadDirective) {
+          await uploadAgentFile(client, uploadDirective, e.channel, threadTs);
+        }
+
+        if (displayResponse.length > LARGE_RESPONSE_THRESHOLD) {
+          pendingResponses.set(threadTs, displayResponse);
+          const lines = displayResponse.split("\n").length;
           await say({
             thread_ts: threadTs,
             text: "This response is long — choose a format:",
@@ -378,8 +397,8 @@ export async function startSlackBot(config: Config): Promise<void> {
               ]},
             ],
           } as any);
-        } else {
-          await say({ text: markdownToMrkdwn(response), thread_ts: threadTs });
+        } else if (displayResponse) {
+          await say({ text: markdownToMrkdwn(displayResponse), thread_ts: threadTs });
         }
       } else {
         await react("warning");
@@ -499,6 +518,65 @@ async function postAuditLog(
   await client.chat.postMessage({
     channel: logChannelId,
     text: `${icon} <@${event.user}> in <#${event.channel}>: ${text} — ${detail}\n<${permalink}|View message>`,
+  });
+}
+
+/** Parsed file-upload directive emitted by the agent. */
+export interface FileUploadDirective {
+  /** Absolute path to the file on disk (e.g. `/tmp/results.csv`) */
+  path: string;
+  /** Filename to show in Slack (e.g. `active_wallets_2026.csv`) */
+  filename: string;
+  /** Agent response with the `<upload_file …/>` tag stripped out */
+  strippedText: string;
+}
+
+const UPLOAD_FILE_TAG = /<upload_file\s+path="([^"]+)"\s+filename="([^"]+)"\s*\/?>/i;
+
+/**
+ * Detect and extract an `<upload_file path="…" filename="…"/>` tag from the
+ * agent response.  Returns `null` when no tag is present.
+ */
+export function extractFileUploadTag(response: string): FileUploadDirective | null {
+  const match = UPLOAD_FILE_TAG.exec(response);
+  if (!match) return null;
+  return {
+    path: match[1],
+    filename: match[2],
+    strippedText: response.replace(UPLOAD_FILE_TAG, "").trim(),
+  };
+}
+
+/**
+ * Upload a file produced by the agent to Slack and post a short summary
+ * message in the thread.  The caller is responsible for also posting
+ * `strippedText` (the response without the tag).
+ */
+async function uploadAgentFile(
+  client: WebClient,
+  directive: FileUploadDirective,
+  channel: string,
+  threadTs: string
+): Promise<void> {
+  let content: Buffer;
+  try {
+    content = await readFile(directive.path);
+  } catch (err) {
+    console.error(`[slack] Could not read agent file at ${directive.path}:`, err);
+    await client.chat.postMessage({
+      channel,
+      thread_ts: threadTs,
+      text: `⚠️ I tried to attach \`${directive.filename}\` but the file was not found on disk.`,
+    });
+    return;
+  }
+
+  await client.files.uploadV2({
+    channel_id: channel,
+    thread_ts: threadTs,
+    content: content.toString("utf-8"),
+    filename: directive.filename,
+    title: directive.filename,
   });
 }
 
