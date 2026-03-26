@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">9.09% </span>
+                <span class="strong">9.03% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>27/297</span>
+                <span class='fraction'>27/299</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">9.39% </span>
+                <span class="strong">9.32% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>25/266</span>
+                <span class='fraction'>25/268</span>
             </div>
         
             
@@ -649,7 +649,11 @@
 <a name='L584'></a><a href='#L584'>584</a>
 <a name='L585'></a><a href='#L585'>585</a>
 <a name='L586'></a><a href='#L586'>586</a>
-<a name='L587'></a><a href='#L587'>587</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L587'></a><a href='#L587'>587</a>
+<a name='L588'></a><a href='#L588'>588</a>
+<a name='L589'></a><a href='#L589'>589</a>
+<a name='L590'></a><a href='#L590'>590</a>
+<a name='L591'></a><a href='#L591'>591</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -661,15 +665,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -680,6 +675,16 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
@@ -869,11 +874,13 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -1002,6 +1009,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -1241,6 +1249,7 @@ import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
 import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler, DmScheduler } from "./concurrency.js";
+import { createSlackTools } from "./tools/read-slack-thread.js";
 import {
   isPublicChannel,
   isNoLearning,
@@ -1454,11 +1463,13 @@ export async function <span class="fstat-no" title="function not covered" >start
         : null;
       const memoryContext = <span class="cstat-no" title="statement not covered" >rawContext ? truncateForInjection(rawContext) : null;</span>
 &nbsp;
+      const customTools = <span class="cstat-no" title="statement not covered" >createSlackTools(client);</span>
       const { text: response, cost, tokens } = <span class="cstat-no" title="statement not covered" >await runAgent({</span>
         threadContent,
         triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
         model,
         memoryContext: memoryContext ?? undefined,
+        customTools,
       });
 <span class="cstat-no" title="statement not covered" >      await syncAuth();</span>
 <span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (skill === "schedule") {</span>
@@ -1588,7 +1599,8 @@ export async function <span class="fstat-no" title="function not covered" >start
         : null;
       const memoryContext = <span class="cstat-no" title="statement not covered" >rawContext ? truncateForInjection(rawContext) : null;</span>
 &nbsp;
-      const { text: response, cost, tokens } = <span class="cstat-no" title="statement not covered" >await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined });</span>
+      const customTools = <span class="cstat-no" title="statement not covered" >createSlackTools(client);</span>
+      const { text: response, cost, tokens } = <span class="cstat-no" title="statement not covered" >await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools });</span>
 <span class="cstat-no" title="statement not covered" >      await syncAuth();</span>
 <span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (skill === "schedule") {</span>
 <span class="cstat-no" title="statement not covered" >        patchScheduleChannels(e.channel);</span>
@@ -1828,7 +1840,7 @@ export function detectSkill(text: string): string {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-03-26T10:29:14.472Z
+                at 2026-03-26T11:18:51.099Z
             </div>
         <script src="../prettify.js"></script>
         <script>

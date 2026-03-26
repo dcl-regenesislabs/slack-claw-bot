@@ -4,6 +4,7 @@ import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
 import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler, DmScheduler } from "./concurrency.js";
+import { createSlackTools } from "./tools/read-slack-thread.js";
 import {
   isPublicChannel,
   isNoLearning,
@@ -217,11 +218,13 @@ export async function startSlackBot(config: Config): Promise<void> {
         : null;
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
+      const customTools = createSlackTools(client);
       const { text: response, cost, tokens } = await runAgent({
         threadContent,
         triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
         model,
         memoryContext: memoryContext ?? undefined,
+        customTools,
       });
       await syncAuth();
       if (skill === "schedule") {
@@ -351,7 +354,8 @@ export async function startSlackBot(config: Config): Promise<void> {
         : null;
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
-      const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined });
+      const customTools = createSlackTools(client);
+      const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools });
       await syncAuth();
       if (skill === "schedule") {
         patchScheduleChannels(e.channel);
