@@ -198,7 +198,7 @@ export async function startSlackBot(config: Config): Promise<void> {
         : null;
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
-      const { text: response, cost, tokens } = await runAgent({
+      const { text: response, cost, tokens, error } = await runAgent({
         threadContent,
         triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
         model,
@@ -243,7 +243,10 @@ export async function startSlackBot(config: Config): Promise<void> {
         }
       } else {
         await react("warning");
-        await say({ text: "I wasn't able to produce a response.", thread_ts: threadTs });
+        const errDetail = error
+          ? `I wasn't able to produce a response (error ${error.code}: ${error.message}).`
+          : "I wasn't able to produce a response.";
+        await say({ text: errDetail, thread_ts: threadTs });
       }
 
       if (config.logChannelId) {
@@ -317,7 +320,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       const model =
         SKILL_MODELS[skill] ??
         (PR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
-      const { text: response, cost, tokens } = await runAgent({ threadContent, triggeredBy: userName, model });
+      const { text: response, cost, tokens, error } = await runAgent({ threadContent, triggeredBy: userName, model });
       await syncAuth();
       if (skill === "schedule") {
         patchScheduleChannels(e.channel);
@@ -345,7 +348,10 @@ export async function startSlackBot(config: Config): Promise<void> {
         }
       } else {
         await react("warning");
-        await say({ text: "I wasn't able to produce a response.", thread_ts: threadTs });
+        const errDetail = error
+          ? `I wasn't able to produce a response (error ${error.code}: ${error.message}).`
+          : "I wasn't able to produce a response.";
+        await say({ text: errDetail, thread_ts: threadTs });
       }
 
       if (config.logChannelId) {

@@ -48,6 +48,7 @@ export interface RunResult {
   text: string;
   cost: number;
   tokens: number;
+  error?: { code: string; message: string };
 }
 
 let authStorage: AuthStorage | null = null;
@@ -184,7 +185,13 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
     const text = session.getLastAssistantText() || "";
     console.log("[agent] result length:", text.length);
-    return { text, cost, tokens };
+
+    const error = extractError(session.messages);
+    if (error) {
+      console.error(`[agent] error detected — code=${error.code} message=${error.message}`);
+    }
+
+    return { text, cost, tokens, error: error ?? undefined };
   } finally {
     session.dispose();
   }
@@ -199,6 +206,23 @@ function subscribeToTextDeltas(session: any, events: EventEmitter): void {
       events.emit("text", event.assistantMessageEvent.delta);
     }
   });
+}
+
+function extractError(messages: any[]): { code: string; message: string } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === "assistant" && msg.stopReason === "error" && msg.errorMessage) {
+      let detail = msg.errorMessage;
+      try {
+        const parsed = JSON.parse(detail);
+        detail = parsed?.error?.message || parsed?.message || detail;
+      } catch {
+        // errorMessage is not JSON, use as-is
+      }
+      return { code: String(msg.errorMessage).match(/^\d+/)?.[0] || "unknown", message: detail };
+    }
+  }
+  return null;
 }
 
 function computeUsage(messages: any[]): { cost: number; tokens: number } {
