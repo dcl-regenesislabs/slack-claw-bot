@@ -463,6 +463,170 @@ The full dataset (795 rows, 6 columns) is attached as a CSV — import it direct
 
 ---
 
+## Step 2E — Interactive HTML visualization (when requested)
+
+When the user asks for a "chart", "graph", "visualization", "dashboard", "visual", or asks to "plot" / "see the trend":
+
+1. Run the query as in Step 2A or 2B to get the data.
+2. Write a **single, self-contained HTML file** to `/tmp/<slug>/index.html` using the `write` tool.
+3. Deploy it to Netlify and share the link in your response.
+4. Tell the user something like: "Here's an interactive chart: <url> — you can filter by date, toggle chart types, and download as PNG."
+
+### HTML file requirements
+
+- **Chart.js via CDN**: `<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>`
+- **Embedded data**: Store query results as `const DATA = [...]` JSON array in a `<script>` tag
+- **Responsive**: Use `<meta name="viewport" content="width=device-width, initial-scale=1">` and responsive chart sizing
+- **Styling**: Clean, minimal inline CSS. System font stack. Light background. Use Decentraland brand palette: `#ff2d55`, `#6930c3`, `#36d7b7`, `#3498db`, `#f39c12`
+
+### Chart type heuristic
+
+| Data shape | Chart type |
+|-----------|------------|
+| Time series (dates on x-axis) | Line chart |
+| Categorical comparison (by region, client, etc.) | Bar chart |
+| Part-of-whole / percentages | Doughnut chart |
+| Two dimensions (e.g. metric × category) | Grouped bar chart |
+
+### Interactive controls to include
+
+- **Date range filter** (if time-series): two `<input type="date">` fields that filter the chart dynamically
+- **Chart type toggle**: buttons to switch between line / bar views
+- **Download as PNG**: button using `canvas.toDataURL('image/png')`
+- **Data table**: a styled `<table>` below the chart showing all rows, sortable by clicking column headers
+
+### Deploy to Netlify
+
+After writing the HTML file, deploy it and extract the URL:
+
+```bash
+cd /tmp/<slug> && zip -r /tmp/<slug>.zip . && \
+curl -s -H "Content-Type: application/zip" \
+  -H "Authorization: Bearer $NETLIFY_TOKEN" \
+  --data-binary @/tmp/<slug>.zip \
+  https://api.netlify.com/api/v1/sites | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+url = data.get('ssl_url') or data.get('url')
+if url:
+    print(f'DEPLOYED: {url}')
+else:
+    print(f'ERROR: {json.dumps(data, indent=2)}')
+    sys.exit(1)
+"
+```
+
+Use the printed URL in your Slack response. If deployment fails, fall back to the `<upload_file>` tag approach (upload the HTML directly to Slack).
+
+### Rules
+
+- Only generate a visualization when the user explicitly asks for a chart/graph/visualization. For plain data questions, use text or CSV.
+- If the user asks for both CSV and visualization, prefer the HTML file (it already contains the data in a table).
+- Never mention internal file paths, tokens, or deployment details in the Slack response.
+- Clean up temp files after deployment: `rm -rf /tmp/<slug> /tmp/<slug>.zip`
+
+### Minimal HTML example
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DAU — Last 30 Days</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fafafa; color: #1a1a2e; padding: 2rem; }
+    h1 { font-size: 1.4rem; margin-bottom: 1rem; }
+    .controls { display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+    .controls label { font-size: 0.85rem; }
+    .controls input, .controls button { padding: 0.3rem 0.6rem; font-size: 0.85rem; }
+    .controls button { cursor: pointer; background: #ff2d55; color: #fff; border: none; border-radius: 4px; }
+    canvas { max-width: 900px; width: 100%; }
+    table { margin-top: 2rem; border-collapse: collapse; width: 100%; max-width: 900px; font-size: 0.85rem; }
+    th, td { border: 1px solid #ddd; padding: 0.4rem 0.8rem; text-align: left; }
+    th { background: #f0f0f0; cursor: pointer; user-select: none; }
+    tr:hover { background: #f9f9f9; }
+  </style>
+</head>
+<body>
+  <h1>DAU — Last 30 Days</h1>
+  <div class="controls">
+    <label>From <input type="date" id="startDate"></label>
+    <label>To <input type="date" id="endDate"></label>
+    <button onclick="filterData()">Apply</button>
+    <button onclick="toggleChart()">Toggle Bar/Line</button>
+    <button onclick="downloadPng()">Download PNG</button>
+  </div>
+  <canvas id="chart"></canvas>
+  <table id="dataTable"></table>
+
+  <script>
+    const DATA = [
+      {"date":"2026-02-24","dau":1823},
+      {"date":"2026-02-25","dau":1912}
+      // ... full query results here
+    ];
+
+    let chartType = 'line';
+    let filtered = [...DATA];
+    let chart;
+
+    function render() {
+      if (chart) chart.destroy();
+      const ctx = document.getElementById('chart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: chartType,
+        data: {
+          labels: filtered.map(r => r.date),
+          datasets: [{
+            label: 'DAU',
+            data: filtered.map(r => r.dau),
+            borderColor: '#ff2d55',
+            backgroundColor: chartType === 'bar' ? '#ff2d5580' : 'transparent',
+            tension: 0.3
+          }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } } }
+      });
+      const tbl = document.getElementById('dataTable');
+      const keys = Object.keys(DATA[0]);
+      tbl.innerHTML = '<tr>' + keys.map(k => `<th onclick="sortTable('${k}')">${k}</th>`).join('') + '</tr>'
+        + filtered.map(r => '<tr>' + keys.map(k => `<td>${r[k]}</td>`).join('') + '</tr>').join('');
+    }
+
+    function filterData() {
+      const s = document.getElementById('startDate').value;
+      const e = document.getElementById('endDate').value;
+      filtered = DATA.filter(r => (!s || r.date >= s) && (!e || r.date <= e));
+      render();
+    }
+
+    function toggleChart() { chartType = chartType === 'line' ? 'bar' : 'line'; render(); }
+
+    function downloadPng() {
+      const a = document.createElement('a');
+      a.href = document.getElementById('chart').toDataURL('image/png');
+      a.download = 'chart.png';
+      a.click();
+    }
+
+    let sortDir = {};
+    function sortTable(key) {
+      sortDir[key] = !sortDir[key];
+      filtered.sort((a, b) => sortDir[key] ? (a[key] > b[key] ? 1 : -1) : (a[key] < b[key] ? 1 : -1));
+      render();
+    }
+
+    render();
+  </script>
+</body>
+</html>
+```
+
+---
+
 ## Step 3 — Format the response
 
 Responses go to Slack (mrkdwn syntax):

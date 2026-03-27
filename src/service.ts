@@ -37,7 +37,8 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
           const [channelId, skill] = entry.split(':').map(s => s.trim())
           return [channelId, skill || 'general'] as [string, string]
         })
-    )
+    ),
+    netlifyToken: await config.getString('NETLIFY_TOKEN')
   }
 
   const globalContext: GlobalContext = { components }
