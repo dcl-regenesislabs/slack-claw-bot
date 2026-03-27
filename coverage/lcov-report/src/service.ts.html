@@ -478,7 +478,7 @@ export async function <span class="fstat-no" title="function not covered" >main(
     s3Bucket: await config.getString('S3_BUCKET'),
     awsRegion: (await config.getString('AWS_REGION')) ?? (await config.getString('AWS_DEFAULT_REGION')),
     autoReplyChannels: new Map(
-      ((await config.getString('AUTO_REPLY_CHANNELS')) ?? '')
+      ((await config.getString('AUTO_REPLY_CHANNEL_IDS')) ?? '')
         .split(',').map(<span class="fstat-no" title="function not covered" >s </span>=&gt; <span class="cstat-no" title="statement not covered" >s.trim())</span>.filter(Boolean)
         .map(<span class="fstat-no" title="function not covered" >entry </span>=&gt; {
           const [channelId, skill] = <span class="cstat-no" title="statement not covered" >entry.split(':').map(<span class="fstat-no" title="function not covered" >s </span>=&gt; <span class="cstat-no" title="statement not covered" >s.trim())</span></span>

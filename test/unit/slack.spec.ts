@@ -54,7 +54,7 @@ describe('markdownToMrkdwn', () => {
 })
 
 describe('shouldHandleMessage', () => {
-  const AUTO_REPLY_CHANNELS = new Map([['C_AUTO', 'triage']])
+  const AUTO_REPLY_CHANNEL_IDS = new Map([['C_AUTO', 'triage']])
 
   it('handles DMs', () => {
     const result = shouldHandleMessage({ channel_type: 'im', user: 'U1', text: 'hello' })
@@ -64,7 +64,7 @@ describe('shouldHandleMessage', () => {
   it('handles messages in auto-reply channels with configured skill', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', user: 'U1', text: 'hello' },
-      AUTO_REPLY_CHANNELS
+      AUTO_REPLY_CHANNEL_IDS
     )
     expect(result).toEqual({ handle: true, isAutoReply: true, skill: 'triage' })
   })
@@ -72,7 +72,7 @@ describe('shouldHandleMessage', () => {
   it('skips messages in non-auto-reply channels', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_OTHER', user: 'U1', text: 'hello' },
-      AUTO_REPLY_CHANNELS
+      AUTO_REPLY_CHANNEL_IDS
     )
     expect(result).toEqual({ handle: false, isAutoReply: false })
   })
@@ -80,7 +80,7 @@ describe('shouldHandleMessage', () => {
   it('skips thread replies in auto-reply channels', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', thread_ts: '123.456', user: 'U1', text: 'hello' },
-      AUTO_REPLY_CHANNELS
+      AUTO_REPLY_CHANNEL_IDS
     )
     expect(result).toEqual({ handle: false, isAutoReply: true })
   })
@@ -88,7 +88,7 @@ describe('shouldHandleMessage', () => {
   it('skips bot messages in auto-reply channels', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', bot_id: 'B1', user: 'U1', text: 'hello' },
-      AUTO_REPLY_CHANNELS
+      AUTO_REPLY_CHANNEL_IDS
     )
     expect(result).toEqual({ handle: false, isAutoReply: true })
   })
@@ -96,7 +96,7 @@ describe('shouldHandleMessage', () => {
   it('skips messages with @mentions in auto-reply channels', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', user: 'U1', text: 'hey <@U12345> check this' },
-      AUTO_REPLY_CHANNELS
+      AUTO_REPLY_CHANNEL_IDS
     )
     expect(result).toEqual({ handle: false, isAutoReply: true })
   })
@@ -139,7 +139,7 @@ describe('shouldHandleMessage', () => {
   it('skips bot @mention in auto-reply channel so app_mention handles it with detectSkill', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', user: 'U1', text: '<@UBOT123> triage this issue' },
-      AUTO_REPLY_CHANNELS
+      AUTO_REPLY_CHANNEL_IDS
     )
     expect(result.handle).toBe(false)
     expect(result.isAutoReply).toBe(true)
@@ -148,7 +148,7 @@ describe('shouldHandleMessage', () => {
   it('skips messages with @mention among other text in auto-reply channel', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', user: 'U1', text: 'cc <@U999> <@U888>' },
-      AUTO_REPLY_CHANNELS
+      AUTO_REPLY_CHANNEL_IDS
     )
     expect(result.handle).toBe(false)
     expect(result.isAutoReply).toBe(true)

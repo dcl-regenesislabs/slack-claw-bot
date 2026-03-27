@@ -31,7 +31,7 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     s3Bucket: await config.getString('S3_BUCKET'),
     awsRegion: (await config.getString('AWS_REGION')) ?? (await config.getString('AWS_DEFAULT_REGION')),
     autoReplyChannels: new Map(
-      ((await config.getString('AUTO_REPLY_CHANNELS')) ?? '')
+      ((await config.getString('AUTO_REPLY_CHANNEL_IDS')) ?? '')
         .split(',').map(s => s.trim()).filter(Boolean)
         .map(entry => {
           const [channelId, skill] = entry.split(':').map(s => s.trim())
