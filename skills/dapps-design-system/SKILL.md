@@ -66,13 +66,18 @@ These are the design tokens extracted from the UI2 theme. Use them directly.
 | Rarity | Color | Light variant | Light theme variant |
 |--------|-------|---------------|---------------------|
 | common | `#73D3D3` | `#D2F9F9` | `#49B7B7` |
-| uncommon | `#FF8362` | `#F9E4DF` | `#DB6D4D` |
-| rare | `#34CE76` | `#C1F2D6` | `#1FA85C` |
-| epic | `#438FFF` | `#C0D3EF` | `#2B73DB` |
-| legendary | `#A14BF3` | `#E1C1FF` | `#8234D4` |
-| exotic | `#9BD141` | `#D1E989` | `#7FB52C` |
-| mythic | `#FF4BED` | `#FDC4F7` | `#DB2DCC` |
-| unique | `#FEA217` | `#F3E5CF` | `#D48800` |
+| uncommon | `#FF8362` | `#F9E4DF` | `#FF8362` |
+| rare | `#34CE76` | `#C1F2D6` | `#34CE76` |
+| epic | `#438FFF` | `#C0D3EF` | `#438FFF` |
+| legendary | `#A14BF3` | `#E1C1FF` | `#A14BF3` |
+| exotic | `#9BD141` | `#D1E989` | `#9BD141` |
+| mythic | `#FF4BED` | `#FDC4F7` | `#FF4BED` |
+| unique | `#FEA217` | `#F3E5CF` | `#FEA217` |
+
+- **Color** (`rarity`): base saturated colors
+- **Light variant** (`rarityLight`): pastel tints for gradients
+- **Light theme variant** (`rarityLightTheme`): used as `palette.rarities` in light theme — only `common` differs from base
+- **Dark theme**: `palette.rarities` uses `hexToRgba(rarity.X, 0.2)` (20% opacity backgrounds), `palette.raritiesText` uses full-opacity base `rarity` colors
 
 #### Gradients
 | Name | Value |
