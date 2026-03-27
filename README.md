@@ -60,7 +60,7 @@ Copy `.env.default` to `.env` and fill in your values. Key variables:
 | `HTTP_SERVER_PORT` | No | HTTP server port for health check (default: 5000) |
 | `UPSTASH_REDIS_REST_URL` | No | Upstash Redis URL for OAuth token persistence |
 | `UPSTASH_REDIS_REST_TOKEN` | No | Upstash Redis token |
-| `AUTO_REPLY_CHANNELS` | No | Comma-separated `channelId:skill` pairs for auto-reply (e.g. `C01ABC:release-review`) |
+| `AUTO_REPLY_CHANNEL_IDS` | No | Comma-separated `channelId:skill` pairs for auto-reply (e.g. `C01ABC:release-review`) |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `NOTION_TOKEN` | No | Notion integration token for reading/creating pages |
 | `NOTION_SHAPE_DB_ID` | No | Notion database ID where shape-up entries are created |

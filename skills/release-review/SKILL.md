@@ -86,7 +86,7 @@ Use this mapping to convert jarvis `owner` values to Slack mentions:
 | `explorer` | `<!subteam^S0434P32L7M>` (Unity Explorer) |
 
 Additionally, always tag these people for releases affecting mobile client, protocol changes, DAO, or SDK runtime:
-- `<@D0AKCKVGQUB>` `<@D097E2TDLQG>` `<@D0AP8TBPQ0J>` (Regenesis Lab)
+- <@U097SSTNBUM> <@U092VG21JJU> <@U092R02ML72> (Regenesis Lab)
 
 Regenesis Lab should be tagged when the release affects: `decentraland/godot-explorer`, `decentraland/bevy-explorer`, protocol-level services (e.g. `comms-gatekeeper`, `archipelago-workers`), or SDK runtime packages.
 
