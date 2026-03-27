@@ -821,7 +821,8 @@ export function detectSkill(text: string): string {
   if (/^fix\b/.test(t)) return "fix";
   if (/^s[ch]edule[\s:]/.test(t) || /\bschedul\w*\b/.test(t) || /\blist\s+schedules\b/.test(t)) return "schedule";
   if (/\bsentry\b/.test(t)) return "sentry";
-  if (/\bcheck\b.+\bpointer\b/.test(t) || /\bpointer\s+consistency\b/.test(t) || /\bcheck\b.+\bwearables\b/.test(t) || /\bcheck\b.+\basset\s+bundles?\b/.test(t)) return "dcl-consistency";
+  if (/\bcheck\b.+\b(ab|asset\s*bundles?)\b/.test(t) || /\bab\s+(status|queue|pipeline|conversion)\b/.test(t) || /\b(scene|ab)\s+conversion\b/.test(t)) return "ab-status";
+  if (/\bcheck\b.+\bpointer\b/.test(t) || /\bpointer\s+consistency\b/.test(t) || /\bcheck\b.+\bwearables\b/.test(t)) return "dcl-consistency";
   if (/^data[\s:]/.test(t)) return "data-query";
   if (/\bunban\b/.test(t) || /\bcredits?\s+ban\b/.test(t) || /\bban\s+status\b/.test(t)) return "credits-unban";
   if (/\bpipeline\b/.test(t) || /\bci(?:[\s/,.!?]|$)/.test(t) || /\bworkflow\b/.test(t) || /\bbuild\s+fail/.test(t)) return "pipeline";

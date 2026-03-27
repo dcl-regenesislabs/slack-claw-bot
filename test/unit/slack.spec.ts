@@ -21,6 +21,42 @@ describe('detectSkill', () => {
     expect(detectSkill('pr review')).toBe('pr-review')
   })
 
+  it('detects "check AB: 0,0" as ab-status', () => {
+    expect(detectSkill('check AB: 0,0')).toBe('ab-status')
+  })
+
+  it('detects "check AB status: 52,-30" as ab-status', () => {
+    expect(detectSkill('check AB status: 52,-30')).toBe('ab-status')
+  })
+
+  it('detects "check asset bundles for 0,0" as ab-status', () => {
+    expect(detectSkill('check asset bundles for 0,0')).toBe('ab-status')
+  })
+
+  it('detects "AB queue" as ab-status', () => {
+    expect(detectSkill('ab queue')).toBe('ab-status')
+  })
+
+  it('detects "AB conversion" as ab-status', () => {
+    expect(detectSkill('AB conversion')).toBe('ab-status')
+  })
+
+  it('detects "check AB pipeline" as ab-status', () => {
+    expect(detectSkill('check AB pipeline')).toBe('ab-status')
+  })
+
+  it('detects "scene conversion status" as ab-status', () => {
+    expect(detectSkill('scene conversion status')).toBe('ab-status')
+  })
+
+  it('detects "check pointer consistency" as dcl-consistency', () => {
+    expect(detectSkill('check pointer consistency for 0,0')).toBe('dcl-consistency')
+  })
+
+  it('detects "check wearables" as dcl-consistency', () => {
+    expect(detectSkill('check wearables consistency')).toBe('dcl-consistency')
+  })
+
   it('returns general for unrelated text', () => {
     expect(detectSkill('hello world')).toBe('general')
   })
