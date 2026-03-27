@@ -57,22 +57,22 @@ These are the design tokens extracted from the UI2 theme. Use them directly.
 #### Semantic
 | Token | Main | Dark | Light |
 |-------|------|------|-------|
-| error | `#FB3B3B` | `#EC303A` | `#E97177` |
+| error | `#FB3B3B` | `#FB3B3B` | `#E97177` |
 | warning | `#FE9C2A` | `#F38025` | `#FFB95B` |
 | info | `#2196F3` | `#1A75D2` | `#63B4F6` |
 | success | `#34CE77` | `#00B453` | `#65D890` |
 
 #### Rarity
-| Rarity | Color | Light variant |
-|--------|-------|---------------|
-| common | `#73D3D3` | `#D2F9F9` |
-| uncommon | `#FF8362` | `#F9E4DF` |
-| rare | `#34CE76` | `#C1F2D6` |
-| epic | `#438FFF` | `#C0D3EF` |
-| legendary | `#A14BF3` | `#E1C1FF` |
-| exotic | `#9BD141` | `#D1E989` |
-| mythic | `#FF4BED` | `#FDC4F7` |
-| unique | `#FEA217` | `#F3E5CF` |
+| Rarity | Color | Light variant | Light theme variant |
+|--------|-------|---------------|---------------------|
+| common | `#73D3D3` | `#D2F9F9` | `#49B7B7` |
+| uncommon | `#FF8362` | `#F9E4DF` | `#DB6D4D` |
+| rare | `#34CE76` | `#C1F2D6` | `#1FA85C` |
+| epic | `#438FFF` | `#C0D3EF` | `#2B73DB` |
+| legendary | `#A14BF3` | `#E1C1FF` | `#8234D4` |
+| exotic | `#9BD141` | `#D1E989` | `#7FB52C` |
+| mythic | `#FF4BED` | `#FDC4F7` | `#DB2DCC` |
+| unique | `#FEA217` | `#F3E5CF` | `#D48800` |
 
 #### Gradients
 | Name | Value |
@@ -116,7 +116,7 @@ These are the design tokens extracted from the UI2 theme. Use them directly.
 
   /* Primary states */
   --dcl-primary: #FF2D55;
-  --dcl-primary-light: #F70038; /* Intentionally same as dark in light theme — source: colorSchemes.ts light.primary */
+  --dcl-primary-light: #F8919D;
   --dcl-primary-dark: #F70038;
   --dcl-primary-contrast: #FFFFFF;
   --dcl-primary-hover: rgba(255, 45, 85, 0.08);
@@ -124,10 +124,10 @@ These are the design tokens extracted from the UI2 theme. Use them directly.
   --dcl-primary-outlined-border: rgba(255, 45, 85, 0.32);
 
   /* Secondary */
-  --dcl-secondary-main: #ECEBED;
-  --dcl-secondary-dark: #A09BA8;
+  --dcl-secondary-main: #43404A;
+  --dcl-secondary-dark: #716B7C;
   --dcl-secondary-light: #CFCDD4;
-  --dcl-secondary-contrast: #5E5B67;
+  --dcl-secondary-contrast: #FCFCFC;
 
   /* Inputs */
   --dcl-input-standard-border: rgba(22, 21, 24, 0.42);
@@ -168,17 +168,17 @@ These are the design tokens extracted from the UI2 theme. Use them directly.
   --dcl-divider: rgba(255, 255, 255, 0.12);
 
   --dcl-primary: #FF2D55;
-  --dcl-primary-light: #F26276;
+  --dcl-primary-light: #F8919D;
   --dcl-primary-dark: #F70038;
   --dcl-primary-contrast: #FFFFFF;
   --dcl-primary-hover: rgba(255, 45, 85, 0.08);
   --dcl-primary-focus-visible: rgba(255, 45, 85, 0.24);
   --dcl-primary-outlined-border: rgba(255, 45, 85, 0.5);
 
-  --dcl-secondary-main: #FFFFFF;
-  --dcl-secondary-dark: #CFCDD4;
+  --dcl-secondary-main: #43404A;
+  --dcl-secondary-dark: #716B7C;
   --dcl-secondary-light: #CFCDD4;
-  --dcl-secondary-contrast: #161518;
+  --dcl-secondary-contrast: #FCFCFC;
 
   /* Note: dark theme does NOT define input.standard tokens in colorSchemes.ts — MUI uses its own dark defaults */
   --dcl-input-outlined-border: rgba(255, 255, 255, 0.23);
