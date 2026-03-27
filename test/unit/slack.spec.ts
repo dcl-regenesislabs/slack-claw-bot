@@ -132,6 +132,36 @@ describe('shouldHandleMessage', () => {
     expect(result).toEqual({ handle: true, isAutoReply: false })
   })
 
+  // When someone @mentions the bot in an auto-reply channel, the message handler
+  // must skip it so only app_mention handles it. This prevents double processing
+  // AND ensures the bot uses detectSkill (from the message) instead of the
+  // auto-reply channel's configured skill.
+  it('skips bot @mention in auto-reply channel so app_mention handles it with detectSkill', () => {
+    const result = shouldHandleMessage(
+      { channel_type: 'channel', channel: 'C_AUTO', user: 'U1', text: '<@UBOT123> triage this issue' },
+      AUTO_REPLY_CHANNELS
+    )
+    expect(result.handle).toBe(false)
+    expect(result.isAutoReply).toBe(true)
+  })
+
+  it('skips messages with @mention among other text in auto-reply channel', () => {
+    const result = shouldHandleMessage(
+      { channel_type: 'channel', channel: 'C_AUTO', user: 'U1', text: 'cc <@U999> <@U888>' },
+      AUTO_REPLY_CHANNELS
+    )
+    expect(result.handle).toBe(false)
+    expect(result.isAutoReply).toBe(true)
+  })
+
+  it('does not skip @mentions in DMs (no double-processing risk)', () => {
+    const result = shouldHandleMessage(
+      { channel_type: 'im', user: 'U1', text: 'hey <@U12345>' }
+    )
+    expect(result.handle).toBe(true)
+    expect(result.isAutoReply).toBe(false)
+  })
+
   it('returns the correct skill per channel', () => {
     const channels = new Map([['C1', 'triage'], ['C2', 'general']])
     const r1 = shouldHandleMessage({ channel_type: 'channel', channel: 'C1', user: 'U1', text: 'hi' }, channels)

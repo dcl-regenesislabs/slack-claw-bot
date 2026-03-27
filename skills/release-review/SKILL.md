@@ -20,7 +20,17 @@ else
 fi
 ```
 
-## Step 1 — Parse the release message
+## Step 1 — Determine if the message is a release
+
+Before doing anything, check whether the message is actually a release announcement. A release message typically:
+- Comes from the GitHub app (e.g. "New release published by ...")
+- Contains a version number (e.g. `v1.2.3`, `4.14.0`)
+- Contains a changelog or "What's Changed" section
+- Is a manual release note from a team member (e.g. "Release Notes v0.135.0", "Release v0.136.0 is now LIVE")
+
+If the message is **NOT** a release announcement (e.g. a question, a regular conversation, a subscription command, a thread reply), respond with exactly `NO_OUTPUT` and nothing else. Do not reply to non-release messages.
+
+## Step 2 — Parse the release message
 
 Extract from the message:
 - **Repository** (e.g. `decentraland/auth`, `decentraland/catalyst`)
@@ -30,7 +40,7 @@ Extract from the message:
 
 If the message is a manual release note (not a GitHub release notification), infer the repository from context (channel topic, mentioned components, or package names).
 
-## Step 2 — Trace dependencies with jarvis
+## Step 3 — Trace dependencies with jarvis
 
 Read the jarvis manifests to understand the impact:
 
@@ -45,7 +55,7 @@ Read the jarvis manifests to understand the impact:
 
 If the released repo is NOT in jarvis manifests (e.g. client apps, tools), skip the manifest lookup and use the repos skill knowledge instead.
 
-## Step 3 — Compose the review
+## Step 4 — Compose the review
 
 Reply in the thread with a concise summary:
 

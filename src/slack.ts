@@ -409,45 +409,51 @@ export async function startSlackBot(config: Config): Promise<void> {
         }
 
         await unreact("hourglass_flowing_sand");
-        if (response) {
-          await react("white_check_mark");
 
-          const uploadDirective = extractFileUploadTag(response);
-          const displayResponse = uploadDirective ? uploadDirective.strippedText : response;
-
-          if (uploadDirective) {
-            await uploadAgentFile(client, uploadDirective, e.channel, threadTs);
+        // NO_OUTPUT means the agent decided this message is not relevant (e.g. not a release)
+        if (!response || response.trim().startsWith("NO_OUTPUT")) {
+          if (!response) {
+            await react("warning");
+            const errDetail = error
+              ? `I wasn't able to produce a response (error ${error.code}: ${sanitizeForSlack(error.message)}).`
+              : "I wasn't able to produce a response.";
+            await say({ text: errDetail, thread_ts: threadTs });
           }
+          // For NO_OUTPUT, silently do nothing
+          return;
+        }
 
-          if (displayResponse.length > LARGE_RESPONSE_THRESHOLD) {
-            pendingResponses.set(threadTs, displayResponse);
-            const lines = displayResponse.split("\n").length;
-            await say({
-              thread_ts: threadTs,
-              text: "This response is long — choose a format:",
-              blocks: [
-                {
-                  type: "section",
-                  text: { type: "mrkdwn", text: `This response is long (~${lines} lines). How would you like to receive it?` },
-                },
-                {
-                  type: "actions",
-                  elements: [
-                    { type: "button", text: { type: "plain_text", text: "File (.md)" }, action_id: "deliver_file", value: threadTs },
-                    { type: "button", text: { type: "plain_text", text: "Inline message" }, action_id: "deliver_message", value: threadTs },
-                  ],
-                },
-              ],
-            } as any);
-          } else if (displayResponse) {
-            await say({ text: markdownToMrkdwn(displayResponse), thread_ts: threadTs });
-          }
-        } else {
-          await react("warning");
-          const errDetail = error
-            ? `I wasn't able to produce a response (error ${error.code}: ${sanitizeForSlack(error.message)}).`
-            : "I wasn't able to produce a response.";
-          await say({ text: errDetail, thread_ts: threadTs });
+        await react("white_check_mark");
+
+        const uploadDirective = extractFileUploadTag(response);
+        const displayResponse = uploadDirective ? uploadDirective.strippedText : response;
+
+        if (uploadDirective) {
+          await uploadAgentFile(client, uploadDirective, e.channel, threadTs);
+        }
+
+        if (displayResponse.length > LARGE_RESPONSE_THRESHOLD) {
+          pendingResponses.set(threadTs, displayResponse);
+          const lines = displayResponse.split("\n").length;
+          await say({
+            thread_ts: threadTs,
+            text: "This response is long — choose a format:",
+            blocks: [
+              {
+                type: "section",
+                text: { type: "mrkdwn", text: `This response is long (~${lines} lines). How would you like to receive it?` },
+              },
+              {
+                type: "actions",
+                elements: [
+                  { type: "button", text: { type: "plain_text", text: "File (.md)" }, action_id: "deliver_file", value: threadTs },
+                  { type: "button", text: { type: "plain_text", text: "Inline message" }, action_id: "deliver_message", value: threadTs },
+                ],
+              },
+            ],
+          } as any);
+        } else if (displayResponse) {
+          await say({ text: markdownToMrkdwn(displayResponse), thread_ts: threadTs });
         }
 
         if (config.logChannelId) {
