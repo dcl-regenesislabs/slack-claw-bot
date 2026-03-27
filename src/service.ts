@@ -38,7 +38,10 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
           return [channelId, skill || 'general'] as [string, string]
         })
     ),
-    netlifyToken: await config.getString('NETLIFY_TOKEN')
+    cfApiToken: await config.getString('CF_API_TOKEN'),
+    cfAccountId: await config.getString('CF_ACCOUNT_ID'),
+    cfR2Bucket: await config.getString('CF_R2_BUCKET'),
+    cfR2PublicUrl: await config.getString('CF_R2_PUBLIC_URL')
   }
 
   const globalContext: GlobalContext = { components }
@@ -58,7 +61,11 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     sentryAuthToken: slackConfig.sentryAuthToken,
     sentryOrg: slackConfig.sentryOrg,
     gitlabTokenDcl: slackConfig.gitlabTokenDcl,
-    gitlabTokenOps: slackConfig.gitlabTokenOps
+    gitlabTokenOps: slackConfig.gitlabTokenOps,
+    cfApiToken: slackConfig.cfApiToken,
+    cfAccountId: slackConfig.cfAccountId,
+    cfR2Bucket: slackConfig.cfR2Bucket,
+    cfR2PublicUrl: slackConfig.cfR2PublicUrl
   })
 
   logger.info('Starting Slack bot...')

@@ -469,7 +469,7 @@ When the user asks for a "chart", "graph", "visualization", "dashboard", "visual
 
 1. Run the query as in Step 2A or 2B to get the data.
 2. Write a **single, self-contained HTML file** to `/tmp/<slug>/index.html` using the `write` tool.
-3. Deploy it to Netlify and share the link in your response.
+3. Deploy it to Cloudflare R2 and share the link in your response.
 4. Tell the user something like: "Here's an interactive chart: <url> — you can filter by date, toggle chart types, and download as PNG."
 
 ### HTML file requirements
@@ -495,21 +495,22 @@ When the user asks for a "chart", "graph", "visualization", "dashboard", "visual
 - **Download as PNG**: button using `canvas.toDataURL('image/png')`
 - **Data table**: a styled `<table>` below the chart showing all rows, sortable by clicking column headers
 
-### Deploy to Netlify
+### Deploy to Cloudflare R2
 
-After writing the HTML file, deploy it and extract the URL:
+After writing the HTML file, upload it to R2 and share the public URL:
 
 ```bash
-cd /tmp/<slug> && zip -r /tmp/<slug>.zip . && \
-curl -s -H "Content-Type: application/zip" \
-  -H "Authorization: Bearer $NETLIFY_TOKEN" \
-  --data-binary @/tmp/<slug>.zip \
-  https://api.netlify.com/api/v1/sites | python3 -c "
-import sys, json
+curl -s -X PUT \
+  "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/r2/buckets/$CF_R2_BUCKET/objects/<slug>/index.html" \
+  -H "Authorization: Bearer $CF_API_TOKEN" \
+  -H "Content-Type: text/html" \
+  --data-binary @/tmp/<slug>/index.html | python3 -c "
+import sys, json, os
 data = json.load(sys.stdin)
-url = data.get('ssl_url') or data.get('url')
-if url:
-    print(f'DEPLOYED: {url}')
+if data.get('success'):
+    slug = '<slug>'
+    base = os.environ.get('CF_R2_PUBLIC_URL', '').rstrip('/')
+    print(f'DEPLOYED: {base}/{slug}/')
 else:
     print(f'ERROR: {json.dumps(data, indent=2)}')
     sys.exit(1)

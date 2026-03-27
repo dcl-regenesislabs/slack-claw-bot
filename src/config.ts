@@ -18,5 +18,8 @@ export interface Config {
   s3Bucket?: string
   awsRegion?: string
   autoReplyChannels?: Map<string, string>  // channelId → skill
-  netlifyToken?: string
+  cfApiToken?: string
+  cfAccountId?: string
+  cfR2Bucket?: string
+  cfR2PublicUrl?: string
 }
