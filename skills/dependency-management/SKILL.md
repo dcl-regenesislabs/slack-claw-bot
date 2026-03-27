@@ -5,15 +5,18 @@ description: Decentraland dependency management standard for JavaScript/TypeScri
 
 # Dependency Management Standard
 
-Source: https://docs.decentraland.org/contributor/contributor-guides/dependency-management
+Adapted from: https://docs.decentraland.org/contributor/contributor-guides/dependency-management
+
+> **Note — canonical source**: The [docs site](https://docs.decentraland.org/contributor/contributor-guides/dependency-management) is the canonical reference. This skill is a derived copy optimised for agent consumption. If the two diverge, the docs site wins. When reviewing, check the source URL is still live; if it 404s, flag it to the team.
 
 This document defines the recommended practices for managing dependencies in JavaScript/TypeScript projects across Decentraland's ecosystem. It applies to front-end, back-end, SDKs, shared libraries, and any npm/yarn/pnpm-based package.
 
 > **TL;DR**:
-> - **Version strategy** → Use **exact/fixed versions** for `dependencies` (security) and `devDependencies` (consistent dev environment). Use **version ranges** only for `peerDependencies` (flexibility).
-> - **Exception** → Decentraland packages (`@dcl/*`, `decentraland-*`) can use version ranges (`^`) as they are trusted internal packages.
+> - **Version strategy** → Use **exact/fixed versions** for `dependencies` and `devDependencies`. Use **version ranges** (`^`) only for `peerDependencies`.
+> - **Decentraland exception** → `@dcl/*` and `decentraland-*` packages may use `^` ranges in `dependencies` (not just `peerDependencies`). This is safe because internal packages follow a disciplined release process with semantic versioning, coordinated across the monorepo/org — so a minor/patch bump is unlikely to introduce breaking changes the way an external package might.
+> - **`@dcl/*` as peer vs dependency** → The exception above applies *only in apps*. In *libraries*, `@dcl/*` packages that are shared-context or singletons (e.g. `@dcl/schemas`, `@dcl/ui-env`, `@dcl/crypto`) still *must* be `peerDependencies` — the app-vs-library rule takes precedence. The `^`-range exception means that when an app lists `@dcl/schemas` in `dependencies`, it may use `"^25.0.0"` instead of `"25.3.0"`.
 > - **Libraries/shared packages** → Use `peerDependencies` with version ranges (`^`) for shared libraries (React, `@dcl/schemas`, etc.). Use `dependencies` with exact versions only for utilities safe to duplicate.
-> - **Apps/final services** → Use `dependencies` with exact versions for runtime packages (React, ethers, etc.).
+> - **Apps/final services** → Use `dependencies` with exact versions (or `^` for `@dcl/*`/`decentraland-*`) for runtime packages.
 
 ## 1. Rationale
 
@@ -100,7 +103,7 @@ Packages that must resolve to a single effective version at runtime:
 - Utilities safe to duplicate (`lodash-es`, `date-fns`)
 - **In apps**: Runtime packages like React, ethers (when app is final consumer)
 
-> **Important**: Always use **exact/fixed versions** in `dependencies` for security.
+> **Important**: Always use **exact/fixed versions** in `dependencies` for security. Exception: `@dcl/*` and `decentraland-*` packages may use `^` ranges because internal releases follow strict semver discipline (see TL;DR above).
 
 ✅ Correct (Library):
 ```json
@@ -119,6 +122,16 @@ Packages that must resolve to a single effective version at runtime:
     "react": "18.3.1",
     "ethers": "6.13.0",
     "lodash-es": "4.17.21"
+  }
+}
+```
+
+✅ Also correct (App, internal package with `^`):
+```json
+{
+  "dependencies": {
+    "@dcl/schemas": "^25.0.0",
+    "decentraland-ui2": "^2.0.0"
   }
 }
 ```
@@ -160,7 +173,7 @@ For reusable packages that work with or without certain dependencies:
 
 ## 4. Common Packages Reference
 
-### Packages that MUST be `peerDependencies` (shared context / singletons)
+### Packages that MUST be `peerDependencies` in libraries (shared context / singletons)
 
 - `react`, `react-dom`, `react-redux`, `react-router-dom`
 - `redux`, `@reduxjs/toolkit`
@@ -169,6 +182,8 @@ For reusable packages that work with or without certain dependencies:
 - `decentraland-dapps`, `decentraland-ui`, `decentraland-ui2`, `decentraland-connect`
 - `pg`, `pg-pool`
 
+> In **apps**, these same packages go in `dependencies` with exact versions (or `^` for `@dcl/*`/`decentraland-*`).
+
 ### Packages that SHOULD be `dependencies` (safe to duplicate)
 
 - `lodash-es`, `date-fns`
@@ -176,13 +191,31 @@ For reusable packages that work with or without certain dependencies:
 - `zod`, `ajv`
 - `ms`, `mitt`, `fp-future`
 
-## 5. PR Review Checklist
+## 5. Automated Lint Rules (npm-package-json-lint)
+
+Decentraland enforces these rules via [`npm-package-json-lint`](https://github.com/decentraland/eslint-config/blob/main/npm-package-json-lint.js). When reviewing PRs, check compliance:
+
+| Rule | Severity | Effect |
+|------|----------|--------|
+| `prefer-absolute-version-dependencies` | warning | `dependencies` must use exact versions — except `@dcl/*`, `decentraland-*`, and `dcl-*` packages which are auto-exempted |
+| `prefer-absolute-version-devDependencies` | warning | `devDependencies` must use exact versions — same internal-package exception |
+| `no-file-dependencies` | error | No `file:` protocol references in dependencies |
+| `no-git-dependencies` | error | No `git+` / GitHub URL references in dependencies |
+| `no-duplicate-properties` | error | No duplicate keys in `package.json` |
+| `prefer-property-order` | error | Fields must follow a standard order: `name`, `version`, `description`, `main`, `module`, `types`, `type`, `exports`, `files`, `scripts`, `dependencies`, `peerDependencies`, `peerDependenciesMeta`, `devDependencies`, `repository`, `keywords`, `author`, `license`, `bugs`, `homepage`, `engines`, `overrides`, `publishConfig` |
+
+> The internal-package exception (`@dcl/*`, `decentraland-*`, `dcl-*`) is computed dynamically from the repo's own `package.json` at lint time. If a package name matches one of those prefixes it is excluded from the exact-version rule.
+
+## 6. PR Review Checklist
 
 When reviewing a PR that modifies `package.json`, verify:
 
 1. **Libraries**: Shared/singleton packages (React, ethers, `@dcl/*`) are in `peerDependencies` with `^` ranges
-2. **Apps**: Runtime packages are in `dependencies` with exact versions (no `^` or `~`)
-3. **Both**: `devDependencies` use exact versions
-4. **Exception**: `@dcl/*` and `decentraland-*` packages may use `^` ranges in `dependencies`
-5. **No missing peers**: If a library uses React/ethers/etc. internally, they must be declared as `peerDependencies`
+2. **Apps**: Runtime packages are in `dependencies` with exact versions (no `^` or `~`) — except internal `@dcl/*`/`decentraland-*` packages which may use `^`
+3. **Both**: `devDependencies` use exact versions (same internal exception applies)
+4. **Decentraland exception clarity**: `@dcl/*` and `decentraland-*` packages may use `^` in `dependencies`/`devDependencies` because internal releases follow strict semver discipline and are coordinated across the organisation. This does *not* exempt them from being `peerDependencies` in libraries when they are shared-context packages.
+5. **No missing peers**: If a library uses React/ethers/`@dcl/schemas` etc. internally, they must be declared as `peerDependencies`
 6. **Optional peers**: If a peer is optional, it should be marked in `peerDependenciesMeta`
+7. **No `file:` or `git+` dependencies** (enforced by lint)
+8. **Property order**: `package.json` fields should follow the standard order (see Section 5)
+9. **No duplicate keys** in `package.json`
