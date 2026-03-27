@@ -27,7 +27,8 @@ const SKILL_MODELS: Partial<Record<string, string>> = {
   'fix': 'claude-opus-4-6',
   'incident': 'claude-opus-4-6',
   'pipeline': 'claude-opus-4-6',
-  'sentry': 'claude-opus-4-6'
+  'sentry': 'claude-opus-4-6',
+  'release-review': 'claude-opus-4-6'
 }
 
 const nameCache = new Map<string, string>();
@@ -818,6 +819,7 @@ export function detectSkill(text: string): string {
   if (/^data[\s:]/.test(t)) return "data-query";
   if (/\bunban\b/.test(t) || /\bcredits?\s+ban\b/.test(t) || /\bban\s+status\b/.test(t)) return "credits-unban";
   if (/\bpipeline\b/.test(t) || /\bci(?:[\s/,.!?]|$)/.test(t) || /\bworkflow\b/.test(t) || /\bbuild\s+fail/.test(t)) return "pipeline";
+  if (/\brelease[\s-]?review\b/.test(t) || /\breview\b.+\brelease\b/.test(t)) return "release-review";
   return "general";
 }
 
