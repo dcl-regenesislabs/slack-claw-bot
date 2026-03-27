@@ -29,6 +29,10 @@ interface AgentConfig {
   sentryOrg?: string;
   gitlabTokenDcl?: string;
   gitlabTokenOps?: string;
+  cfApiToken?: string;
+  cfAccountId?: string;
+  cfR2Bucket?: string;
+  cfR2PublicUrl?: string;
 }
 
 export interface RunOptions {
@@ -77,6 +81,18 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   }
   if (config.gitlabTokenOps) {
     process.env.GITLAB_TOKEN_OPS = config.gitlabTokenOps;
+  }
+  if (config.cfApiToken) {
+    process.env.CF_API_TOKEN = config.cfApiToken;
+  }
+  if (config.cfAccountId) {
+    process.env.CF_ACCOUNT_ID = config.cfAccountId;
+  }
+  if (config.cfR2Bucket) {
+    process.env.CF_R2_BUCKET = config.cfR2Bucket;
+  }
+  if (config.cfR2PublicUrl) {
+    process.env.CF_R2_PUBLIC_URL = config.cfR2PublicUrl;
   }
 
   modelId = config.model || "claude-sonnet-4-6";
