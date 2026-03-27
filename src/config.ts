@@ -17,4 +17,5 @@ export interface Config {
   gitlabTokenOps?: string
   s3Bucket?: string
   awsRegion?: string
+  autoReplyChannels?: Map<string, string>  // channelId → skill
 }

@@ -27,7 +27,8 @@ const SKILL_MODELS: Partial<Record<string, string>> = {
   'fix': 'claude-opus-4-6',
   'incident': 'claude-opus-4-6',
   'pipeline': 'claude-opus-4-6',
-  'sentry': 'claude-opus-4-6'
+  'sentry': 'claude-opus-4-6',
+  'release-review': 'claude-opus-4-6'
 }
 
 const nameCache = new Map<string, string>();
@@ -38,6 +39,25 @@ const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"
 const TEXT_EXTENSIONS = new Set([".md", ".txt"]);
 
 let botToken: string;
+
+/** Determines whether the message handler should process an incoming event. */
+export function shouldHandleMessage(
+  event: { channel_type?: string; channel?: string; thread_ts?: string; bot_id?: string; bot_profile?: unknown; text?: string; subtype?: string; user?: string },
+  autoReplyChannels?: Map<string, string>
+): { handle: boolean; isAutoReply: boolean; skill?: string } {
+  const isDm = event.channel_type === "im";
+  const autoReplySkill = autoReplyChannels?.get(event.channel ?? "");
+  const isAutoReply = !!autoReplySkill;
+  if (!isDm && !isAutoReply) return { handle: false, isAutoReply: false };
+  if (isAutoReply) {
+    if (event.thread_ts) return { handle: false, isAutoReply: true };
+    if (event.bot_id || event.bot_profile) return { handle: false, isAutoReply: true };
+    if (event.text && /<@[A-Z0-9]+>/.test(event.text)) return { handle: false, isAutoReply: true };
+  }
+  if (event.subtype) return { handle: false, isAutoReply };
+  if (!event.user || !event.text?.trim()) return { handle: false, isAutoReply };
+  return { handle: true, isAutoReply, skill: autoReplySkill };
+}
 
 const SCHEDULES_PATH =
   process.env.NODE_ENV === "production" && existsSync("/data")
@@ -319,21 +339,17 @@ export async function startSlackBot(config: Config): Promise<void> {
 
   app.event("message", async ({ event, client, say }) => {
     const e = event as any;
-    if (e.channel_type !== "im") return;
-    if (e.subtype) return;
-    if (!e.user || !e.text?.trim()) return;
+    const { handle, isAutoReply: isAutoReplyChannel, skill: autoReplySkill } = shouldHandleMessage(e, config.autoReplyChannels);
+    if (!handle) return;
 
     if (await isExternalOrGuest(client, e.user)) {
-      console.warn(`[slack] Denied DM from non-org user ${e.user}`);
+      console.warn(`[slack] Denied request from non-org user ${e.user}`);
       await say({ text: "Sorry, I'm not available for external or guest users.", thread_ts: e.ts });
       return;
     }
 
     const text = (e.text as string).trim();
-    const threadTs: string = e.thread_ts || e.ts;
-    const userName = await resolveUserName(client, e.user);
-    const skill = detectSkill(text);
-    console.log(`[slack] DM from ${userName} [skill: ${skill}]: ${text}`);
+    const threadTs: string = isAutoReplyChannel ? e.ts : (e.thread_ts || e.ts);
 
     function react(name: string): Promise<unknown> {
       return client.reactions.add({ channel: e.channel, timestamp: e.ts, name })
@@ -343,6 +359,144 @@ export async function startSlackBot(config: Config): Promise<void> {
       return client.reactions.remove({ channel: e.channel, timestamp: e.ts, name })
         .catch((err) => { if (err.data?.error !== "no_reaction" && err.data?.error !== "message_not_found") throw err; });
     }
+
+    // --- Auto-reply channel: route through the channel scheduler (same as app_mention) ---
+    if (isAutoReplyChannel) {
+      const [userName, channelName] = await Promise.all([
+        resolveUserName(client, e.user),
+        resolveChannelName(client, e.channel),
+      ]);
+      const skill = autoReplySkill!;
+      console.log(`[slack] Auto-reply in #${channelName} from ${userName} [skill: ${skill}]: ${text}`);
+
+      const submission = scheduler.submit(threadTs, async () => {
+        await react("hourglass_flowing_sand");
+
+        let threadContent = await fetchThread(client, e.channel, threadTs);
+        if (skill === "schedule") {
+          threadContent = `[Schedule Context] channel: ${e.channel}\n\n${threadContent}`;
+        }
+        const model =
+          SKILL_MODELS[skill] ??
+          (PR_URL_PATTERN.test(threadContent) || MR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
+
+        const rawContext = isMemoryReadable(config)
+          ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch((err) => {
+              console.error("[memory] Failed to load global context:", err);
+              return null;
+            })
+          : null;
+        const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
+
+        const customTools = createSlackTools(client);
+        const { text: response, cost, tokens, error } = await runAgent({
+          threadContent,
+          triggeredBy: `${userName} (slack_user_id: ${e.user ?? "unknown"})`,
+          model,
+          memoryContext: memoryContext ?? undefined,
+          customTools,
+        });
+        await syncAuth();
+        if (skill === "schedule") {
+          patchScheduleChannels(e.channel);
+        }
+
+        const userIsGuest = e.user ? await isExternalOrGuest(client, e.user) : true;
+        if (isChannelEligibleForMemory(e.channel, config) && response && !userIsGuest) {
+          triggerMemoryUpdate(config, e.channel, threadTs, threadContent, response).catch((err) =>
+            console.error("[memory] Unhandled error in triggerMemoryUpdate:", err)
+          );
+        }
+
+        await unreact("hourglass_flowing_sand");
+
+        // NO_OUTPUT means the agent decided this message is not relevant (e.g. not a release)
+        if (!response || response.trim().startsWith("NO_OUTPUT")) {
+          if (!response) {
+            await react("warning");
+            const errDetail = error
+              ? `I wasn't able to produce a response (error ${error.code}: ${sanitizeForSlack(error.message)}).`
+              : "I wasn't able to produce a response.";
+            await say({ text: errDetail, thread_ts: threadTs });
+          }
+          // For NO_OUTPUT, silently do nothing
+          return;
+        }
+
+        await react("white_check_mark");
+
+        const uploadDirective = extractFileUploadTag(response);
+        const displayResponse = uploadDirective ? uploadDirective.strippedText : response;
+
+        if (uploadDirective) {
+          await uploadAgentFile(client, uploadDirective, e.channel, threadTs);
+        }
+
+        if (displayResponse.length > LARGE_RESPONSE_THRESHOLD) {
+          pendingResponses.set(threadTs, displayResponse);
+          const lines = displayResponse.split("\n").length;
+          await say({
+            thread_ts: threadTs,
+            text: "This response is long — choose a format:",
+            blocks: [
+              {
+                type: "section",
+                text: { type: "mrkdwn", text: `This response is long (~${lines} lines). How would you like to receive it?` },
+              },
+              {
+                type: "actions",
+                elements: [
+                  { type: "button", text: { type: "plain_text", text: "File (.md)" }, action_id: "deliver_file", value: threadTs },
+                  { type: "button", text: { type: "plain_text", text: "Inline message" }, action_id: "deliver_message", value: threadTs },
+                ],
+              },
+            ],
+          } as any);
+        } else if (displayResponse) {
+          await say({ text: markdownToMrkdwn(displayResponse), thread_ts: threadTs });
+        }
+
+        if (config.logChannelId) {
+          postAuditLog(client, config.logChannelId, { channel: e.channel, ts: e.ts, user: e.user }, text, { status: "ok", cost, tokens })
+            .catch((err) => console.error("[slack] Failed to post audit log:", err));
+        }
+      });
+
+      if (submission.status === "queued-behind-thread") {
+        await say({ text: "I'm still working on your previous request in this thread — your new message is queued.", thread_ts: threadTs });
+      } else if (submission.queued) {
+        const pos = submission.queuePosition + 1;
+        const eta = submission.estimatedWaitSec;
+        const etaText = eta > 0 ? ` (estimated wait: ~${formatEta(eta)})` : "";
+        const msg = await say({
+          text: `Your request is queued (position #${pos})${etaText} — I'll get to it shortly.`,
+          thread_ts: threadTs,
+        });
+        if (msg?.ts) {
+          queuedMessages.set(threadTs, { channel: e.channel, messageTs: msg.ts });
+        }
+      }
+
+      submission.done.catch(async (err) => {
+        const message = err instanceof Error ? err.message : "Unknown error occurred";
+        console.error("[slack] Auto-reply agent error:", err);
+        await unreact("hourglass_flowing_sand");
+        await react("x");
+        await say({ text: `Something went wrong: ${message}`, thread_ts: threadTs });
+
+        if (config.logChannelId) {
+          postAuditLog(client, config.logChannelId, { channel: e.channel, ts: e.ts, user: e.user }, text, { status: "error", error: message })
+            .catch((e) => console.error("[slack] Failed to post audit log:", e));
+        }
+      });
+
+      return;
+    }
+
+    // --- DM handling (existing logic) ---
+    const userName = await resolveUserName(client, e.user);
+    const skill = detectSkill(text);
+    console.log(`[slack] DM from ${userName} [skill: ${skill}]: ${text}`);
 
     const { done, position } = dmScheduler.submit(e.user, async () => {
       await react("hourglass_flowing_sand");
@@ -671,6 +825,7 @@ export function detectSkill(text: string): string {
   if (/^data[\s:]/.test(t)) return "data-query";
   if (/\bunban\b/.test(t) || /\bcredits?\s+ban\b/.test(t) || /\bban\s+status\b/.test(t)) return "credits-unban";
   if (/\bpipeline\b/.test(t) || /\bci(?:[\s/,.!?]|$)/.test(t) || /\bworkflow\b/.test(t) || /\bbuild\s+fail/.test(t)) return "pipeline";
+  if (/\brelease[\s-]?review\b/.test(t) || /\breview\b.+\brelease\b/.test(t)) return "release-review";
   return "general";
 }
 

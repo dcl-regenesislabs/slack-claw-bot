@@ -13,6 +13,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Checks Credits ban status for any wallet (open to everyone)
 - Unbans wallets from Credits and Events Notifier (restricted to authorized users)
 - Diagnoses failed CI/CD pipelines on GitHub Actions and GitLab CI — fetches logs, identifies root causes, and suggests fixes
+- Reviews release announcements — traces downstream dependencies via `@dcl/jarvis` manifests and tags affected teams
 
 ## Prerequisites
 
@@ -59,6 +60,7 @@ Copy `.env.default` to `.env` and fill in your values. Key variables:
 | `HTTP_SERVER_PORT` | No | HTTP server port for health check (default: 5000) |
 | `UPSTASH_REDIS_REST_URL` | No | Upstash Redis URL for OAuth token persistence |
 | `UPSTASH_REDIS_REST_TOKEN` | No | Upstash Redis token |
+| `AUTO_REPLY_CHANNELS` | No | Comma-separated `channelId:skill` pairs for auto-reply (e.g. `C01ABC:release-review`) |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `NOTION_TOKEN` | No | Notion integration token for reading/creating pages |
 | `NOTION_SHAPE_DB_ID` | No | Notion database ID where shape-up entries are created |
@@ -121,6 +123,6 @@ test/
   integration/            Integration tests (Jest + localFetch)
 prompts/
   system.md               System prompt for the Claude agent
-skills/                   Agent skill definitions (create-issue, credits-unban, github, mobile-project, plan, pr-review, repos, shape, triage)
+skills/                   Agent skill definitions (create-issue, credits-unban, github, mobile-project, plan, pr-review, release-review, repos, shape, triage)
 ai-gents/                 Announcement templates and internal docs for new skills
 ```

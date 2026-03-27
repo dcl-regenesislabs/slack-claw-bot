@@ -29,7 +29,15 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     gitlabTokenDcl: await config.getString('GITLAB_TOKEN_DCL'),
     gitlabTokenOps: await config.getString('GITLAB_TOKEN_OPS'),
     s3Bucket: await config.getString('S3_BUCKET'),
-    awsRegion: (await config.getString('AWS_REGION')) ?? (await config.getString('AWS_DEFAULT_REGION'))
+    awsRegion: (await config.getString('AWS_REGION')) ?? (await config.getString('AWS_DEFAULT_REGION')),
+    autoReplyChannels: new Map(
+      ((await config.getString('AUTO_REPLY_CHANNELS')) ?? '')
+        .split(',').map(s => s.trim()).filter(Boolean)
+        .map(entry => {
+          const [channelId, skill] = entry.split(':').map(s => s.trim())
+          return [channelId, skill || 'general'] as [string, string]
+        })
+    )
   }
 
   const globalContext: GlobalContext = { components }
