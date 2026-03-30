@@ -83,11 +83,11 @@ function patchScheduleChannels(channelId: string): void {
 }
 
 function isChannelEligibleForMemory(channelId: string, config: Config): boolean {
-  return Boolean(config.s3Bucket) && Boolean(config.awsRegion) && isPublicChannel(channelId)
+  return Boolean(config.s3) && isPublicChannel(channelId)
 }
 
 function isMemoryReadable(config: Config): boolean {
-  return Boolean(config.s3Bucket) && Boolean(config.awsRegion)
+  return Boolean(config.s3)
 }
 
 async function triggerMemoryUpdate(
@@ -116,9 +116,9 @@ async function triggerMemoryUpdate(
       summary: summaryText,
     }
 
-    await saveConversationSummary(config.s3Bucket!, config.awsRegion!, summary)
+    await saveConversationSummary(config.s3!, summary)
 
-    const currentContext = await getGlobalContext(config.s3Bucket!, config.awsRegion!)
+    const currentContext = await getGlobalContext(config.s3!)
     const { text: updatedContext } = await runAgent({
       threadContent: buildMemoryUpdatePrompt(currentContext, summary),
       triggeredBy: 'memory-update',
@@ -136,7 +136,7 @@ async function triggerMemoryUpdate(
         })
         if (compressed) contextToSave = compressed
       }
-      await saveGlobalContext(config.s3Bucket!, config.awsRegion!, contextToSave)
+      await saveGlobalContext(config.s3!, contextToSave)
       console.log('[memory] Global context updated')
     }
   } catch (err) {
@@ -231,7 +231,7 @@ export async function startSlackBot(config: Config): Promise<void> {
         (PR_URL_PATTERN.test(threadContent) || MR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
 
       const rawContext = isMemoryReadable(config)
-        ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch((err) => {
+        ? await getGlobalContext(config.s3!).catch((err) => {
             console.error("[memory] Failed to load global context:", err);
             return null;
           })
@@ -381,7 +381,7 @@ export async function startSlackBot(config: Config): Promise<void> {
           (PR_URL_PATTERN.test(threadContent) || MR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
 
         const rawContext = isMemoryReadable(config)
-          ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch((err) => {
+          ? await getGlobalContext(config.s3!).catch((err) => {
               console.error("[memory] Failed to load global context:", err);
               return null;
             })
@@ -510,7 +510,7 @@ export async function startSlackBot(config: Config): Promise<void> {
         (PR_URL_PATTERN.test(threadContent) || REVIEW_KEYWORD_PATTERN.test(text) ? REVIEW_MODEL : undefined);
 
       const rawContext = isMemoryReadable(config)
-        ? await getGlobalContext(config.s3Bucket!, config.awsRegion!).catch((err) => {
+        ? await getGlobalContext(config.s3!).catch((err) => {
             console.error("[memory] Failed to load global context for DM:", err);
             return null;
           })
