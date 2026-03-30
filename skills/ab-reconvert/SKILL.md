@@ -14,6 +14,7 @@ Before doing anything, check the `Triggered by` line at the top of the prompt.
 Authorized Slack user IDs:
 - `U03JSUQ5Z7U` - Juani Molteni
 - `U047826RNDR` - Ashley Canning
+- `U02NB5QLZBQ` - Davide Jensen
 
 If the caller's `slack_user_id` is NOT in that list → respond only with:
 > "Sorry, you are not authorized to trigger asset bundle reconversions."
