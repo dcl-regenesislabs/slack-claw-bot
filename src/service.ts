@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { Lifecycle } from '@well-known-components/interfaces'
 import { setupRouter } from './controllers/routes.js'
 import { AppComponents, GlobalContext, TestComponents } from './types.js'
@@ -72,13 +73,13 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
   await startSlackBot(slackConfig)
 
   // Schedule runner — checks schedules.json every 60s and fires due tasks
-  startScheduleRunner(slackConfig.slackBotToken, logger)
+  await startScheduleRunner(slackConfig.slackBotToken, slackConfig.s3Bucket, slackConfig.awsRegion, logger)
 
   logger.info('Service started')
 }
 
 // ---------------------------------------------------------------------------
-// Schedule runner
+// Schedule runner — persists to S3 so schedules survive deploys
 // ---------------------------------------------------------------------------
 
 interface Schedule {
@@ -104,7 +105,20 @@ const SCHEDULES_PATH =
     ? '/data/schedules.json'
     : 'data/schedules.json'
 
+const S3_SCHEDULES_KEY = 'schedules/schedules.json'
 const NO_OUTPUT_SENTINEL = 'NO_OUTPUT'
+
+// Hash of last synced content — used to detect local changes made by the skill agent
+let lastSyncedHash: string | null = null
+
+export function contentHash(content: string): string {
+  // Simple fast hash for change detection
+  let h = 0
+  for (let i = 0; i < content.length; i++) {
+    h = ((h << 5) - h + content.charCodeAt(i)) | 0
+  }
+  return h.toString(36)
+}
 
 function readSchedules(): ScheduleFile {
   if (!existsSync(SCHEDULES_PATH)) return { schedules: [] }
@@ -115,23 +129,98 @@ function readSchedules(): ScheduleFile {
   }
 }
 
-function updateScheduleStats(id: string, status: string): void {
+function writeSchedulesLocal(file: ScheduleFile): string {
+  const json = JSON.stringify(file, null, 2)
+  const dir = SCHEDULES_PATH.includes('/') ? SCHEDULES_PATH.slice(0, SCHEDULES_PATH.lastIndexOf('/')) : '.'
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  writeFileSync(SCHEDULES_PATH, json, 'utf-8')
+  return json
+}
+
+async function s3GetSchedules(bucket: string, region: string): Promise<string | null> {
+  try {
+    const client = new S3Client({ region })
+    const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: S3_SCHEDULES_KEY }))
+    return res.Body ? await res.Body.transformToString('utf-8') : null
+  } catch (err: any) {
+    if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) return null
+    throw err
+  }
+}
+
+async function s3PutSchedules(bucket: string, region: string, json: string): Promise<void> {
+  const client = new S3Client({ region })
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: S3_SCHEDULES_KEY,
+    Body: json,
+    ContentType: 'application/json'
+  }))
+  lastSyncedHash = contentHash(json)
+}
+
+/** Sync local file to S3 if it changed since last sync. */
+async function syncToS3IfChanged(bucket: string, region: string, logger: any): Promise<void> {
+  try {
+    const json = existsSync(SCHEDULES_PATH) ? readFileSync(SCHEDULES_PATH, 'utf-8') : null
+    if (!json) return
+    const hash = contentHash(json)
+    if (hash === lastSyncedHash) return
+    await s3PutSchedules(bucket, region, json)
+    logger.info(`[schedule] Synced schedules to S3`)
+  } catch (err) {
+    logger.error(`[schedule] Failed to sync schedules to S3: ${err}`)
+  }
+}
+
+function updateScheduleStats(id: string, status: string, s3Bucket?: string, s3Region?: string, logger?: any): void {
   const file = readSchedules()
   const entry = file.schedules.find((s) => s.id === id)
   if (!entry) return
   entry.runCount = (entry.runCount || 0) + 1
   entry.lastRunAt = new Date().toISOString()
   entry.lastRunStatus = status
-  writeFileSync(SCHEDULES_PATH, JSON.stringify(file, null, 2), 'utf-8')
+  const json = writeSchedulesLocal(file)
+  // Fire-and-forget S3 sync
+  if (s3Bucket && s3Region) {
+    s3PutSchedules(s3Bucket, s3Region, json).catch((err) => {
+      logger?.error(`[schedule] Failed to sync stats to S3: ${err}`)
+    })
+  }
 }
 
-function startScheduleRunner(slackBotToken: string, logger: any): void {
+async function startScheduleRunner(slackBotToken: string, s3Bucket: string | undefined, s3Region: string | undefined, logger: any): Promise<void> {
   const scheduler = new AgentScheduler(1) // separate lane, max 1 concurrent
+
+  // Restore schedules from S3 on startup
+  if (s3Bucket && s3Region) {
+    try {
+      const remote = await s3GetSchedules(s3Bucket, s3Region)
+      if (remote) {
+        const dir = SCHEDULES_PATH.includes('/') ? SCHEDULES_PATH.slice(0, SCHEDULES_PATH.lastIndexOf('/')) : '.'
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+        writeFileSync(SCHEDULES_PATH, remote, 'utf-8')
+        lastSyncedHash = contentHash(remote)
+        const parsed = JSON.parse(remote) as ScheduleFile
+        logger.info(`[schedule] Restored ${parsed.schedules.length} schedules from S3`)
+      } else {
+        logger.info(`[schedule] No schedules found in S3, starting fresh`)
+      }
+    } catch (err) {
+      logger.error(`[schedule] Failed to restore schedules from S3: ${err}`)
+    }
+  }
 
   setInterval(async () => {
     const file = readSchedules()
     const enabled = file.schedules.filter((s) => s.enabled)
     logger.info(`[schedule] Tick — ${file.schedules.length} schedules, ${enabled.length} enabled`)
+
+    // Sync any local changes (e.g. from skill agent creating/deleting schedules) to S3
+    if (s3Bucket && s3Region) {
+      await syncToS3IfChanged(s3Bucket, s3Region, logger)
+    }
+
     if (!enabled.length) return
 
     const now = new Date()
@@ -175,11 +264,11 @@ function startScheduleRunner(slackBotToken: string, logger: any): void {
               })
             }
 
-            updateScheduleStats(schedule.id, 'ok')
+            updateScheduleStats(schedule.id, 'ok', s3Bucket, s3Region, logger)
           } catch (err) {
             const msg = err instanceof Error ? err.message : 'unknown error'
             logger.error(`[schedule] Error running "${schedule.description}": ${msg}`)
-            updateScheduleStats(schedule.id, `error: ${msg}`)
+            updateScheduleStats(schedule.id, `error: ${msg}`, s3Bucket, s3Region, logger)
           }
         })
 
@@ -195,5 +284,5 @@ function startScheduleRunner(slackBotToken: string, logger: any): void {
     }
   }, 60_000)
 
-  logger.info(`[schedule] Runner started, checking ${SCHEDULES_PATH} every 60s`)
+  logger.info(`[schedule] Runner started, checking ${SCHEDULES_PATH} every 60s (S3 sync: ${s3Bucket ? 'enabled' : 'disabled'})`)
 }
