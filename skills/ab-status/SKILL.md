@@ -130,7 +130,7 @@ Environment: <org|zone|today>
 
 📋 Summary:
   • Catalyst consistency: ✅ All nodes in sync / ⚠️ Inconsistent
-  • Entity ID match: ✅ / ❌ (stale)
+  • Entity ID match with the Rigistry: ✅ / ❌ (stale)
   • Global status: ✅ Complete / 🔄 Pending / ❌ Failed / 🔄 Fallback
   • Platform status:
     - Windows: ✅ complete — v2003 (built 2026-03-18)
