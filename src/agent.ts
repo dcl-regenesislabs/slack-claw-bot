@@ -33,6 +33,7 @@ interface AgentConfig {
   cfAccountId?: string;
   cfR2Bucket?: string;
   cfR2PublicUrl?: string;
+  commsModeratorToken?: string;
 }
 
 export interface RunOptions {
@@ -93,6 +94,9 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   }
   if (config.cfR2PublicUrl) {
     process.env.CF_R2_PUBLIC_URL = config.cfR2PublicUrl;
+  }
+  if (config.commsModeratorToken) {
+    process.env.COMMS_MODERATOR_TOKEN = config.commsModeratorToken;
   }
 
   modelId = config.model || "claude-sonnet-4-6";

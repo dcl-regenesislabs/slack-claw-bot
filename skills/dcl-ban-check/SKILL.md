@@ -51,13 +51,14 @@ Response shape:
 
 `ban` is only present when `isBanned` is true. `expiresAt` and `customMessage` may be null.
 
-## Step 3 — Check warnings (requires moderator identity)
+## Step 3 — Check warnings
 
 ```bash
-curl -s "https://comms-gatekeeper.decentraland.org/users/<address>/warnings"
+curl -s -H "Authorization: Bearer $COMMS_MODERATOR_TOKEN" \
+  "https://comms-gatekeeper.decentraland.org/users/<address>/warnings"
 ```
 
-This endpoint requires a signed identity (moderator role). If the request returns 401/403, skip this step and note that warning lookup requires moderator access.
+If the request returns 401/403, skip this step and note that the moderator token is missing or invalid.
 
 Response shape when authorized:
 ```json
@@ -95,7 +96,7 @@ Present a clear summary using Slack mrkdwn:
   • <warnedAt formatted> — <reason> (by <warnedBy>)
 ```
 
-If the warnings endpoint returned 401/403: `:warning: Warning data requires moderator credentials — not fetched.`
+If the warnings endpoint returned 401/403: `:warning: Moderator token missing or invalid — warnings not fetched.`
 
 ## Notes
 

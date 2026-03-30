@@ -41,7 +41,8 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     cfApiToken: await config.getString('CF_API_TOKEN'),
     cfAccountId: await config.getString('CF_ACCOUNT_ID'),
     cfR2Bucket: await config.getString('CF_R2_BUCKET'),
-    cfR2PublicUrl: await config.getString('CF_R2_PUBLIC_URL')
+    cfR2PublicUrl: await config.getString('CF_R2_PUBLIC_URL'),
+    commsModeratorToken: await config.getString('COMMS_MODERATOR_TOKEN')
   }
 
   const globalContext: GlobalContext = { components }
@@ -65,7 +66,8 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     cfApiToken: slackConfig.cfApiToken,
     cfAccountId: slackConfig.cfAccountId,
     cfR2Bucket: slackConfig.cfR2Bucket,
-    cfR2PublicUrl: slackConfig.cfR2PublicUrl
+    cfR2PublicUrl: slackConfig.cfR2PublicUrl,
+    commsModeratorToken: slackConfig.commsModeratorToken
   })
 
   logger.info('Starting Slack bot...')

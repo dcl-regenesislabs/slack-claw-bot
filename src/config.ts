@@ -23,4 +23,5 @@ export interface Config {
   cfAccountId?: string
   cfR2Bucket?: string
   cfR2PublicUrl?: string
+  commsModeratorToken?: string
 }
