@@ -29,6 +29,10 @@ interface AgentConfig {
   sentryOrg?: string;
   gitlabTokenDcl?: string;
   gitlabTokenOps?: string;
+  cfApiToken?: string;
+  cfAccountId?: string;
+  cfR2Bucket?: string;
+  cfR2PublicUrl?: string;
 }
 
 export interface RunOptions {
@@ -50,6 +54,7 @@ export interface RunResult {
   text: string;
   cost: number;
   tokens: number;
+  error?: { code: string; message: string };
 }
 
 let authStorage: AuthStorage | null = null;
@@ -76,6 +81,18 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   }
   if (config.gitlabTokenOps) {
     process.env.GITLAB_TOKEN_OPS = config.gitlabTokenOps;
+  }
+  if (config.cfApiToken) {
+    process.env.CF_API_TOKEN = config.cfApiToken;
+  }
+  if (config.cfAccountId) {
+    process.env.CF_ACCOUNT_ID = config.cfAccountId;
+  }
+  if (config.cfR2Bucket) {
+    process.env.CF_R2_BUCKET = config.cfR2Bucket;
+  }
+  if (config.cfR2PublicUrl) {
+    process.env.CF_R2_PUBLIC_URL = config.cfR2PublicUrl;
   }
 
   modelId = config.model || "claude-sonnet-4-6";
@@ -187,7 +204,13 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
     const text = session.getLastAssistantText() || "";
     console.log("[agent] result length:", text.length);
-    return { text, cost, tokens };
+
+    const error = extractError(session.messages);
+    if (error) {
+      console.error(`[agent] error detected — code=${error.code} message=${error.message}`);
+    }
+
+    return { text, cost, tokens, error: error ?? undefined };
   } finally {
     session.dispose();
   }
@@ -202,6 +225,27 @@ function subscribeToTextDeltas(session: any, events: EventEmitter): void {
       events.emit("text", event.assistantMessageEvent.delta);
     }
   });
+}
+
+function extractError(messages: any[]): { code: string; message: string } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === "assistant" && msg.stopReason === "error" && msg.errorMessage) {
+      const raw = String(msg.errorMessage);
+      const code = raw.match(/^\d+/)?.[0] || "unknown";
+      // errorMessage may be "429 {json...}" — strip the numeric prefix before parsing
+      const jsonPart = raw.replace(/^\d+\s*/, "");
+      let detail: string;
+      try {
+        const parsed = JSON.parse(jsonPart);
+        detail = parsed?.error?.message || parsed?.message || raw;
+      } catch {
+        detail = raw;
+      }
+      return { code, message: detail };
+    }
+  }
+  return null;
 }
 
 function computeUsage(messages: any[]): { cost: number; tokens: number } {

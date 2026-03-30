@@ -133,7 +133,6 @@ When asked to review a PR or MR (not just summarize):
 
 Look for:
 - *Bugs* — logic errors, off-by-one, null/undefined access, race conditions
-- *Security issues* — injection, auth bypass, secrets in code, unsafe deserialization
 - *Missing error handling* — unhandled promise rejections, missing try/catch, ignored errors
 - *Test coverage* — are the changes tested? Are edge cases covered?
 - *API contract* — breaking changes, missing validation, wrong HTTP methods
@@ -142,7 +141,11 @@ Look for:
 
 Reference specific files and lines when noting issues.
 
-### 3. Post the review
+### 3. Run the security-review skill
+
+Always apply the `security-review` skill as part of every PR/MR review. Work through its checklist and include findings in the review. If no security issues are found, note that explicitly.
+
+### 4. Post the review
 
 For GitHub PRs, choose the appropriate review action:
 
@@ -177,7 +180,7 @@ EOF
 
 For GitLab MRs, post a general comment with the review summary and use line-level discussions for specific issues (see GitLab operations above).
 
-### 4. Report back to Slack
+### 5. Report back to Slack
 
 Provide a concise summary:
 

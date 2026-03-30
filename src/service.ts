@@ -29,7 +29,19 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     gitlabTokenDcl: await config.getString('GITLAB_TOKEN_DCL'),
     gitlabTokenOps: await config.getString('GITLAB_TOKEN_OPS'),
     s3Bucket: await config.getString('S3_BUCKET'),
-    awsRegion: (await config.getString('AWS_REGION')) ?? (await config.getString('AWS_DEFAULT_REGION'))
+    awsRegion: (await config.getString('AWS_REGION')) ?? (await config.getString('AWS_DEFAULT_REGION')),
+    autoReplyChannels: new Map(
+      ((await config.getString('AUTO_REPLY_CHANNEL_IDS')) ?? '')
+        .split(',').map(s => s.trim()).filter(Boolean)
+        .map(entry => {
+          const [channelId, skill] = entry.split(':').map(s => s.trim())
+          return [channelId, skill || 'general'] as [string, string]
+        })
+    ),
+    cfApiToken: await config.getString('CF_API_TOKEN'),
+    cfAccountId: await config.getString('CF_ACCOUNT_ID'),
+    cfR2Bucket: await config.getString('CF_R2_BUCKET'),
+    cfR2PublicUrl: await config.getString('CF_R2_PUBLIC_URL')
   }
 
   const globalContext: GlobalContext = { components }
@@ -49,7 +61,11 @@ export async function main(program: Lifecycle.EntryPointParameters<AppComponents
     sentryAuthToken: slackConfig.sentryAuthToken,
     sentryOrg: slackConfig.sentryOrg,
     gitlabTokenDcl: slackConfig.gitlabTokenDcl,
-    gitlabTokenOps: slackConfig.gitlabTokenOps
+    gitlabTokenOps: slackConfig.gitlabTokenOps,
+    cfApiToken: slackConfig.cfApiToken,
+    cfAccountId: slackConfig.cfAccountId,
+    cfR2Bucket: slackConfig.cfR2Bucket,
+    cfR2PublicUrl: slackConfig.cfR2PublicUrl
   })
 
   logger.info('Starting Slack bot...')
