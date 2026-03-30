@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
+import type { IS3Component } from '@dcl/s3-component'
 
 const GLOBAL_CONTEXT_KEY = 'memory/global-context.md'
 const NO_LEARNING = 'NO_LEARNING'
@@ -17,31 +17,6 @@ export interface ConversationSummary {
 // In-process cache — loaded once from S3 on first eligible request, updated after each write
 let cachedGlobalContext: string | null = null
 let contextLoaded = false
-
-let s3Client: S3Client | null = null
-
-function getClient(region: string): S3Client {
-  if (!s3Client) {
-    s3Client = new S3Client({ region })
-  }
-  return s3Client
-}
-
-async function s3Get(bucket: string, region: string, key: string): Promise<string | null> {
-  try {
-    const res = await getClient(region).send(new GetObjectCommand({ Bucket: bucket, Key: key }))
-    return res.Body ? await res.Body.transformToString('utf-8') : null
-  } catch (err: any) {
-    if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) return null
-    throw err
-  }
-}
-
-async function s3Put(bucket: string, region: string, key: string, body: string, contentType: string): Promise<void> {
-  await getClient(region).send(
-    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType })
-  )
-}
 
 export function isPublicChannel(channelId: string): boolean {
   return channelId.startsWith('C')
@@ -76,29 +51,28 @@ Compress this document to under 3000 words. Rules:
 }
 
 /** Loads the global context once from S3, then serves from in-process cache. */
-export async function getGlobalContext(bucket: string, region: string): Promise<string | null> {
+export async function getGlobalContext(s3: IS3Component): Promise<string | null> {
   if (contextLoaded) return cachedGlobalContext
-  const content = await s3Get(bucket, region, GLOBAL_CONTEXT_KEY)
+  const content = await s3.downloadObjectAsString(GLOBAL_CONTEXT_KEY)
   cachedGlobalContext = content
   contextLoaded = true
   return cachedGlobalContext
 }
 
 /** Writes the global context to S3 and updates the in-process cache. */
-export async function saveGlobalContext(bucket: string, region: string, content: string): Promise<void> {
-  await s3Put(bucket, region, GLOBAL_CONTEXT_KEY, content, 'text/markdown')
+export async function saveGlobalContext(s3: IS3Component, content: string): Promise<void> {
+  await s3.uploadObject(GLOBAL_CONTEXT_KEY, content, 'text/markdown')
   cachedGlobalContext = content
   contextLoaded = true
 }
 
 /** Saves a compact per-interaction summary to S3. */
 export async function saveConversationSummary(
-  bucket: string,
-  region: string,
+  s3: IS3Component,
   summary: ConversationSummary
 ): Promise<void> {
   const key = `conversations/${summary.channelId}/${summary.threadTs}.json`
-  await s3Put(bucket, region, key, JSON.stringify(summary, null, 2), 'application/json')
+  await s3.uploadObject(key, JSON.stringify(summary, null, 2), 'application/json')
 }
 
 /**

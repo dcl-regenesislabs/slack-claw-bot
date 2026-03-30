@@ -1,3 +1,5 @@
+import type { IS3Component } from '@dcl/s3-component'
+
 // Config interface used by slack.ts and agent.ts
 // Config values are loaded via WKC env-config-provider in service.ts
 export interface Config {
@@ -15,8 +17,7 @@ export interface Config {
   sentryOrg?: string
   gitlabTokenDcl?: string
   gitlabTokenOps?: string
-  s3Bucket?: string
-  awsRegion?: string
+  s3?: IS3Component
   autoReplyChannels?: Map<string, string>  // channelId → skill
   cfApiToken?: string
   cfAccountId?: string
