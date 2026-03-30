@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, watchFile, unwatchFile } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, watchFile } from 'node:fs'
 import type { IS3Component } from '@dcl/s3-component'
 import { Lifecycle } from '@well-known-components/interfaces'
 import { setupRouter } from './controllers/routes.js'
