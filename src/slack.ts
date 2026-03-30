@@ -826,6 +826,7 @@ export function detectSkill(text: string): string {
   if (/^data[\s:]/.test(t)) return "data-query";
   if (/\bunban\b/.test(t) || /\bcredits?\s+ban\b/.test(t) || /\bban\s+status\b/.test(t)) return "credits-unban";
   if (/\bpipeline\b/.test(t) || /\bci(?:[\s/,.!?]|$)/.test(t) || /\bworkflow\b/.test(t) || /\bbuild\s+fail/.test(t)) return "pipeline";
+  if (/\breconvert\b/.test(t) || /\bab[\s-]?reconver/.test(t) || /\bqueue[\s-]?ab\b/.test(t) || /\basset[\s-]?bundle[\s-]?reconver/.test(t) || /\bqueue-ab-conversion\b/.test(t)) return "ab-reconvert";
   if (/\brelease[\s-]?review\b/.test(t) || /\breview\b.+\brelease\b/.test(t)) return "release-review";
   return "general";
 }
