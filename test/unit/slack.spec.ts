@@ -1,4 +1,4 @@
-import { markdownToMrkdwn, detectSkill, extractFileUploadTag, shouldHandleMessage } from '../../src/slack.js'
+import { markdownToMrkdwn, detectSkill, extractFileUploadTag, shouldHandleMessage, buildCustomTools } from '../../src/slack.js'
 
 describe('detectSkill', () => {
   it('detects "mr review" as pr-review', () => {
@@ -243,6 +243,26 @@ describe('extractFileUploadTag', () => {
   it('returns strippedText equal to original when no tag present', () => {
     // Confirm no mutation occurs when tag is absent
     expect(extractFileUploadTag('no tag here')).toBeNull()
+  })
+})
+
+describe('buildCustomTools', () => {
+  const fakeClient = {} as any
+  const event = { channel: 'C123', ts: '1234.5678', user: 'U99' }
+
+  it('includes report_injection when logChannelId is configured', () => {
+    const tools = buildCustomTools(fakeClient, { logChannelId: 'C_LOG' }, event)
+    expect(tools.some(t => t.name === 'report_injection')).toBe(true)
+  })
+
+  it('omits report_injection when logChannelId is not configured', () => {
+    const tools = buildCustomTools(fakeClient, {}, event)
+    expect(tools.some(t => t.name === 'report_injection')).toBe(false)
+  })
+
+  it('always includes the read_slack_thread tool', () => {
+    const tools = buildCustomTools(fakeClient, {}, event)
+    expect(tools.some(t => t.name === 'read_slack_thread')).toBe(true)
   })
 })
 

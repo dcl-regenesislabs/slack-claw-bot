@@ -7,6 +7,7 @@ import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIE
 import { AgentScheduler, DmScheduler } from "./concurrency.js";
 import { createSlackTools } from "./tools/read-slack-thread.js";
 import { createInjectionReportTool } from "./tools/report-injection.js";
+import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import {
   isPublicChannel,
   isNoLearning,
@@ -40,6 +41,18 @@ const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"
 const TEXT_EXTENSIONS = new Set([".md", ".txt"]);
 
 let botToken: string;
+
+/** Builds the custom tool array for an agent run, conditionally including the injection reporter. */
+export function buildCustomTools(
+  client: WebClient,
+  config: Pick<Config, "logChannelId">,
+  event: { channel: string; ts: string; user?: string }
+): ToolDefinition[] {
+  return [
+    ...createSlackTools(client),
+    ...(config.logChannelId ? [createInjectionReportTool(client, config.logChannelId, event)] : []),
+  ];
+}
 
 /** Determines whether the message handler should process an incoming event. */
 export function shouldHandleMessage(
@@ -239,10 +252,7 @@ export async function startSlackBot(config: Config): Promise<void> {
         : null;
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
-      const customTools = [
-        ...createSlackTools(client),
-        ...(config.logChannelId ? [createInjectionReportTool(client, config.logChannelId, event)] : []),
-      ];
+      const customTools = buildCustomTools(client, config, event);
       const { text: response, cost, tokens } = await runAgent({
         threadContent,
         triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
@@ -521,10 +531,7 @@ export async function startSlackBot(config: Config): Promise<void> {
         : null;
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
-      const customTools = [
-        ...createSlackTools(client),
-        ...(config.logChannelId ? [createInjectionReportTool(client, config.logChannelId, e)] : []),
-      ];
+      const customTools = buildCustomTools(client, config, e);
       const { text: response, cost, tokens, error } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools });
       await syncAuth();
       if (skill === "schedule") {
