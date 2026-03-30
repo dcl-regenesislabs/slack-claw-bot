@@ -121,12 +121,20 @@ describe('shouldHandleMessage', () => {
     expect(result).toEqual({ handle: false, isAutoReply: true })
   })
 
-  it('skips bot messages in auto-reply channels', () => {
+  it('allows bot messages in auto-reply channels', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', bot_id: 'B1', user: 'U1', text: 'hello' },
       AUTO_REPLY_CHANNEL_IDS
     )
-    expect(result).toEqual({ handle: false, isAutoReply: true })
+    expect(result).toEqual({ handle: true, isAutoReply: true, skill: 'triage' })
+  })
+
+  it('allows bot messages without user in auto-reply channels', () => {
+    const result = shouldHandleMessage(
+      { channel_type: 'channel', channel: 'C_AUTO', bot_id: 'B1', text: 'hello' },
+      AUTO_REPLY_CHANNEL_IDS
+    )
+    expect(result).toEqual({ handle: true, isAutoReply: true, skill: 'triage' })
   })
 
   it('skips messages with @mentions in auto-reply channels', () => {

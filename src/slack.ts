@@ -51,11 +51,11 @@ export function shouldHandleMessage(
   if (!isDm && !isAutoReply) return { handle: false, isAutoReply: false };
   if (isAutoReply) {
     if (event.thread_ts) return { handle: false, isAutoReply: true };
-    if (event.bot_id || event.bot_profile) return { handle: false, isAutoReply: true };
     if (event.text && /<@[A-Z0-9]+>/.test(event.text)) return { handle: false, isAutoReply: true };
   }
-  if (event.subtype) return { handle: false, isAutoReply };
-  if (!event.user || !event.text?.trim()) return { handle: false, isAutoReply };
+  if (event.subtype && !isAutoReply) return { handle: false, isAutoReply };
+  if (!event.text?.trim()) return { handle: false, isAutoReply };
+  if (!event.user && !isAutoReply) return { handle: false, isAutoReply };
   return { handle: true, isAutoReply, skill: autoReplySkill };
 }
 
@@ -342,7 +342,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     const { handle, isAutoReply: isAutoReplyChannel, skill: autoReplySkill } = shouldHandleMessage(e, config.autoReplyChannels);
     if (!handle) return;
 
-    if (await isExternalOrGuest(client, e.user)) {
+    if (e.user && await isExternalOrGuest(client, e.user)) {
       console.warn(`[slack] Denied request from non-org user ${e.user}`);
       await say({ text: "Sorry, I'm not available for external or guest users.", thread_ts: e.ts });
       return;
@@ -363,7 +363,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     // --- Auto-reply channel: route through the channel scheduler (same as app_mention) ---
     if (isAutoReplyChannel) {
       const [userName, channelName] = await Promise.all([
-        resolveUserName(client, e.user),
+        e.user ? resolveUserName(client, e.user) : Promise.resolve(e.bot_profile?.name ?? e.username ?? "bot"),
         resolveChannelName(client, e.channel),
       ]);
       const skill = autoReplySkill!;
