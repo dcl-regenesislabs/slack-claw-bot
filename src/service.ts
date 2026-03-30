@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, watchFile, unwatchFile } from 'node:fs'
 import type { IS3Component } from '@dcl/s3-component'
 import { Lifecycle } from '@well-known-components/interfaces'
 import { setupRouter } from './controllers/routes.js'
@@ -145,13 +145,15 @@ function writeSchedulesLocal(file: ScheduleFile): string {
 /** Sync local file to S3 if it changed since last sync. */
 async function syncToS3IfChanged(s3: IS3Component, logger: any): Promise<void> {
   try {
-    const json = existsSync(SCHEDULES_PATH) ? readFileSync(SCHEDULES_PATH, 'utf-8') : null
+    if (!existsSync(SCHEDULES_PATH)) return
+    const json = readFileSync(SCHEDULES_PATH, 'utf-8')
     if (!json) return
     const hash = contentHash(json)
     if (hash === lastSyncedHash) return
+    logger.info(`[schedule] Local file changed (hash ${lastSyncedHash} → ${hash}), uploading to S3...`)
     await s3.uploadObject(S3_SCHEDULES_KEY, json, 'application/json')
     lastSyncedHash = hash
-    logger.info(`[schedule] Synced schedules to S3`)
+    logger.info(`[schedule] Synced schedules to S3 successfully`)
   } catch (err) {
     logger.error(`[schedule] Failed to sync schedules to S3: ${err}`)
   }
@@ -175,8 +177,24 @@ function updateScheduleStats(id: string, status: string, s3?: IS3Component, logg
   }
 }
 
+/** Create a debounced sync function — collapses rapid file changes into one S3 upload. */
+function debounceSync(s3: IS3Component, logger: any, delayMs: number): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return () => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = null
+      syncToS3IfChanged(s3, logger).catch((err) => {
+        logger.error(`[schedule] Debounced sync error: ${err}`)
+      })
+    }, delayMs)
+  }
+}
+
 async function startScheduleRunner(slackBotToken: string, s3: IS3Component | undefined, logger: any): Promise<void> {
   const scheduler = new AgentScheduler(1) // separate lane, max 1 concurrent
+
+  logger.info(`[schedule] SCHEDULES_PATH resolved to: ${SCHEDULES_PATH}`)
 
   // Restore schedules from S3 on startup
   if (s3) {
@@ -189,11 +207,40 @@ async function startScheduleRunner(slackBotToken: string, s3: IS3Component | und
         const parsed = JSON.parse(remote) as ScheduleFile
         logger.info(`[schedule] Restored ${parsed.schedules.length} schedules from S3`)
       } else {
-        logger.info(`[schedule] No schedules found in S3, starting fresh`)
+        logger.info(`[schedule] No schedules found in S3`)
+        // If local file has schedules that never made it to S3, push them now
+        if (existsSync(SCHEDULES_PATH)) {
+          const localJson = readFileSync(SCHEDULES_PATH, 'utf-8')
+          const localFile = JSON.parse(localJson) as ScheduleFile
+          if (localFile.schedules.length > 0) {
+            logger.info(`[schedule] Found ${localFile.schedules.length} local schedules not in S3, uploading...`)
+            await s3.uploadObject(S3_SCHEDULES_KEY, localJson, 'application/json')
+            lastSyncedHash = contentHash(localJson)
+            logger.info(`[schedule] Synced local schedules to S3`)
+          }
+        }
       }
     } catch (err) {
       logger.error(`[schedule] Failed to restore schedules from S3: ${err}`)
     }
+  }
+
+  // Watch the schedules file for changes and sync to S3 immediately.
+  // This handles the case where the skill agent writes to the file — instead
+  // of waiting up to 60s for the next interval tick, we detect the change
+  // right away and push it to S3.
+  if (s3) {
+    const debouncedSync = debounceSync(s3, logger, 2_000)
+    // Ensure the file exists so watchFile has something to watch
+    ensureDir(SCHEDULES_PATH)
+    if (!existsSync(SCHEDULES_PATH)) {
+      writeFileSync(SCHEDULES_PATH, JSON.stringify({ schedules: [] }, null, 2), 'utf-8')
+    }
+    watchFile(SCHEDULES_PATH, { interval: 2_000 }, () => {
+      logger.info(`[schedule] File change detected, triggering S3 sync...`)
+      debouncedSync()
+    })
+    logger.info(`[schedule] Watching ${SCHEDULES_PATH} for changes`)
   }
 
   setInterval(async () => {
