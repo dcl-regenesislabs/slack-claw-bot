@@ -253,7 +253,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
       const customTools = buildCustomTools(client, config, event);
-      const { text: response, cost, tokens } = await runAgent({
+      const { text: response, cost, tokens, error } = await runAgent({
         threadContent,
         triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
         model,
