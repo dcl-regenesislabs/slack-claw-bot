@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import {
