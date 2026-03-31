@@ -16,6 +16,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Diagnoses failed CI/CD pipelines on GitHub Actions and GitLab CI — fetches logs, identifies root causes, and suggests fixes
 - Triggers manual asset bundle reconversion via opscli (restricted to authorized users)
 - Reviews release announcements — traces downstream dependencies via `@dcl/jarvis` manifests and tags affected teams
+- Queries AWS costs, spending trends, anomalies, and resource inventory across all accounts via cross-account read-only access
 
 ## Prerequisites
 

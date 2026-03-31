@@ -1,4 +1,4 @@
-import { markdownToMrkdwn, detectSkill, extractFileUploadTag, shouldHandleMessage, extractEventText } from '../../src/slack.js'
+import { markdownToMrkdwn, detectSkill, extractFileUploadTag, shouldHandleMessage, extractEventText, formatEta, SKILL_MODELS } from '../../src/slack.js'
 
 describe('detectSkill', () => {
   it('detects "mr review" as pr-review', () => {
@@ -55,6 +55,66 @@ describe('detectSkill', () => {
 
   it('detects "check wearables" as dcl-consistency', () => {
     expect(detectSkill('check wearables consistency')).toBe('dcl-consistency')
+  })
+
+  it('detects "pipeline failed" as pipeline', () => {
+    expect(detectSkill('pipeline failed on main')).toBe('pipeline')
+  })
+
+  it('detects "ci is broken" as pipeline', () => {
+    expect(detectSkill('ci is broken')).toBe('pipeline')
+  })
+
+  it('detects "workflow not running" as pipeline', () => {
+    expect(detectSkill('workflow not running')).toBe('pipeline')
+  })
+
+  it('detects "build failing on PR" as pipeline', () => {
+    expect(detectSkill('build failing on this PR')).toBe('pipeline')
+  })
+
+  it('detects "ci/cd" as pipeline', () => {
+    expect(detectSkill('check the ci/cd')).toBe('pipeline')
+  })
+
+  it('detects "aws cost breakdown" as aws-infra', () => {
+    expect(detectSkill('aws cost breakdown')).toBe('aws-infra')
+  })
+
+  it('detects "cloud spend by environment" as aws-infra', () => {
+    expect(detectSkill('cloud spend by environment')).toBe('aws-infra')
+  })
+
+  it('detects "how much are we spending on ec2" as aws-infra', () => {
+    expect(detectSkill('how much are we spending on ec2')).toBe('aws-infra')
+  })
+
+  it('detects "how many rds instances in PRD" as aws-infra', () => {
+    expect(detectSkill('how many rds instances in PRD')).toBe('aws-infra')
+  })
+
+  it('detects "cost anomaly detection" as aws-infra', () => {
+    expect(detectSkill('cost anomaly detection')).toBe('aws-infra')
+  })
+
+  it('detects "infrastructure cost overview" as aws-infra', () => {
+    expect(detectSkill('infrastructure cost overview')).toBe('aws-infra')
+  })
+
+  it('detects "aws billing this month" as aws-infra', () => {
+    expect(detectSkill('aws billing this month')).toBe('aws-infra')
+  })
+
+  it('detects "cost forecast" as aws-infra', () => {
+    expect(detectSkill('cost forecast')).toBe('aws-infra')
+  })
+
+  it('does not trigger aws-infra on "how should we spend our time"', () => {
+    expect(detectSkill('how should we spend our time on this?')).not.toBe('aws-infra')
+  })
+
+  it('does not trigger aws-infra on "billing address update"', () => {
+    expect(detectSkill('update the billing address on the invoice')).not.toBe('aws-infra')
   })
 
   it('returns general for unrelated text', () => {
@@ -403,6 +463,38 @@ describe('extractFileUploadTag', () => {
   it('returns strippedText equal to original when no tag present', () => {
     // Confirm no mutation occurs when tag is absent
     expect(extractFileUploadTag('no tag here')).toBeNull()
+  })
+})
+
+describe('formatEta', () => {
+  it('returns seconds for values under 60', () => {
+    expect(formatEta(45)).toBe('45s')
+  })
+
+  it('returns minutes for values at 60', () => {
+    expect(formatEta(60)).toBe('1min')
+  })
+
+  it('returns minutes for values over 60', () => {
+    expect(formatEta(150)).toBe('3min')
+  })
+
+  it('returns 0s for zero', () => {
+    expect(formatEta(0)).toBe('0s')
+  })
+})
+
+describe('SKILL_MODELS', () => {
+  it('maps aws-infra to claude-opus-4-6', () => {
+    expect(SKILL_MODELS['aws-infra']).toBe('claude-opus-4-6')
+  })
+
+  it('maps pipeline to claude-opus-4-6', () => {
+    expect(SKILL_MODELS['pipeline']).toBe('claude-opus-4-6')
+  })
+
+  it('does not define a model for general', () => {
+    expect(SKILL_MODELS['general']).toBeUndefined()
   })
 })
 
