@@ -74,13 +74,11 @@ assume_role() {
   clear_assumed_role
 
   local CREDS
-  CREDS=$(aws sts assume-role \
+  if ! CREDS=$(aws sts assume-role \
     --role-arn "arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}" \
     --role-session-name "agent-infra-$(date -u +%s)" \
     --duration-seconds 900 \
-    --output json 2>/dev/null)
-
-  if [ $? -ne 0 ] || [ -z "$CREDS" ]; then
+    --output json 2>/dev/null); then
     echo "[ERROR] Cannot access this account" >&2
     _CURRENT_ASSUMED_ACCOUNT=""
     return 1
