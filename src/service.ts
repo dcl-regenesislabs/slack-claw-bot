@@ -101,10 +101,7 @@ interface ScheduleFile {
   schedules: Schedule[]
 }
 
-const SCHEDULES_PATH =
-  process.env.NODE_ENV === 'production' && existsSync('/data')
-    ? '/data/schedules.json'
-    : 'data/schedules.json'
+const SCHEDULES_PATH = 'data/schedules.json'
 
 const S3_SCHEDULES_KEY = 'schedules/schedules.json'
 const NO_OUTPUT_SENTINEL = 'NO_OUTPUT'

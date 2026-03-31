@@ -9,8 +9,7 @@ You can create, list, and manage recurring scheduled tasks. Schedules are stored
 
 ## Schedule File
 
-- **Production**: `/data/schedules.json`
-- **Local dev**: `data/schedules.json` (relative to project root)
+- **Path**: `data/schedules.json` (relative to project root, same in all environments)
 
 Always check if the file exists first. If it doesn't, create it with `{"schedules":[]}`.
 
