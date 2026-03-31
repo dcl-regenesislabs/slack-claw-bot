@@ -1,4 +1,4 @@
-import { markdownToMrkdwn, detectSkill, extractFileUploadTag, shouldHandleMessage } from '../../src/slack.js'
+import { markdownToMrkdwn, detectSkill, extractFileUploadTag, shouldHandleMessage, extractEventText } from '../../src/slack.js'
 
 describe('detectSkill', () => {
   it('detects "mr review" as pr-review', () => {
@@ -212,6 +212,162 @@ describe('shouldHandleMessage', () => {
     const r2 = shouldHandleMessage({ channel_type: 'channel', channel: 'C2', user: 'U1', text: 'hi' }, channels)
     expect(r1.skill).toBe('triage')
     expect(r2.skill).toBe('general')
+  })
+
+  it('handles bot messages with attachments but no text in auto-reply channels', () => {
+    const result = shouldHandleMessage(
+      {
+        channel_type: 'channel',
+        channel: 'C_AUTO',
+        bot_id: 'B_GITHUB',
+        subtype: 'bot_message',
+        attachments: [{ text: 'Release - 2.22.0\nfeat: add token-based moderator authentication', fallback: 'New release published' }]
+      },
+      AUTO_REPLY_CHANNEL_IDS
+    )
+    expect(result).toEqual({ handle: true, isAutoReply: true, skill: 'triage' })
+  })
+
+  it('skips bot messages with no text and no attachments in auto-reply channels', () => {
+    const result = shouldHandleMessage(
+      { channel_type: 'channel', channel: 'C_AUTO', bot_id: 'B1', subtype: 'bot_message' },
+      AUTO_REPLY_CHANNEL_IDS
+    )
+    expect(result).toEqual({ handle: false, isAutoReply: true })
+  })
+
+  it('handles bot messages with blocks but no text/attachments in auto-reply channels', () => {
+    const result = shouldHandleMessage(
+      {
+        channel_type: 'channel',
+        channel: 'C_AUTO',
+        bot_id: 'B_GITHUB',
+        subtype: 'bot_message',
+        blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'New release published' } }]
+      },
+      AUTO_REPLY_CHANNEL_IDS
+    )
+    expect(result).toEqual({ handle: true, isAutoReply: true, skill: 'triage' })
+  })
+
+  it('skips bot messages with subtype in non-auto-reply channels even with attachments', () => {
+    const result = shouldHandleMessage(
+      {
+        channel_type: 'im',
+        subtype: 'bot_message',
+        bot_id: 'B1',
+        attachments: [{ text: 'some content' }]
+      },
+      AUTO_REPLY_CHANNEL_IDS
+    )
+    expect(result).toEqual({ handle: false, isAutoReply: false })
+  })
+
+  it('skips bot messages with empty attachments in auto-reply channels', () => {
+    const result = shouldHandleMessage(
+      {
+        channel_type: 'channel',
+        channel: 'C_AUTO',
+        bot_id: 'B1',
+        subtype: 'bot_message',
+        attachments: []
+      },
+      AUTO_REPLY_CHANNEL_IDS
+    )
+    expect(result).toEqual({ handle: false, isAutoReply: true })
+  })
+})
+
+describe('extractEventText', () => {
+  it('returns text when present', () => {
+    expect(extractEventText({ text: 'hello' })).toBe('hello')
+  })
+
+  it('extracts text from attachments when text is empty', () => {
+    expect(extractEventText({
+      text: '',
+      attachments: [{ text: 'Release - 2.22.0' }]
+    })).toBe('Release - 2.22.0')
+  })
+
+  it('combines pretext and text from attachments', () => {
+    expect(extractEventText({
+      attachments: [{ pretext: 'New release published', text: 'Release - 2.22.0' }]
+    })).toBe('New release published\nRelease - 2.22.0')
+  })
+
+  it('extracts text from section blocks when text and attachments are empty', () => {
+    expect(extractEventText({
+      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'Release - 2.22.0' } }]
+    })).toBe('Release - 2.22.0')
+  })
+
+  it('extracts text from rich_text blocks', () => {
+    expect(extractEventText({
+      blocks: [{
+        type: 'rich_text',
+        elements: [{
+          type: 'rich_text_section',
+          elements: [
+            { type: 'text', text: 'New release: ' },
+            { type: 'link', url: 'https://github.com/org/repo' }
+          ]
+        }]
+      }]
+    })).toBe('New release: \nhttps://github.com/org/repo')
+  })
+
+  it('merges attachments and blocks', () => {
+    expect(extractEventText({
+      attachments: [{ text: 'from attachment' }],
+      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'from block' } }]
+    })).toBe('from attachment\nfrom block')
+  })
+
+  it('uses blocks when attachments are empty array', () => {
+    expect(extractEventText({
+      attachments: [],
+      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'from blocks' } }]
+    })).toBe('from blocks')
+  })
+
+  it('extracts text from multiple attachments', () => {
+    expect(extractEventText({
+      attachments: [
+        { text: 'First release' },
+        { text: 'Second release' }
+      ]
+    })).toBe('First release\nSecond release')
+  })
+
+  it('extracts fields from section blocks', () => {
+    expect(extractEventText({
+      blocks: [{
+        type: 'section',
+        fields: [
+          { type: 'mrkdwn', text: 'Status: open' },
+          { type: 'mrkdwn', text: 'Priority: high' }
+        ]
+      }]
+    })).toBe('Status: open\nPriority: high')
+  })
+
+  it('handles header blocks', () => {
+    expect(extractEventText({
+      blocks: [{ type: 'header', text: { type: 'plain_text', text: 'Release Notes' } }]
+    })).toBe('Release Notes')
+  })
+
+  it('merges text, attachments, and blocks', () => {
+    expect(extractEventText({
+      text: 'direct text',
+      attachments: [{ text: 'attachment' }],
+      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'block' } }]
+    })).toBe('direct text\nattachment\nblock')
+  })
+
+  it('returns empty string when no text, attachments, or blocks', () => {
+    expect(extractEventText({})).toBe('')
   })
 })
 
