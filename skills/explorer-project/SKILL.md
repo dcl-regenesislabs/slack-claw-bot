@@ -294,3 +294,91 @@ QA team members may not have the same technical context — be explicit about re
 ### Claude AI Review
 
 Every PR gets a pending "Claude Review" status check. Trigger it by commenting `@claude review` on the PR. Claude analyzes code quality, bugs, security, performance, and error handling, then sets the status to pass/fail. Skipped for PRs labeled `no review` or `auto-pr`.
+
+## Ticket Status Check
+
+When asked about the status of a ticket (issue), follow these steps to give a complete picture: is it closed, is it merged to dev, and which release includes it.
+
+### Step 1 — Get issue state
+
+```bash
+gh issue view {number} -R decentraland/unity-explorer --json state,title,stateReason,closedAt,labels,assignees
+```
+
+- If the issue has the **`new`** label → it has **not been triaged** by the engineering team yet. Report this.
+- If the issue has **assignees** → it is actively being worked on (or will be soon). Include who is assigned.
+- If **open** and no assignees → report "open, not yet assigned".
+- If **closed** → continue to Step 2.
+
+### Step 2 — Find the closing PR and check if merged to dev
+
+Search for the PR that closed/fixed this issue:
+
+```bash
+# Search for PRs that reference the issue number
+gh pr list -R decentraland/unity-explorer --search "{number}" --state merged --json number,title,headRefName,baseRefName,mergedAt,url --limit 10
+```
+
+Look for a PR whose title or body references `#{number}` and whose `baseRefName` is `dev`. If found, report it as merged to dev with the merge date.
+
+If no PR is found via search, check the issue timeline for closing events:
+
+```bash
+gh api repos/decentraland/unity-explorer/issues/{number}/timeline --jq '[.[] | select(.event == "closed" or .event == "cross-referenced") | {event, source: .source.issue.number, commit_id}]'
+```
+
+### Step 3 — Identify which release includes it
+
+Releases follow a weekly cadence (typically Tuesday/Wednesday). A release branch (`release/YYYY-MM-DD`) is cut from `dev` and a PR is opened targeting `main`. Once merged and tagged, it becomes a GitHub Release.
+
+#### 3a — Check published GitHub Releases
+
+```bash
+gh release list -R decentraland/unity-explorer --limit 10 --json tagName,name,publishedAt
+```
+
+For each recent release tag, check if the PR's merge commit is an ancestor:
+
+```bash
+# Check if the merge commit is included in a release tag
+git log {release_tag} --oneline --grep="#{pr_number}" | head -5
+```
+
+Or use the GitHub API to compare:
+
+```bash
+gh api repos/decentraland/unity-explorer/compare/{merge_commit_sha}...{release_tag} --jq '.status'
+```
+
+If `status` is `"behind"` or `"identical"`, the commit is included in that release.
+
+#### 3b — Check open release PRs (upcoming release)
+
+If the fix is not in any published release, check if there is an open release PR that includes it:
+
+```bash
+# Find open release PRs (branch pattern: release/YYYY-MM-DD, targeting main)
+gh pr list -R decentraland/unity-explorer --base main --head "release/" --state open --json number,title,headRefName,url
+
+# Check if the PR's merge commit is in the release branch
+gh api repos/decentraland/unity-explorer/compare/{merge_commit_sha}...{release_branch} --jq '.status'
+```
+
+If included in an open release PR, report it as part of the upcoming release.
+
+#### 3c — Not in any release yet
+
+If the fix is merged to `dev` but not in any release branch, report that it will be included in the next release cycle.
+
+### Output Format
+
+```
+🎫 Ticket #{number}: {title}
+• State: ✅ Closed / 🔴 Open
+• Triage: 🆕 Not yet triaged (has `new` label) / ✅ Triaged
+• Assigned: 👤 @developer (actively being worked on) / ⚪ Unassigned
+• Merged to dev: ✅ Yes — {PR link} (merged {date}) / ❌ No
+• Release: 📦 Included in {version} ({release_date}) / 🚀 In upcoming release {release_branch} / ⏳ Not yet in a release — will be in the next cycle
+```
+
+Only include the Triage/Assigned lines for open issues. For closed issues, skip straight to merge and release status.
