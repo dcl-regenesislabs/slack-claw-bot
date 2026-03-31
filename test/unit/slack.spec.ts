@@ -110,7 +110,7 @@ describe('shouldHandleMessage', () => {
       { channel_type: 'channel', channel: 'C_OTHER', user: 'U1', text: 'hello' },
       AUTO_REPLY_CHANNEL_IDS
     )
-    expect(result).toEqual({ handle: false, isAutoReply: false })
+    expect(result).toEqual({ handle: false, isAutoReply: false, reason: "not a DM or auto-reply channel" })
   })
 
   it('skips thread replies in auto-reply channels', () => {
@@ -118,7 +118,7 @@ describe('shouldHandleMessage', () => {
       { channel_type: 'channel', channel: 'C_AUTO', thread_ts: '123.456', user: 'U1', text: 'hello' },
       AUTO_REPLY_CHANNEL_IDS
     )
-    expect(result).toEqual({ handle: false, isAutoReply: true })
+    expect(result).toEqual({ handle: false, isAutoReply: true, reason: "thread reply in auto-reply channel" })
   })
 
   it('allows bot messages in auto-reply channels', () => {
@@ -137,36 +137,36 @@ describe('shouldHandleMessage', () => {
     expect(result).toEqual({ handle: true, isAutoReply: true, skill: 'triage' })
   })
 
-  it('skips messages with @mentions in auto-reply channels', () => {
+  it('handles messages with @mentions in auto-reply channels', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', user: 'U1', text: 'hey <@U12345> check this' },
       AUTO_REPLY_CHANNEL_IDS
     )
-    expect(result).toEqual({ handle: false, isAutoReply: true })
+    expect(result).toEqual({ handle: true, isAutoReply: true, skill: 'triage' })
   })
 
   it('skips messages with subtypes', () => {
     const result = shouldHandleMessage(
       { channel_type: 'im', subtype: 'message_changed', user: 'U1', text: 'hello' }
     )
-    expect(result).toEqual({ handle: false, isAutoReply: false })
+    expect(result).toEqual({ handle: false, isAutoReply: false, reason: "subtype: message_changed" })
   })
 
   it('skips messages without text', () => {
     const result = shouldHandleMessage({ channel_type: 'im', user: 'U1', text: '' })
-    expect(result).toEqual({ handle: false, isAutoReply: false })
+    expect(result).toEqual({ handle: false, isAutoReply: false, reason: "no text content" })
   })
 
   it('skips messages without user', () => {
     const result = shouldHandleMessage({ channel_type: 'im', text: 'hello' })
-    expect(result).toEqual({ handle: false, isAutoReply: false })
+    expect(result).toEqual({ handle: false, isAutoReply: false, reason: "no user" })
   })
 
   it('handles auto-reply with no autoReplyChannels configured', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', user: 'U1', text: 'hello' }
     )
-    expect(result).toEqual({ handle: false, isAutoReply: false })
+    expect(result).toEqual({ handle: false, isAutoReply: false, reason: "not a DM or auto-reply channel" })
   })
 
   it('allows DM thread replies (not skipped like auto-reply)', () => {
@@ -176,25 +176,21 @@ describe('shouldHandleMessage', () => {
     expect(result).toEqual({ handle: true, isAutoReply: false })
   })
 
-  // When someone @mentions the bot in an auto-reply channel, the message handler
-  // must skip it so only app_mention handles it. This prevents double processing
-  // AND ensures the bot uses detectSkill (from the message) instead of the
-  // auto-reply channel's configured skill.
-  it('skips bot @mention in auto-reply channel so app_mention handles it with detectSkill', () => {
+  it('handles bot @mention in auto-reply channel (app_mention may also fire)', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', user: 'U1', text: '<@UBOT123> triage this issue' },
       AUTO_REPLY_CHANNEL_IDS
     )
-    expect(result.handle).toBe(false)
+    expect(result.handle).toBe(true)
     expect(result.isAutoReply).toBe(true)
   })
 
-  it('skips messages with @mention among other text in auto-reply channel', () => {
+  it('handles messages with multiple @mentions (e.g. cc) in auto-reply channel', () => {
     const result = shouldHandleMessage(
       { channel_type: 'channel', channel: 'C_AUTO', user: 'U1', text: 'cc <@U999> <@U888>' },
       AUTO_REPLY_CHANNEL_IDS
     )
-    expect(result.handle).toBe(false)
+    expect(result.handle).toBe(true)
     expect(result.isAutoReply).toBe(true)
   })
 
@@ -233,7 +229,7 @@ describe('shouldHandleMessage', () => {
       { channel_type: 'channel', channel: 'C_AUTO', bot_id: 'B1', subtype: 'bot_message' },
       AUTO_REPLY_CHANNEL_IDS
     )
-    expect(result).toEqual({ handle: false, isAutoReply: true })
+    expect(result).toEqual({ handle: false, isAutoReply: true, reason: "no text content" })
   })
 
   it('handles bot messages with blocks but no text/attachments in auto-reply channels', () => {
@@ -260,7 +256,7 @@ describe('shouldHandleMessage', () => {
       },
       AUTO_REPLY_CHANNEL_IDS
     )
-    expect(result).toEqual({ handle: false, isAutoReply: false })
+    expect(result).toEqual({ handle: false, isAutoReply: false, reason: "subtype: bot_message" })
   })
 
   it('skips bot messages with empty attachments in auto-reply channels', () => {
@@ -274,7 +270,7 @@ describe('shouldHandleMessage', () => {
       },
       AUTO_REPLY_CHANNEL_IDS
     )
-    expect(result).toEqual({ handle: false, isAutoReply: true })
+    expect(result).toEqual({ handle: false, isAutoReply: true, reason: "no text content" })
   })
 })
 
