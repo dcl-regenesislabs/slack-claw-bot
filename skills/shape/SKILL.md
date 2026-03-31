@@ -11,12 +11,12 @@ Extract the idea text after the colon.
 ## Shape Up pitch sections (generate in this order)
 
 1. **Problem** — The raw idea, a use case, or something that motivates this work. Who experiences it and when?
-2. **Appetite** — Choose **3-weeks** or **6-weeks** and briefly justify the choice.
-3. **Solution** — Core elements of the approach, concrete enough for people to immediately understand. Use bullet points or short descriptions of key screens/flows.
-4. **Rabbit Holes** — Specific traps or risky details to call out and avoid.
+2. **Appetite** — Choose **3-weeks** or **6-weeks** and briefly justify the choice. The appetite must account for the **full delivery lifecycle**, not just development. Every feature that touches the Explorer needs: (a) QA validation on Explorer builds, and (b) going through the release process (release branch, QA pass, staged rollout). As a rule of thumb, add **20% buffer** on top of the estimated dev time for QA and release overhead. If the dev estimate + 20% exceeds the appetite, either reduce scope or escalate to the larger appetite.
+3. **Solution** — Core elements of the approach, concrete enough for people to immediately understand. Use bullet points or short descriptions of key screens/flows. For user-facing features, suggest building behind a **feature flag** so the feature can be merged, QA'd, and released on the team's schedule while marketing controls when it goes live to users.
+4. **Rabbit Holes** — Specific traps or risky details to call out and avoid. Always include a rabbit hole about **QA and release timing**: call out if any feature requires multiple QA rounds (e.g., platform-specific testing on Mac/Windows), if the release branch cutoff is tight, or if QA team availability could be a bottleneck. If the feature requires Explorer builds, note that build + QA cycles are not instantaneous and can surface late-breaking issues.
 5. **No Goes** — Features or use cases explicitly excluded to keep scope tractable.
 6. **Metrics related to the Project** — Direct indicators to measure after deployment.
-7. **Roadmap** — Features grouped as **Must Have**, **Nice to Have**, **Expendable**.
+7. **Roadmap** — Features grouped as **Must Have**, **Nice to Have**, **Expendable**. For each group, indicate whether the feature needs QA validation and/or an Explorer release. Must Have items must fit within the appetite after applying the 20% QA/release buffer. Nice to Have items should be scoped so they can be cut without derailing the QA/release timeline.
 8. **Suggested Staffing** — Who should tackle this; note if someone is needed only for questions.
 9. **DRI Report** — Leave as placeholder text: `To be written upon completion.`
 
