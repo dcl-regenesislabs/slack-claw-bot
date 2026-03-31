@@ -98,9 +98,9 @@ The jarvis manifests cover backend services. The `repos` skill covers client rep
 **Step 2e — Decide which repo(s) to fix:**
 
 - **Single repo** → the issue clearly maps to one service/repo → proceed to Step 3 with that repo
-- **Different repo than the issue** → the root cause is in a dependency (e.g., issue in `creator-hub` but bug is in `@dcl/sdk-commands` which lives in `js-sdk-toolchain`) → use the source repo for Steps 3-8, link back to the original issue
-- **Multiple repos** → the fix spans services/repos → run Steps 3-8 for EACH repo separately, creating a PR in each. Cross-reference the PRs
-- **Unclear** → pick the most likely repo, clone it, run Step 4 (sub-agent research). If research reveals the root cause is elsewhere, switch repos and restart from Step 3
+- **Different repo than the issue** → the root cause is in a dependency (e.g., issue in `creator-hub` but bug is in `@dcl/sdk-commands` which lives in `js-sdk-toolchain`) → use the source repo for Steps 3-8 (branch, plan, work, CI, push, PR), link back to the original issue
+- **Multiple repos** → the fix spans services/repos → run Steps 3-8 (branch, plan, work, CI, push, PR) for EACH repo separately, creating a PR in each. Cross-reference the PRs
+- **Unclear** → pick the most likely repo, clone it, run Step 5 (plan workflow will research it). If research reveals the root cause is elsewhere, switch repos and restart from Step 3
 - **No URL and can't determine repo** → ask the user: "Which repository should I look at? Based on your description, it could be `<repo1>` or `<repo2>`."
 
 **Always link back to the original issue URL in PR descriptions, even for cross-repo fixes.**
@@ -161,81 +161,7 @@ git pull origin "$default_branch"
 
 ---
 
-### Step 4: Research the codebase with sub-agents (MANDATORY — THIS IS YOUR FIRST ACTION IN THE REPO)
-
-**The FIRST thing you do after cloning/cd'ing into the repo is run sub-agents to research it. Do NOT read files manually first. Do NOT investigate the code yourself. Let the sub-agents do the research — that is their job.**
-
-Get the current working directory, then immediately call the `subagent` tool:
-
-```bash
-pwd
-```
-
-```
-subagent({
-  cwd: "<result of pwd — MUST be the target repo, NOT agent-server>",
-  tasks: [
-    {
-      agent: "repo-research-analyst",
-      task: "Research this repository for the following issue. Find: CLAUDE.md, README.md, CONTRIBUTING.md, .github/workflows/*.yml, project structure, build/test/lint commands, architecture patterns, conventions, and existing implementations related to this problem. If the repo has .claude/skills/, read those too.\n\nIssue: <issue title>\n\n<issue body>"
-    },
-    {
-      agent: "learnings-researcher",
-      task: "Search docs/solutions/ for past learnings related to this issue. Use grep to pre-filter by keywords. Check critical-patterns.md. Return relevant gotchas, patterns, and prevention guidance.\n\nIssue: <issue title>\nKeywords: <extract keywords from issue>"
-    }
-  ]
-})
-```
-
-**Wait for results.** Read them carefully.
-
-**CHECK: Based on the research results and the `repos` skill you read in Step 2, does the fix belong in THIS repo?** Look at the files the sub-agent found — if the root cause is in a dependency that lives in another repo (check the package table from the `repos` skill), you need to switch:
-1. Clone the correct repo
-2. `cd` into it
-3. Run Step 4 again in that repo
-4. Continue from there
-
-**If the fix spans multiple repos**, run Steps 4-8 for each repo separately, creating a PR in each.
-
-**Extract from the results:**
-- **Build commands** — how to build the project
-- **Test commands** — how to run tests
-- **Lint/typecheck commands** — what quality checks exist
-- **Project structure** — where source code, tests, and configs live
-- **Conventions** — coding style, branch naming, commit message format
-- **Relevant files** — existing code related to the issue
-
-**Then decide if external research is needed** (security, external APIs, unfamiliar tech). If yes:
-
-```
-subagent({
-  cwd: "<result of pwd>",
-  tasks: [
-    { agent: "best-practices-researcher", task: "Research best practices for: <topic>" },
-    { agent: "framework-docs-researcher", task: "Gather docs for: <framework/library>" }
-  ]
-})
-```
-
-**Then run spec-flow analysis:**
-
-```
-subagent({
-  cwd: "<result of pwd>",
-  tasks: [
-    {
-      agent: "spec-flow-analyzer",
-      task: "Analyze this fix for completeness. Map user flows, identify edge cases, find gaps.\n\nIssue: <issue title + body>\n\nResearch findings: <summary of what you learned>"
-    }
-  ]
-})
-```
-
----
-
-### Step 5: Create fix branch and write the plan
-
-**5a. Create the branch:**
+### Step 4: Create fix branch
 
 ```bash
 git checkout -b <branch-name> "origin/$default_branch"
@@ -245,63 +171,45 @@ Branch name format:
 - **From GitHub issue:** `fix/<issue-number>-<kebab-case-short-title>` (e.g., `fix/7443-texture-not-saved`)
 - **From description:** `fix/<kebab-case-description>` (e.g., `fix/custom-item-texture-bug`)
 
-**5b. Write the plan document using the sub-agent research from Step 4:**
+---
+
+### Step 5: Plan the fix (MANDATORY)
+
+**BEFORE planning, you MUST read the full workflows-plan skill into this conversation:**
 
 ```bash
-mkdir -p docs/plans
+cat skills/workflows-plan/SKILL.md
 ```
 
-Create `docs/plans/YYYY-MM-DD-fix-<descriptive-name>-plan.md` with:
-- Root cause analysis (from repo-research-analyst findings)
-- Relevant files with line numbers (from repo-research-analyst findings)
-- Institutional learnings (from learnings-researcher findings)
-- User flows and edge cases (from spec-flow-analyzer findings)
-- Proposed changes as checkboxes (`- [ ] Change 1: ...`)
-- Acceptance criteria
-- Build/test commands from the repo
+**Now execute EVERY step you just read — all 8 steps, from Local Research through Report. Do NOT skip any step. Do NOT write your own simplified version. Follow the skill exactly as written.**
 
-**5c. Commit the plan:**
+Input for the plan: `<issue title> — <issue body/description>`
 
-```bash
-git add docs/plans/*.md
-git commit -m "docs: add fix plan for <issue>"
-```
+**CHECK after research:** Based on the sub-agent research results and the `repos` skill you read in Step 2, does the fix belong in THIS repo? If the root cause is in a dependency that lives in another repo, switch repos and restart from Step 3.
 
-**Verify the plan exists before proceeding:**
+**Do NOT proceed to Step 6 until a plan file exists at `docs/plans/*-plan.md`.**
 
 ```bash
 ls docs/plans/*-plan.md
 ```
 
-**If no plan file exists, you skipped Step 4. Go back and run the sub-agents.**
+**Do NOT commit the plan file.** It will be included in the PR description in Step 8, not as a file in the repo.
 
 ---
 
-### Step 6: Implement the fix following the plan (MANDATORY — DO NOT SKIP)
+### Step 6: Implement the fix (MANDATORY)
 
----
-
-**You MUST follow the plan from Step 5. Read the plan file first. Implement each checkbox item one by one.**
+**BEFORE implementing, you MUST read the full workflows-work skill into this conversation:**
 
 ```bash
-cat docs/plans/<the-plan-file-from-step-5>.md
+cat skills/workflows-work/SKILL.md
 ```
 
-For each item in `Proposed Changes`:
+**Now execute EVERY phase you just read — Understand, Execute, Quality Check, Final Commit, Report. Do NOT skip any phase. Follow the skill exactly as written.**
 
-1. Read the files that need to change
-2. Search for similar patterns in the codebase: `grep -r "similar_thing" --include="*.ts" -l`
-3. Implement following existing conventions
-4. Run tests immediately after the change (use the commands from the plan)
-5. If tests fail, fix before moving on
-6. Mark the checkbox done in the plan file (`- [ ]` → `- [x]`)
-7. Commit when a logical unit is complete:
-   ```bash
-   git add <specific-files>
-   git commit -m "fix(scope): description"
-   ```
+Input: the plan file from Step 5.
 
-**Repeat for every checkbox. Do NOT skip items. All checkboxes must be checked before proceeding.**
+**Do NOT proceed to Step 7 until ALL checkboxes in the plan are checked and tests pass.**
 
 ---
 
@@ -309,7 +217,7 @@ For each item in `Proposed Changes`:
 
 After the work workflow completes, run the **repo's actual CI checks** — not hardcoded commands.
 
-**Use the context from Step 4 to determine the correct commands:**
+**Use the context from the plan to determine the correct commands:**
 
 1. Check `CLAUDE.md` for explicit build/test/lint commands
 2. Check `.github/workflows/*.yml` for the CI steps
@@ -351,7 +259,7 @@ npm run typecheck
 git remote get-url origin
 ```
 
-**Before pushing, remove the plan file from git tracking** (keep the file locally but don't push it):
+**Do NOT commit the plan file to the repo.** The plan goes in the PR description only, not as a file in the codebase. If the plan was accidentally committed, remove it:
 
 ```bash
 git rm --cached docs/plans/*.md 2>/dev/null
@@ -418,12 +326,11 @@ Agent:
 1. Fetched issue #170: "Fix hide image action" (repo: decentraland/creator-hub)
 2. Analyzed issue → fix belongs in creator-hub (not a dependency issue)
 3. Found repo locally: /path/to/creator-hub
-4. Read repo context: CLAUDE.md (monorepo, npm workspaces, build: npm run build, test: npm test)
-5. Created branch: fix/170-hide-image-action
-6. Ran /compound-engineering:workflows:plan → created docs/plans/2026-03-13-fix-hide-image-action-plan.md
-7. Ran /compound-engineering:workflows:work → implemented fix, tests pass
-8. CI checks passed (build, test, lint, typecheck)
-9. Created PR: https://github.com/decentraland/creator-hub/pull/1200
+4. Created branch: fix/170-hide-image-action
+5. Followed workflows-plan skill → ran sub-agents (research, spec-flow) → created docs/plans/2026-03-13-fix-hide-image-action-plan.md
+6. Followed workflows-work skill → implemented fix per plan checkboxes, tests pass
+7. CI checks passed (build, test, lint, typecheck)
+8. Created PR: https://github.com/decentraland/creator-hub/pull/1200
 
 FIX COMPLETE
 ```
@@ -437,12 +344,11 @@ Agent:
 1. Fetched issue #456: "CLI crashes on deploy" (repo: org/app)
 2. Analyzed issue → root cause is in @org/sdk-toolchain dependency, fix belongs in org/sdk-toolchain
 3. Cloned org/sdk-toolchain
-4. Read repo context: CLAUDE.md (monorepo, build: rush build, test: rush test)
-5. Created branch: fix/456-cli-deploy-crash
-6. Ran /compound-engineering:workflows:plan → created plan
-7. Ran /compound-engineering:workflows:work → implemented fix, tests pass
-8. CI checks passed
-9. Created PR in org/sdk-toolchain linking back to org/app#456
+4. Created branch: fix/456-cli-deploy-crash
+5. Followed workflows-plan skill → researched codebase, created plan
+6. Followed workflows-work skill → implemented fix, tests pass
+7. CI checks passed
+8. Created PR in org/sdk-toolchain linking back to org/app#456
 
 FIX COMPLETE
 ```
@@ -464,10 +370,10 @@ FIX COMPLETE
 **If repo context files don't exist:**
 - Proceed with caution. Use project type indicators (package.json, Cargo.toml, etc.) to infer conventions. Note in the PR that the repo lacks documentation.
 
-**If /workflows:plan fails:**
+**If the workflows-plan skill fails (no plan file created):**
 - Check error output, retry once. If it fails again, report to user.
 
-**If /workflows:work fails or tests fail:**
+**If the workflows-work skill fails or tests fail:**
 - Analyze errors, fix issues, re-run the failing step.
 
 **If PR creation fails:**
