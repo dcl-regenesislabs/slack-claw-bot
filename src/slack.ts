@@ -69,21 +69,22 @@ function extractBlockText(blocks: Array<Record<string, any>>): string {
   return parts.filter(Boolean).join("\n").trim();
 }
 
-/** Extract readable text from a Slack event, falling back to attachments/blocks when text is empty. */
+/** Extract readable text from a Slack event, merging text, attachments, and blocks. */
 export function extractEventText(event: { text?: string; attachments?: Array<{ text?: string; fallback?: string; pretext?: string }>; blocks?: Array<Record<string, any>> }): string {
-  if (event.text?.trim()) return event.text.trim();
+  const parts: string[] = [];
+  if (event.text?.trim()) parts.push(event.text.trim());
   if (event.attachments?.length) {
-    const text = event.attachments
+    const att = event.attachments
       .map(a => [a.pretext, a.text, a.fallback].filter(Boolean).join("\n"))
       .join("\n")
       .trim();
-    if (text) return text;
+    if (att) parts.push(att);
   }
   if (event.blocks?.length) {
-    const text = extractBlockText(event.blocks);
-    if (text) return text;
+    const blk = extractBlockText(event.blocks);
+    if (blk) parts.push(blk);
   }
-  return "";
+  return parts.join("\n").trim();
 }
 
 let botToken: string;

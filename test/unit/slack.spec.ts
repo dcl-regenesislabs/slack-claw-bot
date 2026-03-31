@@ -317,14 +317,14 @@ describe('extractEventText', () => {
     })).toBe('New release: \nhttps://github.com/org/repo')
   })
 
-  it('prefers attachments over blocks', () => {
+  it('merges attachments and blocks', () => {
     expect(extractEventText({
       attachments: [{ text: 'from attachment' }],
       blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'from block' } }]
-    })).toBe('from attachment')
+    })).toBe('from attachment\nfrom block')
   })
 
-  it('falls back to blocks when attachments are empty array', () => {
+  it('uses blocks when attachments are empty array', () => {
     expect(extractEventText({
       attachments: [],
       blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'from blocks' } }]
@@ -358,12 +358,12 @@ describe('extractEventText', () => {
     })).toBe('Release Notes')
   })
 
-  it('prefers event.text over attachments and blocks', () => {
+  it('merges text, attachments, and blocks', () => {
     expect(extractEventText({
       text: 'direct text',
       attachments: [{ text: 'attachment' }],
       blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'block' } }]
-    })).toBe('direct text')
+    })).toBe('direct text\nattachment\nblock')
   })
 
   it('returns empty string when no text, attachments, or blocks', () => {
