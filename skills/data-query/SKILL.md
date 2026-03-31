@@ -131,6 +131,9 @@ decentraland:
       schema: PROD
       threads: 4
       client_session_keep_alive: false
+      session_parameters:
+        STATEMENT_TIMEOUT_IN_SECONDS: 120
+        QUERY_TAG: jarvis-data-skill
 '''.format(
     account=os.environ.get('SNOWFLAKE_ACCOUNT', ''),
     user=os.environ.get('SNOWFLAKE_USER', ''),
@@ -171,6 +174,21 @@ Read the message carefully and classify it as one of:
 - **metric**: a named business metric (DAU, retention, marketplace volume, etc.)
 - **sql**: a data question that requires a custom SQL query
 - **definition**: a conceptual question ("what is D7 retention?", "how is MAU calculated?")
+
+**Semantic mismatch rule:** If the user's term implies a concept that differs meaningfully from the matched metric's definition (e.g. "logins" vs wallet activity, "revenue" vs volume), state the difference and confirm the metric is what the user wants before proceeding.
+
+**Channel disambiguation rule:** If a question about "users" or "players" could apply to either website visitors or native client users, ask which one before querying. Do not default to either channel silently.
+
+**Ranking disambiguation rule:** If the question asks for a "top N" or "most X" ranking and the criterion is not specified, ask before querying. Offer the criteria that make sense for the entity being ranked (e.g. unique users, time spent, sessions for scenes; volume, sales count for marketplace items). Do not default to any criterion without asking.
+
+**Known ambiguous questions — always clarify before running:**
+
+| Question pattern | Why it's ambiguous | What to ask |
+|---|---|---|
+| "active users" without a date | Could be DAU today, MAU this month, or last 30 days | Confirm daily or monthly grain, and the date range |
+| "retention" without a window | Could be D3/D7/D14/D30; could be Explorer Alpha vs all clients | Ask for the window and whether Explorer Alpha only or all clients |
+| "marketplace sales" | Could include primary mints or secondary only | Clarify; default to secondary sales (`sale_type IN ('order','bid')`) and confirm |
+| "sessions" without platform | Explorer, web, and DAO mobile sessions are tracked in separate tables | Ask which platform |
 
 ---
 
@@ -278,6 +296,7 @@ For questions that require custom data not covered by named metrics.
 2. **`./data/target/semantic_manifest.json`** — the `node_relation` field gives `database.schema.table` for each semantic model.
 3. **`catalog.json` from S3** — use only when you need column-level detail not found above:
 
+
 ```bash
 python3 -c "
 import json, os, boto3
@@ -295,14 +314,49 @@ for key, node in {**cat.get('nodes', {}), **cat.get('sources', {})}.items():
 "
 ```
 
-**If none of these sources map to the question, tell the user you don't have a verified table for it — do NOT guess or hallucinate a table path.**
+4. **`exposures.yml` from S3** — use only to resolve which dbt model backs a specific Metabase question ID or URL. Do NOT use it as a general table discovery tool:
+
+```bash
+python3 -c "
+import os, boto3, yaml
+bucket = os.environ.get('DBT_DOCS_S3_BUCKET')
+boto3.client('s3').download_file(bucket, 'exposures.yml', '/tmp/exposures.yml')
+with open('/tmp/exposures.yml') as f:
+    data = yaml.safe_load(f)
+metabase_id = 'METABASE_ID'  # e.g. '9475'
+for exp in data.get('exposures', []):
+    url = exp.get('url', '')
+    if metabase_id in url:
+        print(f'Chart: {exp[\"label\"]}')
+        print(f'Models: {exp.get(\"depends_on\", [])}')
+"
+```
+
+**Verification rule:** Before writing SQL, you must have a verified `database.schema.table` path from one of these sources. The path from each source is authoritative:
+1. `llm-index.md` → use the schema listed in the routing table directly
+2. `semantic_manifest.json` → use the `node_relation` field, which gives the exact `database.schema.table`
+3. `catalog.json` → search by model name, use `database.schema.name` from the node metadata
+
+**Never construct a schema path by assumption** (e.g., guessing a model is in `DCL.PROD` because it sounds like a production model). If you find a model name in the manifest but the schema is not in its `node_relation`, look it up in catalog.json before writing SQL.
+
+If a path cannot be verified from any of the sources above: "I don't have a verified table for this metric. I found `[X]` which may be related — should I use it as an approximation, or would you prefer to check with the data team?" Do NOT proceed with an unverified table path.
 
 ### 2B.2 — Hard rules for SQL
 
 - **NEVER** query `DCL.STG.*` for business questions (staging tables are raw/unreliable).
 - **NEVER** hardcode schema names — always resolve from artifacts.
-- **ALWAYS** include a `WHERE` clause scoping to a date range. Default: last 60 days.
+- **ALWAYS** include a `WHERE` clause scoping to a date range using the date column from the routing table. Default: last 60 days. If the date column is not listed in the index, look it up in the catalog before writing the query — never skip the date filter because the column name is unknown.
 - **ALWAYS** add `LIMIT 500` as a safety net. If results hit 500 rows, warn the user and offer to narrow the query.
+- **NEVER** use `SELECT *` — always name the columns you need explicitly.
+- **NEVER** write a cartesian join (two tables with no `ON` or `WHERE` join condition). If a join condition is unclear, stop and ask the user before writing the query.
+
+### 2B.2b — Coverage check after JOIN
+
+After writing the SQL but before presenting results: if the query joins a lookup table and the matched rows cover less than 30% of the base set, add a warning to the response:
+
+> ⚠️ Only X% of the base set has data in `[table]` — this may not be the right source for this question.
+
+Do not suppress or omit this warning. Present it before the data.
 
 ### 2B.3 — Execute the query
 
@@ -472,6 +526,14 @@ Responses go to Slack (mrkdwn syntax):
 - Always state the date range queried
 - Always state which metric or table was used as source
 
+### Interpretation (required for metric and SQL results only)
+
+After presenting the numbers, always add 1–3 sentences of interpretation:
+- What does the result mean in business terms?
+- Is the number higher, lower, or consistent with typical values? Reference prior context if available in the thread.
+- Highlight any notable trend, spike, drop, or anomaly.
+- If the result is ambiguous or noisy, say so.
+
 ### Edge cases
 
 | Scenario | How to respond |
@@ -481,6 +543,8 @@ Responses go to Slack (mrkdwn syntax):
 | Multiple metrics requested | Summarize in a comparison table. Include WoW or MoM changes when data allows |
 | Trend data (range of dates) | Describe the trend direction: "DAU rose from ~1.8K to ~2.3K over the period (+28%)." |
 | Metric returned but uncertain it's the right one | State which metric was used and why, so the user can correct |
+| User shared a Metabase URL | Extract the question ID from the URL and look it up in `exposures.yml` (Step 2B.1). If found: query the backing dbt model directly and state which one was used — "This chart uses `[model]`, querying it directly. Note: I can't reproduce Metabase's exact filters or transformations." If not found: "I couldn't find this chart in the model registry — querying Snowflake based on your question. Results may differ." |
+| A result corrects a previous one in the same thread | Explain the cause explicitly: "The previous number used `[table X]`; this one uses `[table Y]` because `[reason]`." Never describe the change as "slightly revised" without the reason. |
 
 ### Example responses
 
@@ -505,3 +569,19 @@ Responses go to Slack (mrkdwn syntax):
 **Definition:**
 > *D7 retention* measures the share of new wallets that return at least once within 7 days of their first session.
 > Source: semantic manifest → `retention_d7`
+
+---
+
+## Data Quality Alerts
+
+If you detect a data quality issue during a query — including but not limited to:
+- A field that is documented as unreliable (e.g. `DIM_SCENES.SDK_VERSION`)
+- Results that contradict reasonable expectations (e.g. 96% of users on a 6-year-old OS version)
+- Unexpected NULLs or zeros where data should exist
+- A fallback/default value dominating the results (suggesting a broken upstream field)
+
+Then **always** include this line at the top of your response, before any data:
+
+> ⚠️ *Data quality issue detected* — <!subteam^S0APRDQS8UD> this may need a fix in the warehouse: [one-line description of the issue]
+
+Then explain the issue and answer the question as best you can with the caveat. Do not suppress the alert even if you can still answer partially.
