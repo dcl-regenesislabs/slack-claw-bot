@@ -94,18 +94,17 @@ let botToken: string;
 export function shouldHandleMessage(
   event: { channel_type?: string; channel?: string; thread_ts?: string; bot_id?: string; bot_profile?: unknown; text?: string; subtype?: string; user?: string; attachments?: Array<{ text?: string; fallback?: string; pretext?: string }>; blocks?: Array<Record<string, any>> },
   autoReplyChannels?: Map<string, string>
-): { handle: boolean; isAutoReply: boolean; skill?: string } {
+): { handle: boolean; isAutoReply: boolean; skill?: string; reason?: string } {
   const isDm = event.channel_type === "im";
   const autoReplySkill = autoReplyChannels?.get(event.channel ?? "");
   const isAutoReply = !!autoReplySkill;
-  if (!isDm && !isAutoReply) return { handle: false, isAutoReply: false };
+  if (!isDm && !isAutoReply) return { handle: false, isAutoReply: false, reason: "not a DM or auto-reply channel" };
   if (isAutoReply) {
-    if (event.thread_ts) return { handle: false, isAutoReply: true };
-    if (event.text && /<@[A-Z0-9]+>/.test(event.text)) return { handle: false, isAutoReply: true };
+    if (event.thread_ts) return { handle: false, isAutoReply: true, reason: "thread reply in auto-reply channel" };
   }
-  if (event.subtype && !isAutoReply) return { handle: false, isAutoReply };
-  if (!extractEventText(event)) return { handle: false, isAutoReply };
-  if (!event.user && !isAutoReply) return { handle: false, isAutoReply };
+  if (event.subtype && !isAutoReply) return { handle: false, isAutoReply, reason: `subtype: ${event.subtype}` };
+  if (!extractEventText(event)) return { handle: false, isAutoReply, reason: "no text content" };
+  if (!event.user && !isAutoReply) return { handle: false, isAutoReply, reason: "no user" };
   return { handle: true, isAutoReply, skill: autoReplySkill };
 }
 
@@ -392,8 +391,11 @@ export async function startSlackBot(config: Config): Promise<void> {
     if (e.bot_id || e.subtype === "bot_message") {
       console.log("[slack][debug] Bot message event:", JSON.stringify({ subtype: e.subtype, bot_id: e.bot_id, text: e.text, hasAttachments: !!e.attachments, attachmentCount: e.attachments?.length, hasBlocks: !!e.blocks, blockCount: e.blocks?.length, keys: Object.keys(e) }, null, 2));
     }
-    const { handle, isAutoReply: isAutoReplyChannel, skill: autoReplySkill } = shouldHandleMessage(e, config.autoReplyChannels);
-    if (!handle) return;
+    const { handle, isAutoReply: isAutoReplyChannel, skill: autoReplySkill, reason } = shouldHandleMessage(e, config.autoReplyChannels);
+    if (!handle) {
+      console.log(`[slack] Skipped message in ${e.channel} from ${e.user ?? e.bot_id ?? "unknown"}: ${reason}`);
+      return;
+    }
 
     if (e.user && await isExternalOrGuest(client, e.user)) {
       console.warn(`[slack] Denied request from non-org user ${e.user}`);

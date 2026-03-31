@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">19.81% </span>
+                <span class="strong">19.41% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>88/444</span>
+                <span class='fraction'>86/443</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">23% </span>
+                <span class="strong">22% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>69/300</span>
+                <span class='fraction'>66/300</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">17.67% </span>
+                <span class="strong">17.38% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>70/396</span>
+                <span class='fraction'>69/397</span>
             </div>
         
             
@@ -948,7 +948,9 @@
 <a name='L883'></a><a href='#L883'>883</a>
 <a name='L884'></a><a href='#L884'>884</a>
 <a name='L885'></a><a href='#L885'>885</a>
-<a name='L886'></a><a href='#L886'>886</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L886'></a><a href='#L886'>886</a>
+<a name='L887'></a><a href='#L887'>887</a>
+<a name='L888'></a><a href='#L888'>888</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1021,20 +1023,20 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">26x</span>
-<span class="cline-any cline-yes">26x</span>
-<span class="cline-any cline-yes">26x</span>
+<span class="cline-any cline-yes">29x</span>
+<span class="cline-any cline-yes">29x</span>
+<span class="cline-any cline-yes">29x</span>
 <span class="cline-any cline-yes">6x</span>
 <span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">6x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">26x</span>
+<span class="cline-any cline-yes">29x</span>
 <span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">26x</span>
+<span class="cline-any cline-yes">29x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1050,12 +1052,11 @@
 <span class="cline-any cline-yes">22x</span>
 <span class="cline-any cline-yes">20x</span>
 <span class="cline-any cline-yes">13x</span>
-<span class="cline-any cline-yes">12x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-yes">19x</span>
+<span class="cline-any cline-yes">17x</span>
 <span class="cline-any cline-yes">14x</span>
-<span class="cline-any cline-yes">11x</span>
-<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">13x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1343,6 +1344,9 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -1928,18 +1932,17 @@ let botToken: string;
 export function shouldHandleMessage(
   event: { channel_type?: string; channel?: string; thread_ts?: string; bot_id?: string; bot_profile?: unknown; text?: string; subtype?: string; user?: string; attachments?: Array&lt;{ text?: string; fallback?: string; pretext?: string }&gt;; blocks?: Array&lt;Record&lt;string, any&gt;&gt; },
   autoReplyChannels?: Map&lt;string, string&gt;
-): { handle: boolean; isAutoReply: boolean; skill?: string } {
+): { handle: boolean; isAutoReply: boolean; skill?: string; reason?: string } {
   const isDm = event.channel_type === "im";
   const autoReplySkill = autoReplyChannels?.get(event.channel ?? "");
   const isAutoReply = !!autoReplySkill;
-  if (!isDm &amp;&amp; !isAutoReply) return { handle: false, isAutoReply: false };
+  if (!isDm &amp;&amp; !isAutoReply) return { handle: false, isAutoReply: false, reason: "not a DM or auto-reply channel" };
   if (isAutoReply) {
-    if (event.thread_ts) return { handle: false, isAutoReply: true };
-    if (event.text &amp;&amp; /&lt;@[A-Z0-9]+&gt;/.test(event.text)) return { handle: false, isAutoReply: true };
+    if (event.thread_ts) return { handle: false, isAutoReply: true, reason: "thread reply in auto-reply channel" };
   }
-  if (event.subtype &amp;&amp; !isAutoReply) return { handle: false, isAutoReply };
-  if (!extractEventText(event)) return { handle: false, isAutoReply };
-  if (!event.user &amp;&amp; !isAutoReply) return { handle: false, isAutoReply };
+  if (event.subtype &amp;&amp; !isAutoReply) return { handle: false, isAutoReply, reason: `subtype: ${event.subtype}` };
+  if (!extractEventText(event)) return { handle: false, isAutoReply, reason: "no text content" };
+  if (!event.user &amp;&amp; !isAutoReply) return { handle: false, isAutoReply, reason: "no user" };
   return { handle: true, isAutoReply, skill: autoReplySkill };
 }
 &nbsp;
@@ -2226,8 +2229,11 @@ export async function <span class="fstat-no" title="function not covered" >start
 <span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (e.bot_id || e.subtype === "bot_message") {</span>
 <span class="cstat-no" title="statement not covered" >      console.log("[slack][debug] Bot message event:", JSON.stringify({ subtype: e.subtype, bot_id: e.bot_id, text: e.text, hasAttachments: !!e.attachments, attachmentCount: e.attachments?.length, hasBlocks: !!e.blocks, blockCount: e.blocks?.length, keys: Object.keys(e) }, null, 2));</span>
     }
-    const { handle, isAutoReply: isAutoReplyChannel, skill: autoReplySkill } = <span class="cstat-no" title="statement not covered" >shouldHandleMessage(e, config.autoReplyChannels);</span>
-<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!handle) <span class="cstat-no" title="statement not covered" >return;</span></span>
+    const { handle, isAutoReply: isAutoReplyChannel, skill: autoReplySkill, reason } = <span class="cstat-no" title="statement not covered" >shouldHandleMessage(e, config.autoReplyChannels);</span>
+<span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (!handle) {</span>
+<span class="cstat-no" title="statement not covered" >      console.log(`[slack] Skipped message in ${e.channel} from ${e.user ?? e.bot_id ?? "unknown"}: ${reason}`);</span>
+<span class="cstat-no" title="statement not covered" >      return;</span>
+    }
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (e.user &amp;&amp; await isExternalOrGuest(client, e.user)) {</span>
 <span class="cstat-no" title="statement not covered" >      console.warn(`[slack] Denied request from non-org user ${e.user}`);</span>
@@ -2725,7 +2731,7 @@ export function detectSkill(text: string): string {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-03-31T16:49:15.692Z
+                at 2026-03-31T17:55:53.576Z
             </div>
         <script src="../prettify.js"></script>
         <script>
