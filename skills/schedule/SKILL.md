@@ -15,6 +15,7 @@ Always check if the file exists first. If it doesn't, create it with `{"schedule
 
 ## JSON Schema
 
+**Schedule definitions** — `data/schedules.json`:
 ```json
 {
   "schedules": [
@@ -26,12 +27,16 @@ Always check if the file exists first. If it doesn't, create it with `{"schedule
       "channel": "C0123ABCD",
       "createdBy": "username",
       "createdAt": "2026-03-10T15:00:00Z",
-      "enabled": true,
-      "runCount": 0,
-      "lastRunAt": null,
-      "lastRunStatus": null
+      "enabled": true
     }
   ]
+}
+```
+
+**Run stats** — `data/schedule-stats.json` (managed by the schedule runner, DO NOT write to this file):
+```json
+{
+  "a1b2c3": { "runCount": 5, "lastRunAt": "2026-03-10T12:00:00Z", "lastRunStatus": "ok" }
 }
 ```
 
@@ -61,7 +66,7 @@ Always check if the file exists first. If it doesn't, create it with `{"schedule
 
 ### List schedules
 
-Read the file and format as a table:
+Read both `data/schedules.json` and `data/schedule-stats.json`. Merge stats into the table by schedule ID:
 
 ```
 | ID     | Description                        | Schedule      | Runs | Last Run           | Status  |
@@ -69,6 +74,8 @@ Read the file and format as a table:
 | a1b2c3 | Daily 9am ARG - Sentry issues      | 0 12 * * *    | 5    | 2026-03-10 12:00Z  | ok      |
 | d4e5f6 | Hourly PR check                    | 0 * * * *     | 12   | 2026-03-10 14:00Z  | ok      |
 ```
+
+If `schedule-stats.json` doesn't exist or has no entry for a schedule, show Runs=0, Last Run=Never, Status=—.
 
 ### Stop / Delete a schedule
 

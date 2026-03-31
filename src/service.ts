@@ -92,18 +92,17 @@ interface Schedule {
   createdBy: string
   createdAt: string
   enabled: boolean
-  runCount: number
-  lastRunAt: string | null
-  lastRunStatus: string | null
 }
 
 interface ScheduleFile {
   schedules: Schedule[]
 }
 
-const SCHEDULES_PATH = 'data/schedules.json'
+export const SCHEDULES_PATH = 'data/schedules.json'
+export const STATS_PATH = 'data/schedule-stats.json'
 
 const S3_SCHEDULES_KEY = 'schedules/schedules.json'
+const S3_STATS_KEY = 'schedules/schedule-stats.json'
 const NO_OUTPUT_SENTINEL = 'NO_OUTPUT'
 
 // Hash of last synced content — used to detect local changes made by the skill agent
@@ -123,7 +122,7 @@ function ensureDir(filePath: string): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 }
 
-function readSchedules(): ScheduleFile {
+export function readSchedules(): ScheduleFile {
   if (!existsSync(SCHEDULES_PATH)) return { schedules: [] }
   try {
     return JSON.parse(readFileSync(SCHEDULES_PATH, 'utf-8'))
@@ -132,10 +131,29 @@ function readSchedules(): ScheduleFile {
   }
 }
 
-function writeSchedulesLocal(file: ScheduleFile): string {
-  const json = JSON.stringify(file, null, 2)
-  ensureDir(SCHEDULES_PATH)
-  writeFileSync(SCHEDULES_PATH, json, 'utf-8')
+// --- Run stats stored separately to avoid race conditions with the skill agent ---
+
+export interface StatsEntry {
+  runCount: number
+  lastRunAt: string | null
+  lastRunStatus: string | null
+}
+
+export type StatsFile = Record<string, StatsEntry>
+
+export function readStats(): StatsFile {
+  if (!existsSync(STATS_PATH)) return {}
+  try {
+    return JSON.parse(readFileSync(STATS_PATH, 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
+export function writeStatsLocal(stats: StatsFile): string {
+  const json = JSON.stringify(stats, null, 2)
+  ensureDir(STATS_PATH)
+  writeFileSync(STATS_PATH, json, 'utf-8')
   return json
 }
 
@@ -156,18 +174,25 @@ async function syncToS3IfChanged(s3: IS3Component, logger: any): Promise<void> {
   }
 }
 
+/**
+ * Update run stats in a SEPARATE file (schedule-stats.json) so we never
+ * do a read-modify-write on schedules.json — which the skill agent also
+ * writes to (create/delete). This eliminates the race condition where
+ * updateScheduleStats could restore a schedule the agent just deleted.
+ */
 function updateScheduleStats(id: string, status: string, s3?: IS3Component, logger?: any): void {
-  const file = readSchedules()
-  const entry = file.schedules.find((s) => s.id === id)
-  if (!entry) return
-  entry.runCount = (entry.runCount || 0) + 1
-  entry.lastRunAt = new Date().toISOString()
-  entry.lastRunStatus = status
-  const json = writeSchedulesLocal(file)
+  const stats = readStats()
+  const prev = stats[id] || { runCount: 0, lastRunAt: null, lastRunStatus: null }
+  stats[id] = {
+    runCount: prev.runCount + 1,
+    lastRunAt: new Date().toISOString(),
+    lastRunStatus: status
+  }
+  const json = writeStatsLocal(stats)
   // Fire-and-forget S3 sync
   if (s3) {
-    s3.uploadObject(S3_SCHEDULES_KEY, json, 'application/json').then(() => {
-      lastSyncedHash = contentHash(json)
+    s3.uploadObject(S3_STATS_KEY, json, 'application/json').then(() => {
+      // no hash tracking needed — stats file is only written by us
     }).catch((err) => {
       logger?.error(`[schedule] Failed to sync stats to S3: ${err}`)
     })
@@ -219,6 +244,18 @@ async function startScheduleRunner(slackBotToken: string, s3: IS3Component | und
       }
     } catch (err) {
       logger.error(`[schedule] Failed to restore schedules from S3: ${err}`)
+    }
+
+    // Restore stats from S3
+    try {
+      const remoteStats = await s3.downloadObjectAsString(S3_STATS_KEY)
+      if (remoteStats) {
+        ensureDir(STATS_PATH)
+        writeFileSync(STATS_PATH, remoteStats, 'utf-8')
+        logger.info(`[schedule] Restored schedule stats from S3`)
+      }
+    } catch (err) {
+      logger.error(`[schedule] Failed to restore schedule stats from S3: ${err}`)
     }
   }
 
