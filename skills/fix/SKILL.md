@@ -257,6 +257,8 @@ npm run typecheck
 
 **If anything fails:** fix it, commit, and re-run until everything passes.
 
+**Before proceeding, remove any unused imports introduced by your changes.**
+
 **Do NOT proceed if checks fail.**
 
 ---

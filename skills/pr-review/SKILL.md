@@ -134,6 +134,7 @@ When asked to review a PR or MR (not just summarize):
 Look for:
 - *Bugs* — logic errors, off-by-one, null/undefined access, race conditions
 - *Missing error handling* — unhandled promise rejections, missing try/catch, ignored errors
+- *Unused imports* — flag any imports that are no longer referenced after the changes
 - *Test coverage* — are the changes tested? Are edge cases covered?
 - *API contract* — breaking changes, missing validation, wrong HTTP methods
 - *Performance* — N+1 queries, unnecessary allocations, missing pagination
