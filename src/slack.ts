@@ -38,11 +38,59 @@ const LARGE_RESPONSE_THRESHOLD = 3000;
 const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
 const TEXT_EXTENSIONS = new Set([".md", ".txt"]);
 
+/** Recursively extract text from Slack blocks (section, rich_text, header, etc.) */
+function extractBlockText(blocks: Array<Record<string, any>>): string {
+  const parts: string[] = [];
+  for (const block of blocks) {
+    if (block.text) {
+      // section / header blocks have { text: { text: "..." } } or { text: "..." }
+      const t = typeof block.text === "string" ? block.text : block.text?.text;
+      if (t) parts.push(t);
+    }
+    // rich_text blocks contain nested elements
+    if (block.elements) {
+      for (const el of block.elements) {
+        if (el.elements) {
+          for (const inner of el.elements) {
+            if (inner.text) parts.push(inner.text);
+            if (inner.url) parts.push(inner.url);
+          }
+        }
+        if (el.text) parts.push(typeof el.text === "string" ? el.text : el.text?.text ?? "");
+      }
+    }
+    if (block.fields) {
+      for (const f of block.fields) {
+        const t = typeof f === "string" ? f : f?.text;
+        if (t) parts.push(t);
+      }
+    }
+  }
+  return parts.filter(Boolean).join("\n").trim();
+}
+
+/** Extract readable text from a Slack event, falling back to attachments/blocks when text is empty. */
+export function extractEventText(event: { text?: string; attachments?: Array<{ text?: string; fallback?: string; pretext?: string }>; blocks?: Array<Record<string, any>> }): string {
+  if (event.text?.trim()) return event.text.trim();
+  if (event.attachments?.length) {
+    const text = event.attachments
+      .map(a => [a.pretext, a.text, a.fallback].filter(Boolean).join("\n"))
+      .join("\n")
+      .trim();
+    if (text) return text;
+  }
+  if (event.blocks?.length) {
+    const text = extractBlockText(event.blocks);
+    if (text) return text;
+  }
+  return "";
+}
+
 let botToken: string;
 
 /** Determines whether the message handler should process an incoming event. */
 export function shouldHandleMessage(
-  event: { channel_type?: string; channel?: string; thread_ts?: string; bot_id?: string; bot_profile?: unknown; text?: string; subtype?: string; user?: string },
+  event: { channel_type?: string; channel?: string; thread_ts?: string; bot_id?: string; bot_profile?: unknown; text?: string; subtype?: string; user?: string; attachments?: Array<{ text?: string; fallback?: string; pretext?: string }>; blocks?: Array<Record<string, any>> },
   autoReplyChannels?: Map<string, string>
 ): { handle: boolean; isAutoReply: boolean; skill?: string } {
   const isDm = event.channel_type === "im";
@@ -54,7 +102,7 @@ export function shouldHandleMessage(
     if (event.text && /<@[A-Z0-9]+>/.test(event.text)) return { handle: false, isAutoReply: true };
   }
   if (event.subtype && !isAutoReply) return { handle: false, isAutoReply };
-  if (!event.text?.trim()) return { handle: false, isAutoReply };
+  if (!extractEventText(event)) return { handle: false, isAutoReply };
   if (!event.user && !isAutoReply) return { handle: false, isAutoReply };
   return { handle: true, isAutoReply, skill: autoReplySkill };
 }
@@ -339,6 +387,9 @@ export async function startSlackBot(config: Config): Promise<void> {
 
   app.event("message", async ({ event, client, say }) => {
     const e = event as any;
+    if (e.bot_id || e.subtype === "bot_message") {
+      console.log("[slack][debug] Bot message event:", JSON.stringify({ subtype: e.subtype, bot_id: e.bot_id, text: e.text, hasAttachments: !!e.attachments, attachmentCount: e.attachments?.length, hasBlocks: !!e.blocks, blockCount: e.blocks?.length, keys: Object.keys(e) }, null, 2));
+    }
     const { handle, isAutoReply: isAutoReplyChannel, skill: autoReplySkill } = shouldHandleMessage(e, config.autoReplyChannels);
     if (!handle) return;
 
@@ -348,7 +399,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       return;
     }
 
-    const text = (e.text as string).trim();
+    const text = extractEventText(e);
     const threadTs: string = isAutoReplyChannel ? e.ts : (e.thread_ts || e.ts);
 
     function react(name: string): Promise<unknown> {
