@@ -496,7 +496,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     // --- DM handling (existing logic) ---
     const userName = await resolveUserName(client, e.user);
     const skill = detectSkill(text);
-    console.log(`[slack] DM from ${userName} [skill: ${skill}]: ${text}`);
+    console.log(`[slack] DM from ${userName} [skill: ${skill}]`);
 
     const { done, position } = dmScheduler.submit(e.user, async () => {
       await react("hourglass_flowing_sand");
@@ -518,7 +518,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
       const customTools = createSlackTools(client);
-      const { text: response, cost, tokens, error } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools });
+      const { text: response, cost, tokens, error } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools, quiet: true });
       await syncAuth();
       if (skill === "schedule") {
         patchScheduleChannels(e.channel);

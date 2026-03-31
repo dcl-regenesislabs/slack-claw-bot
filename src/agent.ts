@@ -44,6 +44,7 @@ export interface RunOptions {
   model?: string;
   memoryContext?: string;
   customTools?: ToolDefinition[];
+  quiet?: boolean;
 }
 
 export const REVIEW_MODEL = "claude-opus-4-6";
@@ -143,7 +144,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     throw new Error("Agent not initialized — call initAgent() first");
   }
 
-  const { threadContent, dryRun, triggeredBy, events, memoryContext, customTools } = options;
+  const { threadContent, dryRun, triggeredBy, events, memoryContext, customTools, quiet } = options;
   const effectiveModelId = options.model || modelId;
   const sessionManager = SessionManager.inMemory();
 
@@ -188,19 +189,23 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
       subscribeToTextDeltas(session, events);
     }
 
-    console.log("[agent] running prompt...");
-    console.log("[agent] prompt:", prompt.slice(0, 200));
+    if (!quiet) {
+      console.log("[agent] running prompt...");
+      console.log("[agent] prompt:", prompt.slice(0, 200));
+    }
     console.log("[agent] model:", effectiveModelId);
     await session.prompt(prompt);
 
-    const messageCount = session.messages.length;
-    console.log("[agent] messages in session:", messageCount);
-    for (const msg of session.messages) {
-      const content = "content" in msg ? JSON.stringify(msg.content).slice(0, 200) : "N/A";
-      const extra = msg.role === "assistant"
-        ? ` stopReason=${(msg as any).stopReason} error=${(msg as any).errorMessage ?? "none"}`
-        : "";
-      console.log(`[agent]   role=${msg.role}${extra} content=${content}`);
+    if (!quiet) {
+      const messageCount = session.messages.length;
+      console.log("[agent] messages in session:", messageCount);
+      for (const msg of session.messages) {
+        const content = "content" in msg ? JSON.stringify(msg.content).slice(0, 200) : "N/A";
+        const extra = msg.role === "assistant"
+          ? ` stopReason=${(msg as any).stopReason} error=${(msg as any).errorMessage ?? "none"}`
+          : "";
+        console.log(`[agent]   role=${msg.role}${extra} content=${content}`);
+      }
     }
 
     const { cost, tokens } = computeUsage(session.messages);
