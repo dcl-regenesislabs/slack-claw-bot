@@ -30,47 +30,80 @@ If no argument is provided, ask: "Which issue should I fix? Please provide a des
 
 ## Autonomous Workflow
 
-### Step 1: Parse input and fetch issue details
+### Step 1: Parse input and determine what to fix
 
-**If input is a GitHub issue URL:**
+**Case A — GitHub issue URL:**
 
 ```bash
-gh issue view <URL> --json title,body,labels,number,repository
+gh issue view <URL> --json title,body,labels,number,url
 ```
 
-Extract:
-- `title` — Issue title
-- `body` — Full description
-- `number` — Issue number
-- `repository` — Full repo name (e.g., `decentraland/some-repo`)
-- `labels` — Issue labels for context
+Extract title, body, number, labels. The repo is in the URL.
 
-**If input is free text:**
+**Case B — Free text description (no URL):**
 
-Use the description directly and infer repository from context if possible.
+The user described a bug or feature in plain text. Extract the problem description and proceed to Step 2 to identify the repo.
+
+**Case C — Slack conversation context (no explicit "fix" request):**
+
+Sometimes users describe bugs in conversation without explicitly asking for a fix. Treat the conversation as a bug report — extract the problem description and proceed to Step 2.
 
 ---
 
-### Step 2: Determine the correct target repository
+### Step 2: Identify the correct target repository using @dcl/jarvis
 
-**The repo where the issue lives is NOT always the repo where the fix belongs.** You MUST consult the `repos` skill before proceeding.
+**The repo where the issue lives is NOT always the repo where the fix belongs.** Use the same service discovery mechanism as the `plan` skill to identify ALL candidate repos.
 
-**Step 2a — Read the `repos` skill.** It contains:
-- Repository dependency graph (which repos consume which)
-- Package-to-repo mapping (which packages live in which repo)
-- Cross-repo fix patterns (common cases where the fix belongs elsewhere)
-- Archived repos and their replacements
+**Step 2a — Ensure @dcl/jarvis is up to date:**
 
-**Step 2b — Match the issue against the dependency graph:**
-- Read the issue title, body, comments, error messages, and stack traces
-- Identify any packages, libraries, or components mentioned
-- Cross-reference against the `repos` skill's package table to find the **source repo**
+```bash
+INSTALLED=$(node -e "console.log(require('./node_modules/@dcl/jarvis/package.json').version)" 2>/dev/null || echo "none")
+LATEST=$(npm view @dcl/jarvis version 2>/dev/null)
+if [ "$INSTALLED" != "$LATEST" ]; then
+  npm install @dcl/jarvis@latest --no-save --silent
+fi
+```
 
-**Step 2c — Decide:**
-- If the affected code lives in a different repo → use **that** repo for Steps 3-9
-- If the fix spans multiple repos → create a PR in **each** repo, cross-referencing them
-- If unclear → clone the issue's repo first, investigate the code (Step 4), and switch if the root cause traces to a dependency
-- Always link back to the original issue URL in PR descriptions
+**Step 2b — Scan the service manifests:**
+
+```bash
+# Read the service index — one entry per service with description, layer, repository, dependencies
+cat node_modules/@dcl/jarvis/manifests/index.yaml
+
+# Read the dependency graph — understand which services call which
+cat node_modules/@dcl/jarvis/manifests/graph.yaml
+```
+
+From these files, identify candidate services/repos by matching:
+- Keywords from the issue (error messages, feature names, UI components, API endpoints)
+- Service descriptions and responsibilities
+- Dependencies — both outbound (what this service calls) and inbound (what calls this service)
+
+**Step 2c — For each candidate, read the service manifest:**
+
+```bash
+cat node_modules/@dcl/jarvis/manifests/<service-name>.yaml
+```
+
+Look at: `repository`, `domain.owned_entities`, `responsibilities`, `dependencies`, `events.publishes/consumes`. This tells you what each service owns and how they relate.
+
+**Step 2d — Also read the `repos` skill for client-side repos:**
+
+```bash
+cat skills/repos/SKILL.md
+```
+
+The jarvis manifests cover backend services. The `repos` skill covers client repos (creator-hub, unity-explorer, godot-explorer, js-sdk-toolchain) and their dependencies. Read both.
+
+**Step 2e — Decide which repo(s) to fix:**
+
+- **Single repo** → the issue clearly maps to one service/repo → proceed to Step 3 with that repo
+- **Different repo than the issue** → the root cause is in a dependency (e.g., issue in `creator-hub` but bug is in `@dcl/sdk-commands` which lives in `js-sdk-toolchain`) → use the source repo for Steps 3-8, link back to the original issue
+- **Multiple repos** → the fix spans services/repos → run Steps 3-8 for EACH repo separately, creating a PR in each. Cross-reference the PRs
+- **Unclear** → pick the most likely repo, clone it, run Step 4 (sub-agent research). If research reveals the root cause is elsewhere, switch repos and restart from Step 3
+- **No URL and can't determine repo** → ask the user: "Which repository should I look at? Based on your description, it could be `<repo1>` or `<repo2>`."
+
+**Always link back to the original issue URL in PR descriptions, even for cross-repo fixes.**
 
 ---
 
@@ -128,107 +161,151 @@ git pull origin "$default_branch"
 
 ---
 
-### Step 4: Read repo context (MANDATORY)
+### Step 4: Research the codebase with sub-agents (MANDATORY — THIS IS YOUR FIRST ACTION IN THE REPO)
 
-**Before planning or writing any code, read the repo's own documentation.** This step is non-negotiable — every repo has different conventions, build tools, and architecture.
+**The FIRST thing you do after cloning/cd'ing into the repo is run sub-agents to research it. Do NOT read files manually first. Do NOT investigate the code yourself. Let the sub-agents do the research — that is their job.**
 
-Read these files in order (skip any that don't exist):
+Get the current working directory, then immediately call the `subagent` tool:
 
 ```bash
-# 1. CLAUDE.md — agent-specific instructions, build commands, architecture, conventions
-cat CLAUDE.md 2>/dev/null
-
-# 2. README.md — project overview, setup, tech stack
-cat README.md 2>/dev/null
-
-# 3. CI configuration — understand what checks will run
-ls .github/workflows/ 2>/dev/null && cat .github/workflows/*.yml 2>/dev/null
-
-# 4. Agent context docs (some repos have these)
-cat docs/ai-agent-context.md 2>/dev/null
-
-# 5. Repo-specific skills (some repos define .claude/skills with domain-specific patterns)
-if [ -d .claude/skills ]; then
-  echo "=== Repo skills ==="
-  for skill in .claude/skills/*/SKILL.md; do
-    echo "--- $skill ---"
-    cat "$skill"
-  done
-fi
-
-# 6. For unity-explorer fixes: the explorer-project skill is already loaded
-#    in your context. Re-read it now before planning — pay attention to
-#    C# conventions, ECS patterns, memory rules, and async guidelines.
-if echo "$PWD" | grep -q "unity-explorer"; then
-  echo "=== Loading explorer-project skill context ==="
-fi
+pwd
 ```
 
-**From these files, extract and note:**
-- **Build commands** — how to build the project (e.g., `npm run build`, `cargo build`, `make`)
-- **Test commands** — how to run tests (e.g., `npm test`, `cargo test`, `pytest`)
+```
+subagent({
+  cwd: "<result of pwd — MUST be the target repo, NOT agent-server>",
+  tasks: [
+    {
+      agent: "repo-research-analyst",
+      task: "Research this repository for the following issue. Find: CLAUDE.md, README.md, CONTRIBUTING.md, .github/workflows/*.yml, project structure, build/test/lint commands, architecture patterns, conventions, and existing implementations related to this problem. If the repo has .claude/skills/, read those too.\n\nIssue: <issue title>\n\n<issue body>"
+    },
+    {
+      agent: "learnings-researcher",
+      task: "Search docs/solutions/ for past learnings related to this issue. Use grep to pre-filter by keywords. Check critical-patterns.md. Return relevant gotchas, patterns, and prevention guidance.\n\nIssue: <issue title>\nKeywords: <extract keywords from issue>"
+    }
+  ]
+})
+```
+
+**Wait for results.** Read them carefully.
+
+**CHECK: Based on the research results and the `repos` skill you read in Step 2, does the fix belong in THIS repo?** Look at the files the sub-agent found — if the root cause is in a dependency that lives in another repo (check the package table from the `repos` skill), you need to switch:
+1. Clone the correct repo
+2. `cd` into it
+3. Run Step 4 again in that repo
+4. Continue from there
+
+**If the fix spans multiple repos**, run Steps 4-8 for each repo separately, creating a PR in each.
+
+**Extract from the results:**
+- **Build commands** — how to build the project
+- **Test commands** — how to run tests
 - **Lint/typecheck commands** — what quality checks exist
 - **Project structure** — where source code, tests, and configs live
 - **Conventions** — coding style, branch naming, commit message format
-- **Monorepo structure** — if applicable, which packages exist and how they relate
+- **Relevant files** — existing code related to the issue
 
-**These extracted details will be used in Steps 6, 7, and 8.** If `CLAUDE.md` exists, its instructions take precedence over defaults. If the repo has `.claude/skills/`, read the skills relevant to the area you're fixing — they contain domain-specific patterns, conventions, and architectural guidance that are critical for correct implementation.
+**Then decide if external research is needed** (security, external APIs, unfamiliar tech). If yes:
+
+```
+subagent({
+  cwd: "<result of pwd>",
+  tasks: [
+    { agent: "best-practices-researcher", task: "Research best practices for: <topic>" },
+    { agent: "framework-docs-researcher", task: "Gather docs for: <framework/library>" }
+  ]
+})
+```
+
+**Then run spec-flow analysis:**
+
+```
+subagent({
+  cwd: "<result of pwd>",
+  tasks: [
+    {
+      agent: "spec-flow-analyzer",
+      task: "Analyze this fix for completeness. Map user flows, identify edge cases, find gaps.\n\nIssue: <issue title + body>\n\nResearch findings: <summary of what you learned>"
+    }
+  ]
+})
+```
 
 ---
 
-### Step 5: Create fix branch
+### Step 5: Create fix branch and write the plan
 
-Derive branch name from issue:
-
-- **From GitHub issue:** `fix/<issue-number>-<kebab-case-short-title>`
-  Example: `fix/7443-texture-not-saved`
-- **From description:** `fix/<kebab-case-description>`
-  Example: `fix/custom-item-texture-bug`
+**5a. Create the branch:**
 
 ```bash
 git checkout -b <branch-name> "origin/$default_branch"
 ```
 
----
+Branch name format:
+- **From GitHub issue:** `fix/<issue-number>-<kebab-case-short-title>` (e.g., `fix/7443-texture-not-saved`)
+- **From description:** `fix/<kebab-case-description>` (e.g., `fix/custom-item-texture-bug`)
 
-### Step 6: Run `/compound-engineering:workflows:plan`
+**5b. Write the plan document using the sub-agent research from Step 4:**
 
-**IMPORTANT: This is NOT the local `plan` skill.** Use the Compound Engineering workflow `/compound-engineering:workflows:plan` (invoked via the Skill tool), NOT the local `plan` skill from `skills/plan/SKILL.md`. The local `plan` skill is for Decentraland backend service architecture — it is unrelated to this step.
-
-**Invoke the Compound Engineering plan workflow, passing the issue context AND the repo context you gathered in Step 4:**
-
-```
-/compound-engineering:workflows:plan <issue title + body> — Repo context: <key details from CLAUDE.md/README: tech stack, build commands, project structure>
+```bash
+mkdir -p docs/plans
 ```
 
-The workflow will autonomously:
-- Research the codebase
-- Find relevant files and patterns
-- Identify the root cause
-- Create a plan document in `docs/plans/`
-- Ask what to do next
+Create `docs/plans/YYYY-MM-DD-fix-<descriptive-name>-plan.md` with:
+- Root cause analysis (from repo-research-analyst findings)
+- Relevant files with line numbers (from repo-research-analyst findings)
+- Institutional learnings (from learnings-researcher findings)
+- User flows and edge cases (from spec-flow-analyzer findings)
+- Proposed changes as checkboxes (`- [ ] Change 1: ...`)
+- Acceptance criteria
+- Build/test commands from the repo
 
-**When prompted for next steps, respond with "Start /workflows:work" to continue autonomously.** Do not wait for user input — this is an autonomous workflow.
+**5c. Commit the plan:**
 
----
-
-### Step 7: Run `/compound-engineering:workflows:work`
-
-**Invoke the work workflow, passing the plan file path:**
-
-```
-/compound-engineering:workflows:work docs/plans/<the-plan-file-created-in-step-6>.md
+```bash
+git add docs/plans/*.md
+git commit -m "docs: add fix plan for <issue>"
 ```
 
-The workflow will autonomously:
-- Break the plan into tasks
-- Implement all changes
-- Run tests and type checks
-- Create commits
+**Verify the plan exists before proceeding:**
+
+```bash
+ls docs/plans/*-plan.md
+```
+
+**If no plan file exists, you skipped Step 4. Go back and run the sub-agents.**
 
 ---
 
-### Step 8: Final CI verification
+### Step 6: Implement the fix following the plan (MANDATORY — DO NOT SKIP)
+
+---
+
+**You MUST follow the plan from Step 5. Read the plan file first. Implement each checkbox item one by one.**
+
+```bash
+cat docs/plans/<the-plan-file-from-step-5>.md
+```
+
+For each item in `Proposed Changes`:
+
+1. Read the files that need to change
+2. Search for similar patterns in the codebase: `grep -r "similar_thing" --include="*.ts" -l`
+3. Implement following existing conventions
+4. Run tests immediately after the change (use the commands from the plan)
+5. If tests fail, fix before moving on
+6. Mark the checkbox done in the plan file (`- [ ]` → `- [x]`)
+7. Commit when a logical unit is complete:
+   ```bash
+   git add <specific-files>
+   git commit -m "fix(scope): description"
+   ```
+
+**Repeat for every checkbox. Do NOT skip items. All checkboxes must be checked before proceeding.**
+
+---
+
+### Step 7: Final CI verification
 
 After the work workflow completes, run the **repo's actual CI checks** — not hardcoded commands.
 
@@ -263,7 +340,7 @@ npm run typecheck
 
 ---
 
-### Step 9: Push and create PR
+### Step 8: Push and create PR
 
 **This step is MANDATORY — the workflow is not complete until the PR is created.**
 
@@ -274,12 +351,11 @@ npm run typecheck
 git remote get-url origin
 ```
 
-**Before pushing, remove the plan file from the commit.** The plan is a working document — only push the actual code changes:
+**Before pushing, remove the plan file from git tracking** (keep the file locally but don't push it):
 
 ```bash
-# Remove plan file from git tracking (do NOT delete the file, just unstage it)
 git rm --cached docs/plans/*.md 2>/dev/null
-git commit -m "remove plan from tracked files" 2>/dev/null
+git commit -m "chore: exclude plan from tracked files" 2>/dev/null
 ```
 
 **Push the branch:**
@@ -288,7 +364,13 @@ git commit -m "remove plan from tracked files" 2>/dev/null
 git push -u origin <branch-name>
 ```
 
-**Create the PR in the target repo.** Always use `--repo` to be explicit:
+**Read the plan file to include it in the PR description:**
+
+```bash
+cat docs/plans/*-plan.md
+```
+
+**Create the PR in the target repo.** The PR body MUST include the full plan. Always use `--repo` to be explicit:
 
 ```bash
 gh pr create \
@@ -299,9 +381,9 @@ gh pr create \
 
 <1-3 bullet points from the plan and commits>
 
-## Root Cause
+## Plan
 
-<From the plan document>
+<Paste the FULL content of the plan document here — root cause analysis, relevant files, proposed changes, acceptance criteria. This is the research that informed the fix.>
 
 ## Changes
 

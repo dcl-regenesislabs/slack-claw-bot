@@ -14,6 +14,7 @@ import {
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { ICacheStorageComponent } from "@dcl/core-commons";
 import { buildPrompt } from "./prompt.js";
+import { createSubagentTool } from "./subagent.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectDir = join(__dirname, "..");
@@ -170,6 +171,13 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   });
   await resourceLoader.reload();
 
+  const subagentTool = createSubagentTool({
+    agentsDir: join(projectDir, "vendor/compound-engineering/plugins/compound-engineering/agents"),
+    authStorage,
+    modelRegistry,
+    parentModelId: effectiveModelId,
+  });
+
   const { session } = await createAgentSession({
     cwd,
     authStorage,
@@ -179,7 +187,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     settingsManager: SettingsManager.inMemory(),
     resourceLoader,
     tools: createCodingTools(cwd),
-    customTools,
+    customTools: [subagentTool, ...(customTools || [])]
   });
 
   try {
