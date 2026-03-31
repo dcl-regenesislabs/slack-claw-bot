@@ -28,7 +28,8 @@ const SKILL_MODELS: Partial<Record<string, string>> = {
   'incident': 'claude-opus-4-6',
   'pipeline': 'claude-opus-4-6',
   'sentry': 'claude-opus-4-6',
-  'release-review': 'claude-opus-4-6'
+  'release-review': 'claude-opus-4-6',
+  'aws-infra': 'claude-opus-4-6'
 }
 
 const nameCache = new Map<string, string>();
@@ -880,6 +881,7 @@ export function detectSkill(text: string): string {
   if (/\bpipeline\b/.test(t) || /\bci(?:[\s/,.!?]|$)/.test(t) || /\bworkflow\b/.test(t) || /\bbuild\s+fail/.test(t)) return "pipeline";
   if (/\breconvert\b/.test(t) || /\bab[\s-]?reconver/.test(t) || /\bqueue[\s-]?ab\b/.test(t) || /\basset[\s-]?bundle[\s-]?reconver/.test(t) || /\bqueue-ab-conversion\b/.test(t)) return "ab-reconvert";
   if (/\brelease[\s-]?review\b/.test(t) || /\breview\b.+\brelease\b/.test(t)) return "release-review";
+  if (/\b(aws|cloud)\s*(cost|spend|billing|budget|infra)\b/.test(t) || /\bcost\s*(explorer|anomal|breakd|forecast)\b/.test(t) || /\b(spend|billing)\b.{0,20}\b(aws|cloud|cost|account|budget|ec2|ecs|rds|s3|lambda)\b/.test(t) || /\bhow\s+m(any|uch)\b.+\b(ec2|ecs|rds|s3|lambda|server|instance|bucket|service|fargate)\b/.test(t) || /\binfra(structure)?\s*(cost|overview|inventory|summary)\b/.test(t)) return "aws-infra";
   return "general";
 }
 
