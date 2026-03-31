@@ -17,6 +17,19 @@ description: Analyze AWS costs, spending trends, anomalies, forecasts, and query
 
 ---
 
+## Prerequisites
+
+This skill requires three environment variables set on the ECS task definition:
+
+- `AWS_ACCOUNT_MAP` — comma-separated `NAME:ACCOUNT_ID` pairs for all accounts.
+- `AWS_COST_ROLE_NAME` — IAM role name in ROOT for Cost Explorer access.
+- `AWS_INFRA_ROLE_NAME` — IAM role name in each account for resource inventory.
+
+The ECS task role must have `sts:AssumeRole` permission for all target roles.
+The container image must include `aws-cli`, `bash`, and `jq`.
+
+---
+
 ## Trigger
 
 **Activate for:**

@@ -23,7 +23,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # ---- Production stage ----
 FROM node:24-alpine
 
-RUN apk add --no-cache tini github-cli curl jq python3 aws-cli
+RUN apk add --no-cache tini github-cli curl jq python3 aws-cli bash
 
 ENV NODE_ENV=production
 
