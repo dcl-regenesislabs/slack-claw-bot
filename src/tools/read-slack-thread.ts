@@ -1,7 +1,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import type { WebClient } from "@slack/web-api";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
-import { extractEventText } from "../slack.js";
+import { extractEventText } from "../slack-utils.js";
 
 const DEFAULT_LIMIT = 50;
 
