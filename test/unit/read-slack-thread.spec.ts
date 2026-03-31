@@ -184,4 +184,55 @@ describe("createSlackTools", () => {
 
     expect((result.content[0] as any).text).toMatch(/not found/i);
   });
+
+  it("extracts content from attachments when text is empty (e.g. GitHub bot)", async () => {
+    const messages = [
+      {
+        ts: "1700000000.000001",
+        bot_id: "BGITHUB",
+        bot_profile: { name: "GitHub" },
+        text: "",
+        attachments: [{ text: "PR #42 opened by user: fix typo", fallback: "PR opened" }],
+      },
+    ];
+    const client = mockClient(messages);
+    const [tool] = createSlackTools(client);
+
+    const result = await tool.execute(
+      "call-8",
+      { channel: "C123", thread_ts: "1700000000.000001" },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    const text = (result.content[0] as any).text as string;
+    expect(text).toContain("GitHub");
+    expect(text).toContain("PR #42 opened by user: fix typo");
+  });
+
+  it("extracts content from blocks when text and attachments are absent", async () => {
+    const messages = [
+      {
+        ts: "1700000000.000001",
+        username: "DeployBot",
+        text: "",
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "Deployment complete" } }],
+      },
+    ];
+    const client = mockClient(messages);
+    const [tool] = createSlackTools(client);
+
+    const result = await tool.execute(
+      "call-9",
+      { channel: "C123", thread_ts: "1700000000.000001" },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    const text = (result.content[0] as any).text as string;
+    expect(text).toContain("DeployBot");
+    expect(text).toContain("Deployment complete");
+  });
 });

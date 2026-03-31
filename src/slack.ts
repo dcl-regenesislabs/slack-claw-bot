@@ -828,9 +828,10 @@ async function fetchThread(
 
   const parts = await Promise.all(
     messages.map(async (m) => {
-      const name = userNames.get(m.user || "") || "unknown";
+      const anyM = m as any;
+      const name = userNames.get(m.user || "") || anyM.bot_profile?.name || anyM.username || "unknown";
       const ts = m.ts ? new Date(parseFloat(m.ts) * 1000).toISOString() : "";
-      let content = `[${name}] (${ts}): ${m.text || ""}`;
+      let content = `[${name}] (${ts}): ${extractEventText(m)}`;
 
       const files: any[] = (m as any).files || [];
       for (const file of files) {

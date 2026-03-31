@@ -1,6 +1,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import type { WebClient } from "@slack/web-api";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
+import { extractEventText } from "../slack.js";
 
 const DEFAULT_LIMIT = 50;
 
@@ -62,11 +63,11 @@ function formatMessages(
 ): string {
   return messages
     .map((m) => {
-      const name = userNames.get(m.user || "") || "unknown";
+      const name = userNames.get(m.user || "") || m.bot_profile?.name || m.username || "unknown";
       const ts = m.ts
         ? new Date(parseFloat(m.ts) * 1000).toISOString()
         : "";
-      return `[${name}] (${ts}): ${m.text || ""}`;
+      return `[${name}] (${ts}): ${extractEventText(m)}`;
     })
     .join("\n");
 }
