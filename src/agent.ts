@@ -172,7 +172,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   await resourceLoader.reload();
 
   const subagentTool = createSubagentTool({
-    agentsDir: join(projectDir, "vendor/compound-engineering/plugins/compound-engineering/agents"),
+    agentsDir: join(projectDir, "node_modules/@every-env/compound-plugin/plugins/compound-engineering/agents"),
     authStorage,
     modelRegistry,
     parentModelId: effectiveModelId,

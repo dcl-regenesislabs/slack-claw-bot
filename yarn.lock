@@ -1012,6 +1012,14 @@
   resolved "https://registry.npmjs.org/@eslint/js/-/js-8.57.1.tgz"
   integrity sha512-d9zaMRSTIKDLhctzH12MtXvJKSSUhaHcjV+2Z+GK+EEY7XKpP5yR4x+N3TAcHTcu963nIr+TMcCb4DBCYX1z6Q==
 
+"@every-env/compound-plugin@^2.60.0":
+  version "2.60.0"
+  resolved "https://registry.npmjs.org/@every-env/compound-plugin/-/compound-plugin-2.60.0.tgz"
+  integrity sha512-VcWzWHglBL12SsQY/GZjophXiTALG4Di6dKzVx5kRs3z/728sld4xrNpWr3WaaWuE9MYMq4TVh1P8fO4sECv7w==
+  dependencies:
+    citty "^0.1.6"
+    js-yaml "^4.1.0"
+
 "@google/genai@^1.40.0":
   version "1.44.0"
   resolved "https://registry.npmjs.org/@google/genai/-/genai-1.44.0.tgz"
@@ -2961,6 +2969,13 @@ ci-info@^3.2.0:
   resolved "https://registry.npmjs.org/ci-info/-/ci-info-3.9.0.tgz"
   integrity sha512-NIxF55hv4nSqQswkAeiOi1r83xy8JldOFDTWiug55KBu9Jnblncd2U6ViHmYgHf01TPZS77NJBhBMKdWj9HQMQ==
 
+citty@^0.1.6:
+  version "0.1.6"
+  resolved "https://registry.npmjs.org/citty/-/citty-0.1.6.tgz"
+  integrity sha512-tskPPKEs8D2KPafUypv2gxwJP8h/OaJmC82QQGGDQcHvXX43xF2VDACcJVmZ0EuSxkpO9Kc4MlrA3q0+FG58AQ==
+  dependencies:
+    consola "^3.2.3"
+
 cjs-module-lexer@^1.0.0:
   version "1.4.3"
   resolved "https://registry.npmjs.org/cjs-module-lexer/-/cjs-module-lexer-1.4.3.tgz"
@@ -3034,6 +3049,11 @@ concat-map@0.0.1:
   version "0.0.1"
   resolved "https://registry.npmjs.org/concat-map/-/concat-map-0.0.1.tgz"
   integrity sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==
+
+consola@^3.2.3:
+  version "3.4.2"
+  resolved "https://registry.npmjs.org/consola/-/consola-3.4.2.tgz"
+  integrity sha512-5IKcdX0nnYavi6G7TtOhwkYzyjfJlatbjMjuLSfE2kYT5pMDOilZ4OvMhi637CcDICTmz3wARPoyhqyX1Y+XvA==
 
 content-disposition@^1.0.0:
   version "1.0.1"

@@ -19,6 +19,7 @@
     "@dcl/jarvis": "^1.4.0",
     "@dcl/redis-component": "^3.0.1",
     "@dcl/s3-component": "^2.0.2",
+    "@every-env/compound-plugin": "^2.60.0",
     "@mariozechner/pi-coding-agent": "^0.55.0",
     "@slack/bolt": "^4.1.0",
     "@well-known-components/env-config-provider": "^1.2.0",
