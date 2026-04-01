@@ -740,3 +740,27 @@ calls, data transfer, and token consumption.
 - **Offer drill-down instead of pre-fetching.** For broad questions, give the
   top-level summary and offer "want me to break down PRD ECS by service?" rather
   than preemptively querying every sub-dimension.
+
+### Data Integrity in Cost Analysis
+
+- **Derive ratios from data — never assume them.** Don't assume how many
+  metrics, resources, or series exist per dimension. Always calculate ratios
+  by dividing observed totals by observed distinct values. For example, don't
+  assume "each ECS service emits ~60 metrics" — query the actual metric count
+  and divide by the service count. Assumed ratios compound errors across the
+  entire analysis.
+- **Cross-validate breakdowns against known totals.** When decomposing a total
+  into subcategories (e.g., splitting CW cost by account), verify the parts
+  sum back to the whole. If they don't, at least one subquery is wrong. This
+  is a cheap sanity check: `sum(parts) vs total → if delta > 5%, investigate`.
+- **Verify set differences explicitly.** When identifying orphaned, stale, or
+  ghost resources (e.g., "log groups with no active service"), perform a direct
+  set comparison between what's active and what's emitting. Never subtract one
+  summary count from another — that hides mismatches and produces unreliable
+  gap estimates. Query both sets, compare, and list the actual orphans.
+- **Separate confirmed facts from derived estimates.** Clearly label which
+  numbers come directly from API output (confirmed) and which are calculated
+  or inferred (estimated). When a recommendation's projected savings depends
+  on a derived number, flag that dependency. Use markers like "confirmed" vs
+  "estimated" in the output so the reader knows which figures to trust and
+  which to verify independently before acting.
