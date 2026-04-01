@@ -142,6 +142,18 @@ Look for:
 
 Reference specific files and lines when noting issues.
 
+### 2b. Run review sub-agents in parallel
+
+Read the `workflows-review` skill and run specialized review agents on the PR:
+
+```bash
+cat skills/workflows-review/SKILL.md
+```
+
+**Execute the parallel review steps from that skill.** Pass the PR diff and context to each agent. The sub-agents provide deep specialized analysis (TypeScript conventions, security, architecture, patterns, simplicity) that complements your manual analysis from Step 2.
+
+**Incorporate the sub-agent findings into your review in Step 4.** Deduplicate findings — if you and a sub-agent found the same issue, keep the more detailed version.
+
 ### 3. Run the security-review skill
 
 Always apply the `security-review` skill as part of every PR/MR review. Work through its checklist and include findings in the review. If no security issues are found, note that explicitly.

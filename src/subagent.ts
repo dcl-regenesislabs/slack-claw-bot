@@ -15,7 +15,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 
 const MAX_CONCURRENCY = 4;
-const AGENT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes per sub-agent
+const AGENT_TIMEOUT_MS = 7 * 60 * 1000; // 7 minutes per sub-agent
 
 interface AgentDef {
   name: string;
