@@ -17,7 +17,7 @@ Diagnose CI/CD failures across GitHub Actions and GitLab CI. Fetch logs, identif
 
 **When a user requests a write action** (retry, cancel, re-run, trigger deploy, modify pipeline config) or your diagnosis determines a fix requires infrastructure intervention (runner restart, cache purge, secret rotation, Pulumi state unlock, etc.), respond with:
 
-> "That action requires manual intervention. Please reach out to <#devops-infra> for assistance."
+> "That action requires manual intervention. Please reach out to <#CBK9GC5FY|devops-infra> for assistance."
 
 Include a brief summary of what's needed so the DevOps team has context when the user posts there. Always provide the direct link to the failed run/pipeline so they can jump straight to it.
 
@@ -212,7 +212,7 @@ Analyze the extracted error context. Identify:
 3. **Root cause** - why it happened (match against known patterns below if applicable)
 4. **Suggested fix** - what the developer can do to resolve it
 5. **Is it transient?** - whether a simple retry would likely fix it (even though we don't retry ourselves)
-6. **Needs DevOps?** - if the fix requires infrastructure intervention (runner restart, cache purge, secret rotation, Pulumi unlock, registry issue), direct the user to <#devops-infra>
+6. **Needs DevOps?** - if the fix requires infrastructure intervention (runner restart, cache purge, secret rotation, Pulumi unlock, registry issue), direct the user to <#CBK9GC5FY|devops-infra>
 
 ### Phase 5 - Report
 
@@ -236,7 +236,7 @@ Check extracted log lines against these patterns before doing a full analysis. I
 | Timeout | `timed out`, `deadline exceeded`, `Job exceeded maximum duration` | Job took too long | Optimize slow steps, increase timeout, check for deadlocks |
 | Permission denied | `Permission denied`, `403 Forbidden`, `insufficient_permissions` | Token lacks required scope | Check CI token permissions and scopes |
 | SSL/TLS error | `SSL certificate problem`, `unable to verify`, `CERT_` | Certificate issue | Check CA bundle, expiration, or proxy configuration |
-| Pulumi lock | `error: the stack is currently locked`, `conflict: [409]`, `already locked` | Concurrent Pulumi operation or stale lock | Wait for other operation to finish, or ask <#devops-infra> to force-unlock if the lock is stale |
+| Pulumi lock | `error: the stack is currently locked`, `conflict: [409]`, `already locked` | Concurrent Pulumi operation or stale lock | Wait for other operation to finish, or ask <#CBK9GC5FY|devops-infra> to force-unlock if the lock is stale |
 | Docker build | `failed to solve`, `executor failed`, `COPY failed` | Dockerfile error or missing context | Check Dockerfile paths, build context, and base image availability |
 
 ---
@@ -296,7 +296,7 @@ TypeError: Cannot read properties of undefined (reading 'id')
 When the fix requires infrastructure intervention, append:
 
 ```
-*Needs DevOps:* Yes - this requires [describe action]. Please post in <#devops-infra> with this link.
+*Needs DevOps:* Yes - this requires [describe action]. Please post in <#CBK9GC5FY|devops-infra> with this link.
 ```
 
 ### Quick status check
@@ -320,4 +320,4 @@ When the fix requires infrastructure intervention, append:
 - Use `jq` to parse and format all JSON API responses
 - Truncate log output in Slack responses - show only the relevant error lines, not the full trace
 - For GitHub repos, use the `repos` skill alias table to resolve shorthand names
-- If the user asks to retry, re-run, cancel, or trigger something, redirect them to <#devops-infra> with a summary of what's needed and the direct link to the failed run
+- If the user asks to retry, re-run, cancel, or trigger something, redirect them to <#CBK9GC5FY|devops-infra> with a summary of what's needed and the direct link to the failed run

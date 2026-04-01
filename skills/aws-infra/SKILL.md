@@ -552,9 +552,13 @@ This skill MUST NOT run any command that modifies AWS state.
 - `aws tag get-*` — Resource Groups Tagging read
 - `aws sts assume-role`, `aws sts get-caller-identity` — STS session management
 
-If a user asks to change, stop, or delete a resource, explain that this skill
-is read-only and suggest they take the action through their IaC (Pulumi) or
-the AWS console.
+If a user asks to change, stop, or delete a resource, or if your analysis
+reveals an optimization or fix that requires infrastructure changes:
+- Explain that this skill is read-only and cannot make changes.
+- Never provide ready-to-run AWS CLI commands for write operations.
+- Recommend the user validate the findings with the DevOps team in
+  <#CBK9GC5FY|devops-infra> before any action is taken.
+- Only the DevOps team has write permissions on AWS infrastructure.
 
 ### Credential hygiene
 
