@@ -768,7 +768,7 @@ export function markdownToMrkdwn(text: string): string {
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>");
 }
 
-async function fetchThread(
+export async function fetchThread(
   client: WebClient,
   channel: string,
   threadTs: string,
