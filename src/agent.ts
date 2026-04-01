@@ -12,6 +12,7 @@ import {
   createCodingTools,
 } from "@mariozechner/pi-coding-agent";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
+import type { ImageContent } from "@mariozechner/pi-ai";
 import type { ICacheStorageComponent } from "@dcl/core-commons";
 import { buildPrompt } from "./prompt.js";
 
@@ -38,6 +39,7 @@ interface AgentConfig {
 
 export interface RunOptions {
   threadContent: string;
+  images?: ImageContent[];
   dryRun?: boolean;
   triggeredBy?: string;
   events?: EventEmitter;
@@ -144,7 +146,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     throw new Error("Agent not initialized — call initAgent() first");
   }
 
-  const { threadContent, dryRun, triggeredBy, events, memoryContext, customTools, quiet } = options;
+  const { threadContent, images, dryRun, triggeredBy, events, memoryContext, customTools, quiet } = options;
   const effectiveModelId = options.model || modelId;
   const sessionManager = SessionManager.inMemory();
 
@@ -194,7 +196,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
       console.log("[agent] prompt:", prompt.slice(0, 200));
     }
     console.log("[agent] model:", effectiveModelId);
-    await session.prompt(prompt);
+    await session.prompt(prompt, images && images.length > 0 ? { images } : undefined);
 
     if (!quiet) {
       const messageCount = session.messages.length;

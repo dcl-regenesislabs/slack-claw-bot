@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
+import type { ImageContent } from "@mariozechner/pi-ai";
 import type { Config } from "./config.js";
 import { runAgent, syncAuth, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler, DmScheduler } from "./concurrency.js";
@@ -39,6 +40,7 @@ const pendingResponses = new Map<string, string>();
 const LARGE_RESPONSE_THRESHOLD = 3000;
 const TEXT_MIMETYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
 const TEXT_EXTENSIONS = new Set([".md", ".txt"]);
+const IMAGE_MIMETYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 // Re-export so existing consumers (tests, etc.) aren't broken.
 export { extractEventText } from "./slack-utils.js";
@@ -226,7 +228,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     const submission = scheduler.submit(threadTs, async () => {
       await react("hourglass_flowing_sand");
 
-      let threadContent = await fetchThread(client, event.channel, threadTs);
+      let { content: threadContent, images: threadImages } = await fetchThread(client, event.channel, threadTs);
       if (skill === "schedule") {
         threadContent = `[Schedule Context] channel: ${event.channel}\n\n${threadContent}`;
       }
@@ -245,6 +247,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       const customTools = createSlackTools(client);
       const { text: response, cost, tokens, error } = await runAgent({
         threadContent,
+        images: threadImages.length > 0 ? threadImages : undefined,
         triggeredBy: `${userName} (slack_user_id: ${event.user ?? "unknown"})`,
         model,
         memoryContext: memoryContext ?? undefined,
@@ -382,7 +385,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       const submission = scheduler.submit(threadTs, async () => {
         await react("hourglass_flowing_sand");
 
-        let threadContent = await fetchThread(client, e.channel, threadTs);
+        let { content: threadContent, images: threadImages } = await fetchThread(client, e.channel, threadTs);
         if (skill === "schedule") {
           threadContent = `[Schedule Context] channel: ${e.channel}\n\n${threadContent}`;
         }
@@ -401,6 +404,7 @@ export async function startSlackBot(config: Config): Promise<void> {
         const customTools = createSlackTools(client);
         const { text: response, cost, tokens, error } = await runAgent({
           threadContent,
+          images: threadImages.length > 0 ? threadImages : undefined,
           triggeredBy: `${userName} (slack_user_id: ${e.user ?? "unknown"})`,
           model,
           memoryContext: memoryContext ?? undefined,
@@ -511,7 +515,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     const { done, position } = dmScheduler.submit(e.user, async () => {
       await react("hourglass_flowing_sand");
 
-      let threadContent = await fetchThread(client, e.channel, threadTs);
+      let { content: threadContent, images: threadImages } = await fetchThread(client, e.channel, threadTs);
       if (skill === "schedule") {
         threadContent = `[Schedule Context] channel: ${e.channel}\n\n${threadContent}`;
       }
@@ -528,7 +532,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       const memoryContext = rawContext ? truncateForInjection(rawContext) : null;
 
       const customTools = createSlackTools(client);
-      const { text: response, cost, tokens, error } = await runAgent({ threadContent, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools, quiet: true });
+      const { text: response, cost, tokens, error } = await runAgent({ threadContent, images: threadImages.length > 0 ? threadImages : undefined, triggeredBy: userName, model, memoryContext: memoryContext ?? undefined, customTools, quiet: true });
       await syncAuth();
       if (skill === "schedule") {
         patchScheduleChannels(e.channel);
@@ -762,7 +766,7 @@ async function fetchThread(
   client: WebClient,
   channel: string,
   threadTs: string,
-): Promise<string> {
+): Promise<{ content: string; images: ImageContent[] }> {
   const reply = await client.conversations.replies({
     channel,
     ts: threadTs,
@@ -781,6 +785,8 @@ async function fetchThread(
     }),
   );
 
+  const allImages: ImageContent[] = [];
+
   const parts = await Promise.all(
     messages.map(async (m) => {
       const anyM = m as any;
@@ -796,6 +802,12 @@ async function fetchThread(
           if (fileContent) {
             content += `\n[Attached file: ${file.name}]\n${fileContent}\n[/Attached file]`;
           }
+        } else if (IMAGE_MIMETYPES.has(file.mimetype)) {
+          const imageData = await downloadImageFile(file.url_private_download ?? file.url_private);
+          if (imageData) {
+            allImages.push({ type: "image", data: imageData, mimeType: file.mimetype });
+            content += `\n[Attached image: ${file.name ?? "image"}]`;
+          }
         }
       }
 
@@ -803,7 +815,7 @@ async function fetchThread(
     }),
   );
 
-  return parts.join("\n");
+  return { content: parts.join("\n"), images: allImages };
 }
 
 async function downloadTextFile(url: string): Promise<string> {
@@ -811,6 +823,17 @@ async function downloadTextFile(url: string): Promise<string> {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${botToken}` } });
     if (!res.ok) return "";
     return res.text();
+  } catch {
+    return "";
+  }
+}
+
+async function downloadImageFile(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${botToken}` } });
+    if (!res.ok) return "";
+    const buffer = await res.arrayBuffer();
+    return Buffer.from(buffer).toString("base64");
   } catch {
     return "";
   }
