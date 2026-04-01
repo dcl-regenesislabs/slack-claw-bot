@@ -228,7 +228,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     const submission = scheduler.submit(threadTs, async () => {
       await react("hourglass_flowing_sand");
 
-      let { content: threadContent, images: threadImages } = await fetchThread(client, event.channel, threadTs);
+      const { content: threadContent, images: threadImages } = await fetchThread(client, event.channel, threadTs);
       if (skill === "schedule") {
         threadContent = `[Schedule Context] channel: ${event.channel}\n\n${threadContent}`;
       }
@@ -385,7 +385,7 @@ export async function startSlackBot(config: Config): Promise<void> {
       const submission = scheduler.submit(threadTs, async () => {
         await react("hourglass_flowing_sand");
 
-        let { content: threadContent, images: threadImages } = await fetchThread(client, e.channel, threadTs);
+        const { content: threadContent, images: threadImages } = await fetchThread(client, e.channel, threadTs);
         if (skill === "schedule") {
           threadContent = `[Schedule Context] channel: ${e.channel}\n\n${threadContent}`;
         }
@@ -515,7 +515,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     const { done, position } = dmScheduler.submit(e.user, async () => {
       await react("hourglass_flowing_sand");
 
-      let { content: threadContent, images: threadImages } = await fetchThread(client, e.channel, threadTs);
+      const { content: threadContent, images: threadImages } = await fetchThread(client, e.channel, threadTs);
       if (skill === "schedule") {
         threadContent = `[Schedule Context] channel: ${e.channel}\n\n${threadContent}`;
       }
