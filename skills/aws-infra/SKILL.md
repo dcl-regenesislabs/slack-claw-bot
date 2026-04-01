@@ -389,16 +389,20 @@ CLUSTERS=$(aws ecs list-clusters --query 'clusterArns[]' --output text)
 for cluster in $CLUSTERS; do
   CLUSTER_NAME="${cluster##*/}"
   echo "=== Cluster: $CLUSTER_NAME ==="
+  # list-services paginates automatically (default page size: 10)
   SVCS=$(aws ecs list-services --cluster "$cluster" --query 'serviceArns[]' --output text)
   [ -z "$SVCS" ] && continue
-  echo "$SVCS" | xargs -n 10 aws ecs describe-services \
+  echo "$SVCS" | tr '\t' '\n' | xargs -n 10 aws ecs describe-services \
     --cluster "$cluster" --services \
     --query 'services[].{Name:serviceName,Running:runningCount,Desired:desiredCount,Status:status}' \
     --output json
 done
 ```
 
-`xargs -n 10` batches describe-services calls (API limit: 10 per call).
+AWS CLI auto-paginates by default — do NOT pass `--max-items`, `--no-paginate`,
+or `--page-size` unless you have a specific reason. The CLI handles `nextToken`
+internally and merges all pages. `xargs -n 10` batches describe-services
+(API limit: 10 per call).
 
 ### S3 — buckets
 
@@ -560,6 +564,37 @@ reveals an optimization or fix that requires infrastructure changes:
   <#CBK9GC5FY|devops-infra> before any action is taken.
 - Only the DevOps team has write permissions on AWS infrastructure.
 
+### Recommendation principles — DevOps before cost
+
+When suggesting optimizations, always apply DevOps best practices first and
+cost reduction second. Never recommend the cheapest option if it compromises
+observability, reliability, or environment parity. Specifically:
+
+- **Never recommend disabling observability outright.** Monitoring, logging,
+  and tracing exist for a reason. Instead of "disable X", recommend reducing
+  resolution, retention, or scope. For example: switch from enhanced (1-min)
+  to standard (5-min) Container Insights, reduce log retention to 7-14 days
+  in non-prod, or enable metrics selectively on active services only.
+- **Respect environment parity.** If PRD has a capability (Container Insights,
+  log groups, alarms), non-prod should too — but proportional to usage, not
+  a full mirror. The principle is: non-prod observability should be
+  proportional to non-prod traffic and usage.
+- **Prefer tuning over removing.** Reduce granularity, shorten retention,
+  filter noisy endpoints, drop per-task metrics in favor of per-service
+  aggregates. These preserve the safety net while cutting cost.
+- **Always present the middle ground first.** Lead with the balanced option
+  that preserves best practices, then mention the aggressive option as an
+  alternative with its tradeoffs clearly stated. Never lead with "just
+  disable it" — even if the user asks for maximum savings.
+- **Flag operational risk.** If a cost-saving action reduces incident
+  detection capability, debugging visibility, or recovery speed, say so
+  explicitly. Example: "Disabling CI on STG saves $144/month but removes
+  the ability to catch memory leaks before PRD."
+- **Log retention is not optional.** Every log group should have a retention
+  policy. Infinite retention is waste, not caution. Recommend 30 days for
+  PRD, 7-14 days for non-prod as defaults, longer only if compliance
+  requires it.
+
 ### Credential hygiene
 
 - Always call `clear_assumed_role` after completing all queries for a response
@@ -678,6 +713,14 @@ calls, data transfer, and token consumption.
 
 ### Resource Inventory
 
+- **Let the AWS CLI auto-paginate.** The CLI follows `nextToken` automatically
+  and merges all pages into a single result. Do NOT pass `--no-paginate`,
+  `--max-items`, or manually handle `--next-token` unless you have a specific
+  reason (e.g., streaming very large result sets). A missing pagination loop
+  silently drops results — this is a data correctness bug, not a performance
+  issue. Known low page sizes: `ecs list-services` (10), `lambda list-functions`
+  (50), `logs describe-log-groups` (50), `apigateway get-rest-apis` (25).
+  The CLI handles all of these transparently.
 - **Use `--query` (JMESPath) aggressively.** This filters on the AWS API side,
   reducing response size before it hits the network. Always project only the
   fields you need rather than returning full resource descriptions.
