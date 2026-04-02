@@ -373,7 +373,7 @@ export async function startSlackBot(config: Config): Promise<void> {
     const threadTs: string = isAutoReplyChannel ? e.ts : (e.thread_ts || e.ts);
 
     // "status" command — reply with cached rate limits, no agent needed
-    if (/^\s*status\s*$/i.test(text)) {
+    if (/^\s*status\s*$/i.test(text.replace(/<@[A-Z0-9]+>/g, "").trim())) {
       await say({ text: getStatusMessage(), thread_ts: threadTs });
       return;
     }
