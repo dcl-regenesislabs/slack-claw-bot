@@ -9,7 +9,7 @@ description: Decentraland incident management process — severity classificatio
 
 | Level | GitHub label | Action | Examples |
 |-------|-------------|--------|---------|
-| **SEV-1** | `0-critical` | Escalate to #crash via `/create-incident`. Always hotfix. | Login fails for everyone; client won't launch; teleport completely broken; Marketplace inaccessible |
+| **SEV-1** | `0-critical` | Escalate to #crash via `/create-incident`. Always hotfix. | Login fails for everyone; client won't launch; teleport completely broken; Marketplace inaccessible; uncontrolled retry loop causing excessive network/cost for all users |
 | **SEV-2** | `1-high` | Escalate to #crash via `/create-incident`. Hotfix only if Primary feature affected. | Other users don't see your avatar; voice chat down; emotes not equipping; Marketplace credits not updating |
 | **SEV-3** | `2-medium` | Tracked in #qa-team. Normal release cycle. | Weekly goals tooltip wrong; camera shortcuts broken; backpack category filter off |
 | **SEV-4** | `3-low` | Tracked in #qa-team. Normal release cycle. | Wearable panel misaligned; tooltip copy error |
@@ -54,6 +54,25 @@ GitHub label `3-low` maps to both SEV-4 and SEV-5. If there is zero functional i
 | **Marketplace** | Purchases (user can't buy anything) |
 | **Admin Tools** | Admin Tools |
 | **Creator Tools & Scenes** | Creator Hub not launching, Local Scene Preview, Scene deployments, AssetPacks, Templates, Creating/Publishing Wearables & Emotes, Emotes & Wearables Builder |
+
+### Excessive Resource Usage
+
+Issues where the client silently uses too many resources (network, storage, CPU, battery) for all users without a visibly "broken" feature. These are easy to miss because no single feature stops working, but they can have severe impact on performance, battery, bandwidth, and infrastructure cost.
+
+| Severity | Condition | Examples |
+|----------|-----------|----------|
+| **SEV-1** | Affects all users, grows over time, or causes significant infrastructure cost | Failed analytics events retried indefinitely (e.g. Segment size-limit rejection loop); unbounded network upload draining bandwidth and incurring cost; local database growing without limit; memory leak causing crashes over time; shader or system consuming excessive CPU/GPU for all users |
+| **SEV-2** | Affects a subset of users or is bounded/self-limiting | Excessive polling frequency on a specific screen; background task consuming high CPU/GPU only while a specific panel is open; disk I/O spike limited to a single flow |
+
+**Key signals to watch for:**
+- HTTP 4xx errors in a retry loop (the request will never succeed, but retries keep going)
+- Local storage (SQLite, files) growing without bounds
+- Abnormally high network upload/download that doesn't correspond to user activity
+- Steadily increasing memory usage that doesn't stabilize (memory leak)
+- CPU or GPU running at unexpectedly high utilization during normal use
+- Constant disk writes to local cache or logs slowing the system
+
+These issues should be treated as **SEV-1 when they affect all users and grow over time** — even if no user-facing feature appears broken.
 
 ### Secondary Categories (SEV-2 tracked in #qa-team, no hotfix)
 
