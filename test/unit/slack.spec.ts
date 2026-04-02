@@ -1,4 +1,5 @@
-import { markdownToMrkdwn, detectSkill, extractFileUploadTag, shouldHandleMessage, extractEventText, formatEta, SKILL_MODELS } from '../../src/slack.js'
+import { markdownToMrkdwn, detectSkill, extractFileUploadTag, shouldHandleMessage, extractEventText, formatEta, formatRateLimits, SKILL_MODELS } from '../../src/slack.js'
+import type { RateLimitData } from '../../src/agent.js'
 
 describe('detectSkill', () => {
   it('detects "mr review" as pr-review', () => {
@@ -115,6 +116,14 @@ describe('detectSkill', () => {
 
   it('does not trigger aws-infra on "billing address update"', () => {
     expect(detectSkill('update the billing address on the invoice')).not.toBe('aws-infra')
+  })
+
+  it('routes "rate limit" to general (handled by status command instead)', () => {
+    expect(detectSkill('what are the rate limits')).toBe('general')
+  })
+
+  it('routes "usage" to general (handled by status command instead)', () => {
+    expect(detectSkill('check usage')).toBe('general')
   })
 
   it('returns general for unrelated text', () => {
@@ -481,6 +490,73 @@ describe('formatEta', () => {
 
   it('returns 0s for zero', () => {
     expect(formatEta(0)).toBe('0s')
+  })
+})
+
+describe('formatRateLimits', () => {
+  const baseLimits: RateLimitData = {
+    status: 200,
+    model: 'claude-sonnet-4-6',
+    limits: {
+      'anthropic-ratelimit-requests-limit': '50',
+      'anthropic-ratelimit-requests-remaining': '48',
+      'anthropic-ratelimit-requests-reset': '2026-04-02T16:05:00Z',
+      'anthropic-ratelimit-tokens-limit': '40000',
+      'anthropic-ratelimit-tokens-remaining': '39800',
+      'anthropic-ratelimit-tokens-reset': '2026-04-02T16:05:00Z',
+      'anthropic-ratelimit-input-tokens-limit': '1000000',
+      'anthropic-ratelimit-input-tokens-remaining': '987234',
+      'anthropic-ratelimit-input-tokens-reset': '2026-04-03T00:00:00Z',
+      'anthropic-ratelimit-output-tokens-limit': '200000',
+      'anthropic-ratelimit-output-tokens-remaining': '196100',
+      'anthropic-ratelimit-output-tokens-reset': '2026-04-03T00:00:00Z',
+    }
+  }
+
+  it('includes model name in header', () => {
+    const result = formatRateLimits(baseLimits)
+    expect(result).toContain('`claude-sonnet-4-6`')
+  })
+
+  it('formats all four rate limit groups', () => {
+    const result = formatRateLimits(baseLimits)
+    expect(result).toContain('*Requests / min*')
+    expect(result).toContain('*Tokens / min*')
+    expect(result).toContain('*Input tokens / day*')
+    expect(result).toContain('*Output tokens / day*')
+  })
+
+  it('formats numbers with comma separators', () => {
+    const result = formatRateLimits(baseLimits)
+    expect(result).toContain('1,000,000')
+    expect(result).toContain('987,234')
+  })
+
+  it('shows rate-limited warning on 429', () => {
+    const data: RateLimitData = {
+      status: 429,
+      model: 'claude-sonnet-4-6',
+      limits: { 'retry-after': '30' }
+    }
+    const result = formatRateLimits(data)
+    expect(result).toContain('rate-limited')
+    expect(result).toContain('30s')
+  })
+
+  it('omits groups with no data', () => {
+    const data: RateLimitData = {
+      status: 200,
+      model: 'claude-sonnet-4-6',
+      limits: {
+        'anthropic-ratelimit-requests-limit': '50',
+        'anthropic-ratelimit-requests-remaining': '48',
+        'anthropic-ratelimit-requests-reset': '2026-04-02T16:05:00Z',
+      }
+    }
+    const result = formatRateLimits(data)
+    expect(result).toContain('*Requests / min*')
+    expect(result).not.toContain('*Tokens / min*')
+    expect(result).not.toContain('*Input tokens / day*')
   })
 })
 

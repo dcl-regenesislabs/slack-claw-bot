@@ -280,3 +280,43 @@ function computeUsage(messages: any[]): { cost: number; tokens: number } {
 
   return { cost, tokens };
 }
+
+export interface RateLimitData {
+  status: number;
+  model: string;
+  limits: Record<string, string>;
+}
+
+export async function fetchRateLimits(): Promise<RateLimitData> {
+  if (!existsSync(authPath)) {
+    throw new Error("No .auth.json found");
+  }
+  const auth = JSON.parse(readFileSync(authPath, "utf-8"));
+  const token = auth?.anthropic?.access;
+  if (!token) {
+    throw new Error("No Anthropic access token in .auth.json");
+  }
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: modelId,
+      max_tokens: 1,
+      messages: [{ role: "user", content: "hi" }],
+    }),
+  });
+
+  const limits: Record<string, string> = {};
+  for (const [key, value] of response.headers.entries()) {
+    if (key.startsWith("anthropic-ratelimit") || key === "retry-after" || key === "x-request-id") {
+      limits[key] = value;
+    }
+  }
+
+  return { status: response.status, model: modelId, limits };
+}

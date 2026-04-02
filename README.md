@@ -17,7 +17,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Triggers manual asset bundle reconversion via opscli (restricted to authorized users)
 - Reviews release announcements — traces downstream dependencies via `@dcl/jarvis` manifests and tags affected teams
 - Queries AWS costs, spending trends, anomalies, and resource inventory across all accounts via cross-account read-only access
-- Shows current Anthropic API rate limits, remaining quota, and reset times (e.g. `@bot what are your current rate limits?`)
+- Shows current Anthropic API rate limits and remaining quota via `@bot status` (no agent bootstrapping — responds instantly)
 
 ## Prerequisites
 
@@ -127,6 +127,6 @@ test/
   integration/            Integration tests (Jest + localFetch)
 prompts/
   system.md               System prompt for the Claude agent
-skills/                   Agent skill definitions (create-issue, credits-unban, github, mobile-project, plan, pr-review, release-review, repos, shape, triage, usage)
+skills/                   Agent skill definitions (create-issue, credits-unban, github, mobile-project, plan, pr-review, release-review, repos, shape, triage)
 ai-gents/                 Announcement templates and internal docs for new skills
 ```
