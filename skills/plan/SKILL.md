@@ -7,14 +7,17 @@ description: Plan full-stack or backend features end-to-end across Decentraland 
 
 This skill provides access to LLM-optimized snapshots of all Decentraland backend and frontend services via the `@dcl/jarvis` package.
 
-## CRITICAL: Never answer from general knowledge
+## CRITICAL: Never answer from general knowledge — follow rounds IN ORDER
 
 Do **NOT** answer based on prior knowledge. The triage workflow below is mandatory for every question.
 
-**Pre-response checklist** (complete all before writing your answer):
-- [ ] Read `index.yaml` and `graph.yaml`
-- [ ] Read `{name}.yaml` for every candidate
-- [ ] Cloned every candidate repo and read `ai-agent-context`, `README.md`, OpenAPI spec, `src/`, and DB schema
+**You MUST complete Rounds 1, 2, and 3 BEFORE starting Round 4.** Round 4 (sub-agents) depends on the repos being cloned and the candidate list being stable. Do NOT skip ahead to sub-agents.
+
+**Pre-response checklist** (complete all IN ORDER before writing your answer):
+- [ ] **Round 1**: Read `index.yaml` and `graph.yaml` — identify candidate services
+- [ ] **Round 2**: Clone every candidate repo and read `ai-agent-context`, `README.md`, OpenAPI spec, `src/`, and DB schema
+- [ ] **Round 3**: Repeat until no new candidates are found
+- [ ] **Round 4**: ONLY AFTER Rounds 1-3 are complete — run compound sub-agents on the cloned repos
 - [ ] For implementation plans: confirmed whether an existing service/dApp covers the domain, or justified why a new one is needed
 
 **HARD RULE — extend existing before creating new:**
@@ -103,6 +106,108 @@ After reading: add any newly discovered services to the candidate list and re-ch
 ### Round 3+ — Repeat until stable
 
 Repeat Round 2 for each new candidate. Stop when a full pass adds no new candidates.
+
+### Round 4 — Deep research with compound sub-agents (REQUIRES Rounds 1-3 complete)
+
+**PREREQUISITE**: You must have already completed Rounds 1-3 before this step. Candidate repos must be cloned in `tmp/`. If you haven't read `index.yaml`, `graph.yaml`, cloned repos, and read their docs — go back and do that first.
+
+Use the `subagent` tool to run targeted research on each candidate repo. Pass the repo path as `cwd`.
+
+#### 4a. Local research (run in parallel for each candidate repo)
+
+```
+subagent({
+  cwd: "tmp/<repo>",
+  tasks: [
+    {
+      agent: "repo-research-analyst",
+      task: "Scope: architecture, patterns. Research this repository for implementing <feature>. Find architecture patterns, conventions, existing implementations similar to this feature, build/test commands, and key files that will need changes."
+    },
+    {
+      agent: "learnings-researcher",
+      task: "Search docs/solutions/ for past learnings related to: <feature>. Return relevant gotchas, patterns, and prevention guidance."
+    }
+  ]
+})
+```
+
+#### 4b. External research (conditional)
+
+Run external research sub-agents only when:
+- The feature involves security, payments, external APIs, privacy, or migrations
+- The codebase lacks relevant local patterns (fewer than 3 direct examples)
+- The technology layer is absent or thin in the candidate repos
+
+Skip when the codebase already shows strong local patterns and the approach is clear.
+
+```
+subagent({
+  cwd: "tmp/<repo>",
+  tasks: [
+    {
+      agent: "best-practices-researcher",
+      task: "Research best practices for: <feature>. Check for current industry standards, official documentation, and common pitfalls."
+    },
+    {
+      agent: "framework-docs-researcher",
+      task: "Gather documentation for the frameworks/libraries involved in: <feature>. Find version-specific constraints, deprecations, and implementation patterns."
+    }
+  ]
+})
+```
+
+#### 4c. Flow analysis (for non-trivial plans)
+
+For features that involve user flows, state transitions, or cross-service handoffs:
+
+```
+subagent({
+  cwd: "tmp/<repo>",
+  tasks: [
+    {
+      agent: "spec-flow-analyzer",
+      task: "Analyze this feature for completeness: <feature>. Map all user flows, identify edge cases, find gaps in requirements, and formulate critical questions. Research findings: <summary of 4a/4b results>"
+    }
+  ]
+})
+```
+
+#### 4d. Consolidate research
+
+Before writing the final report, consolidate ALL findings from sub-agents and jarvis triage:
+- Relevant file paths from repo research
+- Institutional learnings and gotchas
+- External best practices (if gathered)
+- Edge cases and flow gaps (if analyzed)
+- Constraints that should shape the plan
+
+Incorporate these findings into the Implementation Plan sections below.
+
+### Round 5 — Confidence check and plan strengthening
+
+After writing the initial plan (Final Report below), evaluate whether any sections need strengthening. Score each plan section for confidence gaps:
+
+For each section, check:
+- **Architecture Decision**: Are decisions stated without rationale? Are tradeoffs unexplored?
+- **Implementation Components**: Are file paths missing? Is dependency order unclear?
+- **Data Flow Diagrams**: Are error paths missing? Are cross-service interactions incomplete?
+- **Testing Strategy**: Are edge cases and error paths covered? Are integration scenarios included?
+- **Deployment Notes**: Are rollout risks addressed? Is rollback plan concrete?
+
+If 2+ sections have gaps, run targeted sub-agents to strengthen them:
+
+| Weak section | Agent to run |
+|-------------|-------------|
+| Architecture Decision | `architecture-strategist` |
+| Implementation Components | `pattern-recognition-specialist` |
+| Data Flow / cross-service | `spec-flow-analyzer` |
+| Testing Strategy | `spec-flow-analyzer` |
+| Security concerns | `security-sentinel` |
+| Data migrations | `data-integrity-guardian` |
+| Deployment / rollout | `deployment-verification-agent` |
+| Performance concerns | `performance-oracle` |
+
+Run only the agents needed (max 3-4 total). Update the plan with their findings — strengthen rationale, add missing edge cases, tighten verification — but do not rewrite the entire plan.
 
 ### Final report
 
