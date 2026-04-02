@@ -17,6 +17,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Triggers manual asset bundle reconversion via opscli (restricted to authorized users)
 - Reviews release announcements — traces downstream dependencies via `@dcl/jarvis` manifests and tags affected teams
 - Queries AWS costs, spending trends, anomalies, and resource inventory across all accounts via cross-account read-only access
+- Shows cached Anthropic API rate limits via `@bot status` (no agent needed — reads from last API response). Automatically warns in responses when usage exceeds 98%.
 
 ## Prerequisites
 
