@@ -67,6 +67,111 @@ let modelId: string;
 let redisComponent: ICacheStorageComponent | null = null;
 let lastAuthSnapshot: string | null = null;
 
+export interface RateLimitSnapshot {
+  utilization5h?: number;
+  status5h?: string;
+  reset5h?: string;
+  utilization7d?: number;
+  status7d?: string;
+  reset7d?: string;
+  overageStatus?: string;
+  overageReason?: string;
+  timestamp: string;
+}
+
+let lastRateLimits: RateLimitSnapshot | null = null;
+
+export function getLastRateLimits(): RateLimitSnapshot | null {
+  return lastRateLimits;
+}
+
+function fmtPct(n: number): string {
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+function fmtReset(epoch: string): string {
+  return new Date(parseInt(epoch, 10) * 1000).toISOString();
+}
+
+export function getStatusMessage(): string {
+  if (!lastRateLimits) {
+    return "No rate limit data available yet — the bot needs to handle at least one request first.";
+  }
+
+  const r = lastRateLimits;
+  const lines: string[] = [`*Anthropic API — Rate Limits* (model: \`${modelId}\`)`];
+  lines.push(`_Last updated: ${r.timestamp}_`);
+
+  if (r.utilization5h !== undefined) {
+    const icon = r.status5h === "allowed" ? ":white_check_mark:" : ":warning:";
+    lines.push(`\n*5-hour window* ${icon}`);
+    lines.push(`• Usage: ${fmtPct(r.utilization5h)} | Status: ${r.status5h} | Resets: ${fmtReset(r.reset5h!)}`);
+  }
+
+  if (r.utilization7d !== undefined) {
+    const icon = r.status7d === "allowed" ? ":white_check_mark:" : ":warning:";
+    lines.push(`\n*7-day window* ${icon}`);
+    lines.push(`• Usage: ${fmtPct(r.utilization7d)} | Status: ${r.status7d} | Resets: ${fmtReset(r.reset7d!)}`);
+  }
+
+  if (r.overageStatus) {
+    lines.push(`\n*Overage*: ${r.overageStatus}${r.overageReason ? ` (${r.overageReason.replace(/_/g, " ")})` : ""}`);
+  }
+
+  return lines.join("\n");
+}
+
+const RATE_LIMIT_WARNING_THRESHOLD = 0.98;
+
+function installRateLimitInterceptor(): void {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
+    const response = await originalFetch(input, init);
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes("api.anthropic.com")) {
+      const u5h = response.headers.get("anthropic-ratelimit-unified-5h-utilization");
+      const u7d = response.headers.get("anthropic-ratelimit-unified-7d-utilization");
+      if (u5h || u7d) {
+        lastRateLimits = {
+          utilization5h: u5h ? parseFloat(u5h) : undefined,
+          status5h: response.headers.get("anthropic-ratelimit-unified-5h-status") ?? undefined,
+          reset5h: response.headers.get("anthropic-ratelimit-unified-5h-reset") ?? undefined,
+          utilization7d: u7d ? parseFloat(u7d) : undefined,
+          status7d: response.headers.get("anthropic-ratelimit-unified-7d-status") ?? undefined,
+          reset7d: response.headers.get("anthropic-ratelimit-unified-7d-reset") ?? undefined,
+          overageStatus: response.headers.get("anthropic-ratelimit-unified-overage-status") ?? undefined,
+          overageReason: response.headers.get("anthropic-ratelimit-unified-overage-disabled-reason") ?? undefined,
+          timestamp: new Date().toISOString(),
+        };
+        console.log(`[agent] rate limits — 5h: ${(lastRateLimits.utilization5h! * 100).toFixed(1)}% (${lastRateLimits.status5h}), 7d: ${(lastRateLimits.utilization7d! * 100).toFixed(1)}% (${lastRateLimits.status7d})`);
+      }
+    }
+    return response;
+  } as typeof globalThis.fetch;
+}
+
+/** @internal — exposed for testing */
+export function _setLastRateLimits(snapshot: RateLimitSnapshot | null): void {
+  lastRateLimits = snapshot;
+}
+
+export function buildRateLimitWarning(): string | null {
+  if (!lastRateLimits) return null;
+  const warnings: string[] = [];
+
+  if (lastRateLimits.utilization5h !== undefined && lastRateLimits.utilization5h >= RATE_LIMIT_WARNING_THRESHOLD) {
+    const reset = lastRateLimits.reset5h ? new Date(parseInt(lastRateLimits.reset5h, 10) * 1000).toISOString() : "unknown";
+    warnings.push(`5h window at ${(lastRateLimits.utilization5h * 100).toFixed(1)}% — resets ${reset}`);
+  }
+  if (lastRateLimits.utilization7d !== undefined && lastRateLimits.utilization7d >= RATE_LIMIT_WARNING_THRESHOLD) {
+    const reset = lastRateLimits.reset7d ? new Date(parseInt(lastRateLimits.reset7d, 10) * 1000).toISOString() : "unknown";
+    warnings.push(`7d window at ${(lastRateLimits.utilization7d * 100).toFixed(1)}% — resets ${reset}`);
+  }
+
+  if (warnings.length === 0) return null;
+  return `\n\n⚠️ *Approaching rate limit*: ${warnings.join("; ")}`;
+}
+
 const authPath = process.env.NODE_ENV === "production" && existsSync("/data")
   ? "/data/.auth.json"
   : join(projectDir, ".auth.json");
@@ -127,6 +232,7 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   }
 
   authStorage = AuthStorage.create(authPath);
+  installRateLimitInterceptor();
 }
 
 export async function syncAuth(): Promise<void> {
@@ -229,7 +335,8 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
       console.error(`[agent] error detected — code=${error.code} message=${error.message}`);
     }
 
-    return { text, cost, tokens, error: error ?? undefined };
+    const rateLimitWarning = buildRateLimitWarning();
+    return { text: rateLimitWarning ? text + rateLimitWarning : text, cost, tokens, error: error ?? undefined };
   } finally {
     session.dispose();
   }
@@ -281,42 +388,3 @@ function computeUsage(messages: any[]): { cost: number; tokens: number } {
   return { cost, tokens };
 }
 
-export interface RateLimitData {
-  status: number;
-  model: string;
-  limits: Record<string, string>;
-}
-
-export async function fetchRateLimits(): Promise<RateLimitData> {
-  if (!existsSync(authPath)) {
-    throw new Error("No .auth.json found");
-  }
-  const auth = JSON.parse(readFileSync(authPath, "utf-8"));
-  const token = auth?.anthropic?.access;
-  if (!token) {
-    throw new Error("No Anthropic access token in .auth.json");
-  }
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: modelId,
-      max_tokens: 1,
-      messages: [{ role: "user", content: "hi" }],
-    }),
-  });
-
-  const limits: Record<string, string> = {};
-  for (const [key, value] of response.headers.entries()) {
-    if (key.startsWith("anthropic-ratelimit") || key === "retry-after" || key === "x-request-id") {
-      limits[key] = value;
-    }
-  }
-
-  return { status: response.status, model: modelId, limits };
-}

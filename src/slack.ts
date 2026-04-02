@@ -4,7 +4,7 @@ import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { ImageContent } from "@mariozechner/pi-ai";
 import type { Config } from "./config.js";
-import { runAgent, syncAuth, fetchRateLimits, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
+import { runAgent, syncAuth, getStatusMessage, REVIEW_MODEL, PR_URL_PATTERN, MR_URL_PATTERN, REVIEW_KEYWORD_PATTERN } from "./agent.js";
 import { AgentScheduler, DmScheduler } from "./concurrency.js";
 import { createSlackTools } from "./tools/read-slack-thread.js";
 import { extractEventText } from "./slack-utils.js";
@@ -209,16 +209,9 @@ export async function startSlackBot(config: Config): Promise<void> {
       return;
     }
 
-    // "status" command — reply with rate limits directly, no agent needed
+    // "status" command — reply with cached rate limits, no agent needed
     if (/^\s*status\s*$/i.test(text)) {
-      console.log(`[slack] Status request from ${event.user} in ${event.channel}`);
-      try {
-        const data = await fetchRateLimits();
-        await say({ text: formatRateLimits(data), thread_ts: threadTs });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        await say({ text: `Failed to fetch rate limits: ${msg}`, thread_ts: threadTs });
-      }
+      await say({ text: getStatusMessage(), thread_ts: threadTs });
       return;
     }
 
@@ -379,16 +372,9 @@ export async function startSlackBot(config: Config): Promise<void> {
     const text = extractEventText(e);
     const threadTs: string = isAutoReplyChannel ? e.ts : (e.thread_ts || e.ts);
 
-    // "status" command — reply with rate limits directly, no agent needed
+    // "status" command — reply with cached rate limits, no agent needed
     if (/^\s*status\s*$/i.test(text)) {
-      console.log(`[slack] Status request from ${e.user ?? "unknown"} in ${e.channel}`);
-      try {
-        const data = await fetchRateLimits();
-        await say({ text: formatRateLimits(data), thread_ts: threadTs });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        await say({ text: `Failed to fetch rate limits: ${msg}`, thread_ts: threadTs });
-      }
+      await say({ text: getStatusMessage(), thread_ts: threadTs });
       return;
     }
 
@@ -875,40 +861,6 @@ export function formatEta(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const mins = Math.round(seconds / 60);
   return `${mins}min`;
-}
-
-function fmt(n: string): string {
-  return Number(n).toLocaleString("en-US");
-}
-
-export function formatRateLimits(data: import("./agent.js").RateLimitData): string {
-  const h = data.limits;
-  const lines: string[] = [`*Anthropic API — Rate Limits* (model: \`${data.model}\`)`];
-
-  if (data.status === 429) {
-    lines.push("", `*:warning: Currently rate-limited*`);
-    if (h["retry-after"]) lines.push(`Retry after: ${h["retry-after"]}s`);
-    lines.push("");
-  }
-
-  const groups: Array<{ title: string; prefix: string }> = [
-    { title: "Requests / min", prefix: "anthropic-ratelimit-requests" },
-    { title: "Tokens / min", prefix: "anthropic-ratelimit-tokens" },
-    { title: "Input tokens / day", prefix: "anthropic-ratelimit-input-tokens" },
-    { title: "Output tokens / day", prefix: "anthropic-ratelimit-output-tokens" },
-  ];
-
-  for (const { title, prefix } of groups) {
-    const limit = h[`${prefix}-limit`];
-    const remaining = h[`${prefix}-remaining`];
-    const reset = h[`${prefix}-reset`];
-    if (limit || remaining) {
-      lines.push(`\n*${title}*`);
-      lines.push(`• Limit: ${fmt(limit)} | Remaining: ${fmt(remaining)} | Resets: ${reset}`);
-    }
-  }
-
-  return lines.join("\n");
 }
 
 export function detectSkill(text: string): string {
