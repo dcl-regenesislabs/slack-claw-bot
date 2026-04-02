@@ -17,7 +17,7 @@ import {
 const MAX_CONCURRENCY = 4;
 const AGENT_TIMEOUT_MS = 7 * 60 * 1000; // 7 minutes per sub-agent
 
-interface AgentDef {
+export interface AgentDef {
   name: string;
   description: string;
   model: string | undefined;
@@ -26,7 +26,7 @@ interface AgentDef {
   filePath: string;
 }
 
-function discoverAgents(agentsDir: string): AgentDef[] {
+export function discoverAgents(agentsDir: string): AgentDef[] {
   const agents: AgentDef[] = [];
 
   function scanDir(dir: string): void {
@@ -68,7 +68,7 @@ function discoverAgents(agentsDir: string): AgentDef[] {
   return agents;
 }
 
-function resolveModel(
+export function resolveModel(
   agentModel: string | undefined,
   parentModelId: string,
   modelRegistry: ModelRegistry,
@@ -141,7 +141,7 @@ async function runSingleAgent(
   }
 }
 
-async function runWithConcurrency<T>(
+export async function runWithConcurrency<T>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<unknown>,
