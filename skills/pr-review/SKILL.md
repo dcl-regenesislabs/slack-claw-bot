@@ -226,4 +226,5 @@ When reviewing PRs in unity-explorer, also check:
 - **ECS patterns** — Proper component cleanup on removal/entity destroy/world dispose; structural changes must happen last in queries (refs invalidated by archetype moves); systems must be allocation-free in Update
 - **Async** — `SuppressToResultAsync` for detached UniTask flows; prefer `IsCancellationRequested` over `ThrowIfCancellationRequested`; `SafeCancelAndDispose()` for CancellationTokenSource
 - **Logging** — Uses `ReportHub` (not `Debug.Log`); verify correct `ReportCategory`
+- **Nullable Reference Types** — Params, fields, return types, and properties must be annotated (`?`) when they can be null. Flag any null-forgiving operator (`!`) that lacks a justifying comment. Public API signatures should never return `null` without a `?` annotation. Warn if `#nullable disable` is added or if `!` is used to silence warnings instead of fixing the actual nullability.
 - **Tests** — AAA pattern, NUnit + NSubstitute, `UnitySystemTestBase` for ECS system tests
