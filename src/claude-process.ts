@@ -225,8 +225,10 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
   child.stdout.on("data", (chunk: Buffer) => {
     resetNoOutputTimer();
     const text = chunk.toString();
-    for (const line of text.split("\n")) {
-      if (line.trim()) console.log("[claude-raw]", line.trim().slice(0, 500));
+    if (process.env.DEBUG) {
+      for (const line of text.split("\n")) {
+        if (line.trim()) console.log("[claude-raw]", line.trim().slice(0, 500));
+      }
     }
     state.lineBuffer += text;
     flushLines(state, onTextDelta);
@@ -234,7 +236,7 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
 
   child.stderr.on("data", (chunk: Buffer) => {
     const text = chunk.toString();
-    if (text.trim()) {
+    if (process.env.DEBUG && text.trim()) {
       console.log("[claude-stderr]", text.trim().slice(0, 500));
     }
     stderr += text;
@@ -265,7 +267,9 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
   }
 
   const resultText = state.finalResult ?? state.text;
-  console.log(`[claude-parse] finalResult=${state.finalResult?.length ?? "null"} text=${state.text.length} error=${state.error ?? "null"} resultText=${resultText.length}`);
+  if (process.env.DEBUG) {
+    console.log(`[claude-parse] finalResult=${state.finalResult?.length ?? "null"} text=${state.text.length} error=${state.error ?? "null"} resultText=${resultText.length}`);
+  }
 
   return {
     text: resultText,
