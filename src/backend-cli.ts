@@ -61,8 +61,9 @@ export class ClaudeCliBackend implements AgentBackend {
     return this.knownSessions.has(sessionId);
   }
 
-  disposeSession(sessionId: string): void {
-    this.knownSessions.delete(sessionId);
+  disposeSession(_sessionId: string): void {
+    // No-op for CLI backend — Claude CLI manages its own sessions.
+    // We keep knownSessions intact so subsequent messages resume correctly.
   }
 
   private buildEnv(base?: Record<string, string>): Record<string, string> {
