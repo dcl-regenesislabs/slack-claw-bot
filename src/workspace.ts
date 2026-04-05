@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, symlinkSync, readlinkSync, unlinkSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, symlinkSync, readlinkSync, unlinkSync, writeFileSync, readFileSync, readdirSync, cpSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -55,6 +55,24 @@ export function prepareWorkspace(opts: { memoryDir?: string }): string {
     const memorySkills = join(opts.memoryDir, "skills");
     if (existsSync(memorySkills)) {
       ensureSymlink(memorySkills, join(workspaceDir, "memory-skills"));
+    }
+  }
+
+  // Copy skills into .claude/skills/ so Claude CLI discovers them as project-scoped skills
+  const claudeSkillsDir = join(workspaceDir, ".claude", "skills");
+  const skillSources = [
+    join(projectDir, "skills"),
+    ...(opts.memoryDir ? [join(opts.memoryDir, "skills")] : []),
+  ];
+  for (const source of skillSources) {
+    if (!existsSync(source)) continue;
+    for (const entry of readdirSync(source, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const skillFile = join(source, entry.name, "SKILL.md");
+      if (!existsSync(skillFile)) continue;
+      const destDir = join(claudeSkillsDir, entry.name);
+      mkdirSync(destDir, { recursive: true });
+      cpSync(skillFile, join(destDir, "SKILL.md"));
     }
   }
 
