@@ -111,6 +111,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   }
 
   const systemPrompt = isResume ? undefined : buildFullSystemPrompt(memoryContent);
+  if (process.env.DEBUG && systemPrompt) {
+    console.log(`[debug] system prompt (${systemPrompt.length} chars):\n${systemPrompt.slice(0, 500)}...`);
+  }
 
   let prompt: string;
   if (isResume) {
@@ -129,6 +132,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   }
 
   console.log(`[agent] Running (model: ${modelId}, resume: ${isResume}, prompt: ${prompt.slice(0, 200)})`);
+  if (process.env.DEBUG) {
+    console.log(`[debug] full prompt (${prompt.length} chars):\n${prompt}`);
+  }
   const result = await backend.run({
     prompt,
     model: modelId,
