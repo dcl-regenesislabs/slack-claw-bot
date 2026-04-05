@@ -86,6 +86,14 @@ function handleParsedLine(
     state.error = parsed.error;
   }
 
+  // Detect tool use from assistant messages (type: "assistant" with content[].type === "tool_use")
+  if (type === "assistant" && isRecord(parsed.message)) {
+    const content = (parsed.message as Record<string, unknown>).content;
+    if (Array.isArray(content) && content.some((c) => isRecord(c) && c.type === "tool_use")) {
+      state.usedTools = true;
+    }
+  }
+
   if (type === "result") {
     if (parsed.is_error === true && typeof parsed.result === "string") {
       state.error = state.error || parsed.result.trim();
@@ -216,12 +224,20 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
 
   child.stdout.on("data", (chunk: Buffer) => {
     resetNoOutputTimer();
-    state.lineBuffer += chunk.toString();
+    const text = chunk.toString();
+    for (const line of text.split("\n")) {
+      if (line.trim()) console.log("[claude-raw]", line.trim().slice(0, 500));
+    }
+    state.lineBuffer += text;
     flushLines(state, onTextDelta);
   });
 
   child.stderr.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString();
+    const text = chunk.toString();
+    if (text.trim()) {
+      console.log("[claude-stderr]", text.trim().slice(0, 500));
+    }
+    stderr += text;
   });
 
   const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
@@ -249,6 +265,7 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
   }
 
   const resultText = state.finalResult ?? state.text;
+  console.log(`[claude-parse] finalResult=${state.finalResult?.length ?? "null"} text=${state.text.length} error=${state.error ?? "null"} resultText=${resultText.length}`);
 
   return {
     text: resultText,

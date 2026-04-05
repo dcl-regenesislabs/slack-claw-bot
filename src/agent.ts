@@ -151,14 +151,20 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
   const rawResponse = result.text;
   const hasSaveMarker = rawResponse.includes(SAVE_MARKER);
-  const shouldSave = result.usedTools || hasSaveMarker;
+  // Always save memory for now — the save prompt decides whether to actually write anything.
+  // The [SAVE] marker and tool-use detection are kept for future optimization.
+  const shouldSave = true;
 
+  if (process.env.DEBUG) {
+    console.log(`[debug] usedTools=${result.usedTools} hasSaveMarker=${hasSaveMarker} shouldSave=${shouldSave}`);
+  }
   if (!shouldSave) {
     console.log("[agent] Skipping memory save — no tools used and no [SAVE] marker");
     backend.disposeSession?.(sessionId);
   }
 
   const response = rawResponse.replace(/\n?\[SAVE\]\s*$/g, "").trimEnd();
+  console.log(`[agent] rawResponse (${rawResponse.length} chars): "${rawResponse.slice(0, 200)}"`);
 
   const done = shouldSave
     ? saveMemory(sessionId, modelId, options.userId, options.username)
@@ -186,18 +192,26 @@ async function saveMemory(
   if (!memoryDir) return;
 
   const savePrompt = buildMemorySavePrompt(memoryDir, userId, username);
+  console.log("[memory] Starting save (session: %s, memoryDir: %s)", sessionId, memoryDir);
+  if (process.env.DEBUG) {
+    console.log(`[debug] save prompt (${savePrompt.length} chars):\n${savePrompt.slice(0, 300)}...`);
+  }
 
   try {
     if (backend.runFollowUp) {
       await backend.runFollowUp(sessionId, savePrompt);
     } else {
-      await backend.run({
+      const saveResult = await backend.run({
         prompt: savePrompt,
         model: modelId,
         sessionId,
         isResume: true,
         cwd: workspaceDir,
       });
+      console.log("[memory] Save response: %s tokens, usedTools=%s", saveResult.tokens, saveResult.usedTools);
+      if (process.env.DEBUG) {
+        console.log(`[debug] save response text:\n${saveResult.text.slice(0, 500)}`);
+      }
     }
   } catch (err) {
     console.error("[agent] Memory save failed:", err);
