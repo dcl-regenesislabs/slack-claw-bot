@@ -68,11 +68,8 @@ export function prepareWorkspace(opts: { memoryDir?: string }): string {
     if (!existsSync(source)) continue;
     for (const entry of readdirSync(source, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const skillFile = join(source, entry.name, "SKILL.md");
-      if (!existsSync(skillFile)) continue;
-      const destDir = join(claudeSkillsDir, entry.name);
-      mkdirSync(destDir, { recursive: true });
-      cpSync(skillFile, join(destDir, "SKILL.md"));
+      if (!existsSync(join(source, entry.name, "SKILL.md"))) continue;
+      cpSync(join(source, entry.name), join(claudeSkillsDir, entry.name), { recursive: true });
     }
   }
 
