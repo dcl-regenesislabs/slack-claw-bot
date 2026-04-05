@@ -19,6 +19,7 @@ export interface ClaudeRunResult {
   sessionId: string;
   usage: { inputTokens: number; outputTokens: number };
   usedTools: boolean;
+  costUsd: number;
 }
 
 const PRICING_PER_MILLION: Record<string, { input: number; output: number }> = {
@@ -46,6 +47,7 @@ interface ParseState {
   usedTools: boolean;
   finalResult: string | undefined;
   error: string | undefined;
+  costUsd: number;
 }
 
 function createParseState(): ParseState {
@@ -58,6 +60,7 @@ function createParseState(): ParseState {
     usedTools: false,
     finalResult: undefined,
     error: undefined,
+    costUsd: 0,
   };
 }
 
@@ -100,6 +103,9 @@ function handleParsedLine(
     }
     if (typeof parsed.result === "string") {
       state.finalResult = parsed.result.trim();
+    }
+    if (typeof parsed.total_cost_usd === "number") {
+      state.costUsd = parsed.total_cost_usd;
     }
     return;
   }
@@ -279,6 +285,7 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
       outputTokens: state.outputTokens,
     },
     usedTools: state.usedTools,
+    costUsd: state.costUsd,
   };
 }
 

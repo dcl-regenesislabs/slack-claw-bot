@@ -92,7 +92,7 @@ export class ClaudeCliBackend implements AgentBackend {
 
     this.knownSessions.add(options.sessionId);
 
-    const cost = estimateCost(options.model, result.usage.inputTokens, result.usage.outputTokens);
+    const cost = result.costUsd || estimateCost(options.model, result.usage.inputTokens, result.usage.outputTokens);
 
     return {
       text: result.text,
