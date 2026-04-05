@@ -22,21 +22,6 @@ export interface ClaudeRunResult {
   costUsd: number;
 }
 
-const PRICING_PER_MILLION: Record<string, { input: number; output: number }> = {
-  "claude-sonnet-4-5": { input: 3, output: 15 },
-  "claude-sonnet-4-6": { input: 3, output: 15 },
-  "claude-opus-4-6": { input: 15, output: 75 },
-  "claude-haiku-4-5": { input: 0.8, output: 4 },
-};
-
-export function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
-  // Try exact match, then prefix match
-  const pricing =
-    PRICING_PER_MILLION[model] ??
-    Object.entries(PRICING_PER_MILLION).find(([key]) => model.startsWith(key))?.[1];
-  if (!pricing) return 0;
-  return (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
-}
 
 interface ParseState {
   lineBuffer: string;

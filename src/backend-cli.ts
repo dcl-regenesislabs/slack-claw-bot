@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AgentBackend, BackendConfig, BackendRunOptions, BackendRunResult } from "./backend.js";
-import { runClaude, estimateCost, SessionExpiredError } from "./claude-process.js";
+import { runClaude, SessionExpiredError } from "./claude-process.js";
 
 // Claude CLI requires UUIDs for session IDs, but Slack uses threadTs (e.g. "1712345678.123456").
 // Derive a deterministic UUID from the threadTs so resume works across calls.
@@ -92,7 +92,7 @@ export class ClaudeCliBackend implements AgentBackend {
 
     this.knownSessions.add(options.sessionId);
 
-    const cost = result.costUsd || estimateCost(options.model, result.usage.inputTokens, result.usage.outputTokens);
+    const cost = result.costUsd;
 
     return {
       text: result.text,
