@@ -27,11 +27,12 @@ try {
 }
 
 await initAgent({
-  anthropicOAuthRefreshToken: config.anthropicOAuthRefreshToken,
+  backend: config.agentBackend,
+  anthropicApiKey: config.anthropicApiKey,
+  anthropicSetupToken: config.anthropicSetupToken,
   githubToken: config.githubToken,
   model: config.model,
-  upstashRedisUrl: config.upstashRedisUrl,
-  upstashRedisToken: config.upstashRedisToken,
+  slackBotToken: config.slackBotToken,
   memoryDir,
 });
 

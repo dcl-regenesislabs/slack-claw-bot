@@ -15,7 +15,9 @@ try {
 }
 
 await initAgent({
-  anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
+  backend: (process.env.AGENT_BACKEND || "cli") as "pi-agent" | "cli",
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+  anthropicSetupToken: process.env.ANTHROPIC_SETUP_TOKEN,
   githubToken: process.env.GITHUB_TOKEN,
   model: process.env.MODEL,
   memoryDir,
