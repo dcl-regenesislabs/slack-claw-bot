@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
-import { initAgent, runAgent, detectReviewModel } from "./agent.js";
+import { initAgent, runAgent, detectReviewModel } from "./agent/index.js";
 import { resolveMemoryDir } from "./memory.js";
 
 const dryRun = process.argv.includes("--dry-run");
@@ -15,7 +15,9 @@ try {
 }
 
 await initAgent({
-  anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
+  backend: (process.env.AGENT_BACKEND || "cli") as "pi-agent" | "cli",
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+  anthropicSetupToken: process.env.ANTHROPIC_SETUP_TOKEN,
   githubToken: process.env.GITHUB_TOKEN,
   model: process.env.MODEL,
   memoryDir,

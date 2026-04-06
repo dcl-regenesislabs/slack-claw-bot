@@ -1,7 +1,7 @@
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
-import { runAgent, syncAuth, detectReviewModel } from "./agent.js";
+import { runAgent, detectReviewModel } from "./agent/index.js";
 import type { FileAttachment } from "./prompt.js";
 import { AgentScheduler } from "./concurrency.js";
 
@@ -59,7 +59,6 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
       });
 
       // Reply to Slack immediately — memory save continues in background
-      await syncAuth();
       await unreact(client, event.channel, event.ts, "rl-bonk-doge");
 
       if (response) {

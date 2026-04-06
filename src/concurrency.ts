@@ -46,7 +46,7 @@ export class AgentScheduler {
       this.threadQueues.set(threadId, queue);
     }
     return new Promise<void>((resolve, reject) => {
-      queue!.push(async () => {
+      queue.push(async () => {
         try {
           await work();
           resolve();
@@ -67,25 +67,11 @@ export class AgentScheduler {
       await work();
     } finally {
       this.running--;
-
-      // Run next queued work for this thread, if any
-      const queue = this.threadQueues.get(threadId);
-      const next = queue?.shift();
-      if (queue?.length === 0) this.threadQueues.delete(threadId);
-
-      if (next) {
-        this.running++;
-        next().finally(() => {
-          this.running--;
-          this.finishThread(threadId);
-        });
-      } else {
-        this.finishThread(threadId);
-      }
+      this.drainThread(threadId);
     }
   }
 
-  private finishThread(threadId: string): void {
+  private drainThread(threadId: string): void {
     const queue = this.threadQueues.get(threadId);
     const next = queue?.shift();
     if (queue?.length === 0) this.threadQueues.delete(threadId);
@@ -94,15 +80,22 @@ export class AgentScheduler {
       this.running++;
       next().finally(() => {
         this.running--;
-        this.finishThread(threadId);
+        this.drainThread(threadId);
       });
     } else {
       this.activeThreads.delete(threadId);
-      this.waitQueue.shift()?.();
+      this.releaseWaiter();
+      this.checkDrain();
+    }
+  }
 
-      if (this.activeThreads.size === 0 && this.drainResolvers.length > 0) {
-        for (const resolve of this.drainResolvers.splice(0)) resolve();
-      }
+  private releaseWaiter(): void {
+    this.waitQueue.shift()?.();
+  }
+
+  private checkDrain(): void {
+    if (this.activeThreads.size === 0 && this.drainResolvers.length > 0) {
+      for (const resolve of this.drainResolvers.splice(0)) resolve();
     }
   }
 }

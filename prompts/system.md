@@ -9,8 +9,14 @@
 
 - `gh` operations (issues, PRs, reviews, comments) are always allowed.
 - Do not create pull requests unless using the `reflect` skill to improve your own skills.
-- Protected project files (`src/`, `test/`, `package.json`, `package-lock.json`, `tsconfig.json`, `.auth.json`, `.env*`) cannot be modified — writes are blocked by the tool guard.
+- Protected project files (`src/`, `test/`, `package.json`, `package-lock.json`, `tsconfig.json`, `.auth.json`, `.env*`) cannot be modified.
 - To create runtime skills, write them to `{memory_base_dir}/skills/` and push with the `push-memory` skill. Skills in the memory repo are loaded automatically on each session.
+
+## Skills
+
+You have skill definitions available. Read the relevant skill file before executing a skill-based task:
+- `skills/` — built-in skills in the workspace
+- `memory-skills/` — runtime skills from the memory repo (if available)
 - Never force push or push directly to main/master branches.
 - Always run the project's build and test commands before pushing. Do not push code that fails either step.
 

@@ -16,25 +16,46 @@ npm test          # run tests
 
 ```
 src/
-  index.ts        Entry point — startup, shutdown, git clone
-  slack.ts        Slack event handlers, thread fetching, message formatting
-  agent.ts        Session management, memory loading, pi-coding-agent
-  prompt.ts       Prompt builder (extracted for testability)
-  config.ts       Environment variable loading
-  concurrency.ts  Agent scheduler with queue management and drain
-  memory.ts       Memory loading, save prompt, qmd index, git clone/pull
-  cli.ts          CLI for local testing (REPL + one-shot)
-  health.ts       Health check endpoint
+  index.ts              Entry point — startup, shutdown, git clone
+  agent.ts              Thin dispatcher — orchestrates memory, prompt, backend
+  backend.ts            AgentBackend interface + factory
+  backend-pi-agent.ts   Pi-agent backend (OAuth, SessionManager, guarded tools)
+  backend-cli.ts        Claude CLI backend (spawns `claude` subprocess)
+  claude-process.ts     Low-level CLI spawn + JSONL stream parser
+  workspace.ts          Agent workspace setup (symlinks, CLAUDE.md)
+  slack.ts              Slack event handlers, thread fetching, message formatting
+  prompt.ts             Prompt builder (extracted for testability)
+  config.ts             Environment variable loading
+  concurrency.ts        Agent scheduler with queue management and drain
+  memory.ts             Memory loading, save prompt, qmd index, git clone/pull
+  cli.ts                CLI for local testing (REPL + one-shot)
+  health.ts             Health check endpoint
 ```
 
-- **Agent SDK**: uses `@mariozechner/pi-coding-agent` (pi-agent) to run Claude with tool use
-  - Agent tools: `createGuardedTools(cwd)` provides bash, read, edit, and write tools with write-protection on project source files (`src/`, `test/`, `package.json`, etc.)
-  - Extensions: `before_agent_start` injects memory context into system prompt
-  - **Runtime skills**: the agent can create new skills at runtime by writing to `{memoryDir}/skills/` and pushing via `push-memory`. These are loaded alongside `skills/` on session creation.
-- **Sessions**: each Slack thread maps to a session file (`SessionManager.open()`). Follow-ups resume the session instead of re-processing the full thread.
+### Backend system
+
+The bot supports two agent backends, switchable via `AGENT_BACKEND` env var:
+
+- **`cli`** (default) — spawns `claude -p --output-format stream-json --permission-mode bypassPermissions` as a subprocess. Auth via `ANTHROPIC_SETUP_TOKEN` env var (seeds `~/.claude/.credentials.json` on startup). Prompt sent via stdin, JSONL output parsed for text deltas, session_id, and usage. Session resume via `--resume`. Tool restrictions via CLAUDE.md in the workspace.
+- **`pi-agent`** — uses `@mariozechner/pi-coding-agent` for API calls. Kept as fallback for Codex. Auth: static OAuth token via `ANTHROPIC_API_KEY`. Tools: guarded bash, read, edit, write. Sessions persisted as JSONL files.
+
+Both backends implement `AgentProvider` (defined in `agent/types.ts`). `agent/index.ts` orchestrates the flow: memory load → prompt build → `provider.run()` → memory save.
+
+**Security trade-off:** The pi-agent backend enforces write protection via code-level guards (`isProtectedPath`). The CLI backend relies on CLAUDE.md instructions in the workspace — this is advisory, not enforced at the code level. The workspace isolation (`/tmp/claw-workspace/`) mitigates most risk since Claude can't reach the project source.
+
+### Workspace
+
+Both backends run with `cwd` set to `/tmp/claw-workspace/`, prepared by `workspace.ts` with:
+- Symlinked `skills/` from the project
+- Symlinked `memory-skills/` from the memory repo
+- A `CLAUDE.md` with tool restrictions
+
+### Memory, sessions, concurrency, skills
+
 - **Memory**: persistent memory — `shared/MEMORY.md` (shared), `users/` (per-user), `shared/daily/` (logs). When `MEMORY_REPO` is set, cloned to `/tmp/claw-memory` on startup; otherwise uses a temp dir. Loaded at start of each run, saved via post-task prompt. `qmd` (BM25 keyword search) indexes only `shared/` so user files stay private; the agent searches via `npx qmd --index claw-memory search`. Git-backed repos are committed+pushed by the agent via the `push-memory` skill.
+- **Sessions**: pi-agent backend uses JSONL session files. CLI backend tracks sessions in-memory and resumes via `--resume {sessionId}`.
 - **Concurrency**: bounded agent pool (`MAX_CONCURRENT_AGENTS`) with a queue. `drain()` for graceful shutdown.
-- **Skills**: prompt-based tool definitions in `skills/` (create-issue, create-skill, github, memory-search, mobile-project, pr-review, reflect, repos) + runtime skills in `{memoryDir}/skills/`
+- **Skills**: prompt-based tool definitions in `skills/` + runtime skills in `{memoryDir}/skills/`
 - **System prompt**: `prompts/system.md`
 
 ## Memory directory
@@ -49,14 +70,12 @@ src/
 
 Sessions are ephemeral, stored in `/tmp/claw-sessions/`.
 
-## Auth — OAuth only, never API keys
+## Auth
 
-NEVER use `ANTHROPIC_API_KEY`. All Anthropic auth uses OAuth sessions.
+Two authentication paths depending on the backend:
 
-- `.auth.json` stores `{ refresh, access, expires }` for the OAuth flow
-- Refresh tokens rotate on use — the file is the source of truth
-- The app seeds `.auth.json` from `ANTHROPIC_OAUTH_REFRESH_TOKEN` env var on first run, then persists rotated tokens via Redis
-- The CLI reuses `.auth.json` directly
+- **CLI backend** (default): `ANTHROPIC_SETUP_TOKEN` env var (from `claude setup-token`, ~1 year). Seeds `~/.claude/.credentials.json` on startup. No Redis, no rotation.
+- **pi-agent backend**: `ANTHROPIC_API_KEY` env var or `.auth.json` file. No OAuth rotation, no Redis.
 
 ## Testing
 

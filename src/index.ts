@@ -7,7 +7,7 @@ process.on("uncaughtException", (err) => {
 });
 
 import { loadConfig } from "./config.js";
-import { initAgent } from "./agent.js";
+import { initAgent } from "./agent/index.js";
 import { startSlackBot, createScheduler } from "./slack.js";
 import { startHealthServer } from "./health.js";
 import { resolveMemoryDir } from "./memory.js";
@@ -27,11 +27,12 @@ try {
 }
 
 await initAgent({
-  anthropicOAuthRefreshToken: config.anthropicOAuthRefreshToken,
+  backend: config.agentBackend,
+  anthropicApiKey: config.anthropicApiKey,
+  anthropicSetupToken: config.anthropicSetupToken,
   githubToken: config.githubToken,
   model: config.model,
-  upstashRedisUrl: config.upstashRedisUrl,
-  upstashRedisToken: config.upstashRedisToken,
+  slackBotToken: config.slackBotToken,
   memoryDir,
 });
 

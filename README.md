@@ -17,7 +17,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Node.js 20+
 - A [Slack app](https://api.slack.com/apps) configured for Socket Mode with an `app_mention` event subscription
 - GitHub personal access token
-- Anthropic OAuth refresh token
+- **Either** an Anthropic API key or `.auth.json` from `claude setup-token` (pi-agent backend) **or** the `claude` CLI installed and authenticated (CLI backend)
 
 ## Setup
 
@@ -51,39 +51,40 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `SLACK_BOT_TOKEN` | Yes | Bot token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | Yes | App-level token for Socket Mode (`xapp-...`) |
 | `GITHUB_TOKEN` | Yes | GitHub PAT for `gh` CLI |
-| `ANTHROPIC_OAUTH_REFRESH_TOKEN` | No* | Anthropic OAuth refresh token (see Auth section) |
+| `AGENT_BACKEND` | No | `cli` (default) or `pi-agent`. See Backend section below. |
+| `ANTHROPIC_SETUP_TOKEN` | Yes* | Long-lived token from `claude setup-token` (cli backend) |
+| `ANTHROPIC_API_KEY` | No | Anthropic API key (pi-agent backend only) |
 | `MODEL` | No | Model override (default: `claude-sonnet-4-5`). PR reviews always use `claude-opus-4-6` regardless of this setting. |
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
-| `UPSTASH_REDIS_REST_URL` | No | Upstash Redis URL for OAuth token persistence |
-| `UPSTASH_REDIS_REST_TOKEN` | No | Upstash Redis token |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 | `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |
 
-*\*Required for first-time setup if no `.auth.json` exists yet.*
+*\*Required for the cli backend (default).*
 
-### Authentication (OAuth)
+### Agent backends
 
-All Anthropic auth uses OAuth — there is no API key path. The OAuth flow works like this:
+The bot supports two backends, controlled by `AGENT_BACKEND`:
 
-1. A **refresh token** is exchanged for a short-lived **access token** on each API call.
-2. The SDK may **rotate the refresh token** after use, so the original token becomes invalid.
-3. The current auth state (refresh + access + expiry) is persisted in `.auth.json`.
+#### `cli` (default)
 
-**Getting started:**
+Spawns the `claude` CLI as a subprocess for each agent turn.
 
-- **First run** — set `ANTHROPIC_OAUTH_REFRESH_TOKEN` in `.env`. The bot writes `.auth.json` on startup and uses that going forward.
-- **Existing session** — copy `.auth.json` from another pi-agent or OpenDCL session into the project root. No env var needed.
-- **CLI** — works if `.auth.json` exists (`npm run cli`). No env var needed.
+- Run `claude setup-token` on your local machine to get a long-lived token (~1 year).
+- Set `ANTHROPIC_SETUP_TOKEN` in `.env` — the bot passes it as `CLAUDE_CODE_OAUTH_TOKEN` to the subprocess.
+- Prompt sent via stdin, streamed JSONL output parsed for responses.
+- Session continuity via `--resume`.
+- Tool restrictions enforced via a `CLAUDE.md` file in the agent workspace.
+- Cost estimated from token counts; use `ccusage` for detailed reporting.
 
-**Why `.auth.json` matters:** because refresh tokens rotate on use, the file is the source of truth. The env var is only a seed for first-time setup.
+#### `pi-agent`
 
-**Why Redis:** container restarts lose the file, so the original env var token may already be expired. When Upstash Redis is configured (`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`):
+Uses `@mariozechner/pi-coding-agent` for Anthropic API calls. Kept as a fallback for Codex.
 
-1. **On startup** — the bot loads the latest auth state from Redis instead of the env var.
-2. **After each rotation** — the bot syncs the new state back to Redis.
+- Set `ANTHROPIC_API_KEY` in `.env`.
+- Provides guarded tools (bash, read, edit, write) with write-protection on project source files.
 
-This keeps the bot resilient to restarts without manual token re-provisioning.
+To switch: `AGENT_BACKEND=pi-agent npm start`
 
 ### Memory persistence (git)
 
@@ -108,17 +109,22 @@ Set `HEALTH_PORT=5000` (and expose the port) to enable the health check endpoint
 
 ```
 src/
-  index.ts          Entry point — startup, shutdown, git clone
-  slack.ts          Slack event handlers, thread fetching, message formatting
-  agent.ts          Session management, memory loading, pi-coding-agent
-  prompt.ts         Prompt builder (extracted for testability)
-  config.ts         Environment variable loading
-  concurrency.ts    Agent scheduler with queue management and drain
-  memory.ts         Memory loading, save prompt, qmd index, git clone/pull
-  cli.ts            CLI interface for local testing (REPL + one-shot)
-  health.ts         Health check endpoint
-test/               Unit tests (node:test)
+  index.ts              Entry point — startup, shutdown, git clone
+  agent.ts              Thin dispatcher — orchestrates memory, prompt, backend
+  backend.ts            AgentBackend interface + factory
+  backend-pi-agent.ts   Pi-agent backend (OAuth, SessionManager, guarded tools)
+  backend-cli.ts        Claude CLI backend (spawns `claude` subprocess)
+  claude-process.ts     Low-level CLI spawn + JSONL stream parser
+  workspace.ts          Agent workspace setup (symlinks, CLAUDE.md)
+  slack.ts              Slack event handlers, thread fetching, message formatting
+  prompt.ts             Prompt builder (extracted for testability)
+  config.ts             Environment variable loading
+  concurrency.ts        Agent scheduler with queue management and drain
+  memory.ts             Memory loading, save prompt, qmd index, git clone/pull
+  cli.ts                CLI interface for local testing (REPL + one-shot)
+  health.ts             Health check endpoint
+test/                   Unit tests (node:test)
 prompts/
-  system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, pr-review, reflect, repos, triage)
+  system.md             System prompt for the Claude agent
+skills/                 Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, pr-review, reflect, repos)
 ```
