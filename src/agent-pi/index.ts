@@ -23,10 +23,10 @@ import {
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
-import type { AgentBackend, BackendConfig, BackendRunOptions, BackendRunResult } from "./backend.js";
+import type { AgentBackend, BackendConfig, BackendRunOptions, BackendRunResult } from "../backend.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const projectDir = join(__dirname, "..");
+const projectDir = join(__dirname, "../..");
 
 const PROTECTED_PREFIXES = ["src/", "test/", "node_modules/"];
 const PROTECTED_FILES = ["package.json", "package-lock.json", "tsconfig.json", ".auth.json"];

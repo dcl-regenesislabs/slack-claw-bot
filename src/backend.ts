@@ -1,5 +1,5 @@
-import { ClaudeCliBackend } from "./backend-cli/index.js";
-import { PiAgentBackend } from "./backend-pi-agent.js";
+import { ClaudeCliBackend } from "./agent-cli/index.js";
+import { PiAgentBackend } from "./agent-pi/index.js";
 
 export interface BackendConfig {
   githubToken?: string;
