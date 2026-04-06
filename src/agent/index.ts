@@ -158,9 +158,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
   const rawResponse = result.text;
   const hasSaveMarker = rawResponse.includes(SAVE_MARKER);
-  // Always save memory for now — the save prompt decides whether to actually write anything.
-  // The [SAVE] marker and tool-use detection are kept for future optimization.
-  const shouldSave = true;
+  const shouldSave = result.usedTools || hasSaveMarker;
 
   if (process.env.DEBUG) {
     console.log(`[debug] usedTools=${result.usedTools} hasSaveMarker=${hasSaveMarker} shouldSave=${shouldSave}`);

@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join, dirname, resolve, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -18,7 +18,6 @@ import {
   type WriteOperations,
   type EditOperations,
   type BashSpawnContext,
-  type ExtensionFactory,
   type AgentSession,
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
@@ -137,13 +136,6 @@ function initAuth(apiKey?: string): void {
   }
 }
 
-function createMemoryExtension(content: string): ExtensionFactory {
-  return (pi) => {
-    pi.on("before_agent_start", (event) => ({
-      systemPrompt: event.systemPrompt + "\n\n" + content,
-    }));
-  };
-}
 
 function hasToolCalls(messages: AgentMessage[]): boolean {
   return messages.some(
@@ -265,8 +257,7 @@ export class PiAgentProvider implements AgentProvider {
     }
   }
 
-  private async createSession(modelId: string, memoryContent: string, sessionManager: SessionManager) {
-    const systemPrompt = readFileSync(join(projectDir, "prompts/system.md"), "utf-8").trim();
+  private async createSession(modelId: string, fullSystemPrompt: string, sessionManager: SessionManager) {
     const modelRegistry = new ModelRegistry(authStorage!);
     const model = modelRegistry.find("anthropic", modelId);
     if (!model) throw new Error(`Model "anthropic/${modelId}" not found`);
@@ -278,8 +269,8 @@ export class PiAgentProvider implements AgentProvider {
         join(projectDir, "skills"),
         ...(this.memoryDir ? [join(this.memoryDir, "skills")] : []),
       ],
-      systemPrompt,
-      extensionFactories: memoryContent ? [createMemoryExtension(memoryContent)] : [],
+      systemPrompt: fullSystemPrompt,
+      extensionFactories: [],
       noExtensions: true,
       noPromptTemplates: true,
       noThemes: true,

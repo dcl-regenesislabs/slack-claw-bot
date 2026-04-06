@@ -302,7 +302,10 @@ function buildArgs(opts: {
 
 function killProcess(child: ChildProcessWithoutNullStreams): void {
   try {
-    child.kill("SIGKILL");
+    child.kill("SIGTERM");
+    setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+    }, 5000).unref();
   } catch {
     // ignore
   }

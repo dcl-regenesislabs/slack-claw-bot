@@ -67,7 +67,6 @@ export class AgentScheduler {
       await work();
     } finally {
       this.running--;
-      this.releaseWaiter();
       this.drainThread(threadId);
     }
   }
@@ -81,11 +80,11 @@ export class AgentScheduler {
       this.running++;
       next().finally(() => {
         this.running--;
-        this.releaseWaiter();
         this.drainThread(threadId);
       });
     } else {
       this.activeThreads.delete(threadId);
+      this.releaseWaiter();
       this.checkDrain();
     }
   }
