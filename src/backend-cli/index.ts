@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AgentBackend, BackendConfig, BackendRunOptions, BackendRunResult } from "./backend.js";
+import type { AgentBackend, BackendConfig, BackendRunOptions, BackendRunResult } from "../backend.js";
 import { runClaude, SessionExpiredError } from "./claude-process.js";
 
 // Claude CLI requires UUIDs for session IDs, but Slack uses threadTs (e.g. "1712345678.123456").

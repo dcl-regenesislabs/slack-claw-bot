@@ -1,4 +1,4 @@
-import { ClaudeCliBackend } from "./backend-cli.js";
+import { ClaudeCliBackend } from "./backend-cli/index.js";
 import { PiAgentBackend } from "./backend-pi-agent.js";
 
 export interface BackendConfig {
