@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
-import { initAgent, runAgent, detectReviewModel } from "./agent.js";
+import { initAgent, runAgent, detectReviewModel } from "./agent/index.js";
 import { resolveMemoryDir } from "./memory.js";
 
 const dryRun = process.argv.includes("--dry-run");

@@ -1,7 +1,4 @@
-import { ClaudeCliBackend } from "./agent-cli/index.js";
-import { PiAgentBackend } from "./agent-pi/index.js";
-
-export interface BackendConfig {
+export interface AgentProviderConfig {
   githubToken?: string;
   model?: string;
   memoryDir?: string;
@@ -12,7 +9,7 @@ export interface BackendConfig {
   anthropicSetupToken?: string;
 }
 
-export interface BackendRunOptions {
+export interface AgentRunOptions {
   prompt: string;
   model: string;
   sessionId: string;
@@ -23,7 +20,7 @@ export interface BackendRunOptions {
   onTextDelta?: (delta: string) => void;
 }
 
-export interface BackendRunResult {
+export interface AgentRunResult {
   text: string;
   sessionId: string;
   tokens: number;
@@ -31,18 +28,12 @@ export interface BackendRunResult {
   usedTools: boolean;
 }
 
-export interface AgentBackend {
-  init(config: BackendConfig): Promise<void>;
-  run(options: BackendRunOptions): Promise<BackendRunResult>;
-  afterRun?(): Promise<void>;
+export interface AgentProvider {
+  init(config: AgentProviderConfig): Promise<void>;
+  run(options: AgentRunOptions): Promise<AgentRunResult>;
   isKnownSession?(sessionId: string): boolean;
   disposeSession?(sessionId: string): void;
   runFollowUp?(sessionId: string, prompt: string): Promise<void>;
 }
 
-export type BackendType = "pi-agent" | "cli";
-
-export function createBackend(type: BackendType): AgentBackend {
-  if (type === "cli") return new ClaudeCliBackend();
-  return new PiAgentBackend();
-}
+export type AgentProviderType = "pi-agent" | "cli";

@@ -1,7 +1,7 @@
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Config } from "./config.js";
-import { runAgent, detectReviewModel } from "./agent.js";
+import { runAgent, detectReviewModel } from "./agent/index.js";
 import type { FileAttachment } from "./prompt.js";
 import { AgentScheduler } from "./concurrency.js";
 

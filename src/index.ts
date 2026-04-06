@@ -7,7 +7,7 @@ process.on("uncaughtException", (err) => {
 });
 
 import { loadConfig } from "./config.js";
-import { initAgent } from "./agent.js";
+import { initAgent } from "./agent/index.js";
 import { startSlackBot, createScheduler } from "./slack.js";
 import { startHealthServer } from "./health.js";
 import { resolveMemoryDir } from "./memory.js";
