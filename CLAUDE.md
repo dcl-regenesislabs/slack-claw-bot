@@ -39,7 +39,9 @@ The bot supports two agent backends, switchable via `AGENT_BACKEND` env var:
 - **`cli`** (default) — spawns `claude -p --output-format stream-json --permission-mode bypassPermissions` as a subprocess. Auth via `ANTHROPIC_SETUP_TOKEN` env var (seeds `~/.claude/.credentials.json` on startup). Prompt sent via stdin, JSONL output parsed for text deltas, session_id, and usage. Session resume via `--resume`. Tool restrictions via CLAUDE.md in the workspace.
 - **`pi-agent`** — uses `@mariozechner/pi-coding-agent` for API calls. Kept as fallback for Codex. Auth: static OAuth token via `ANTHROPIC_API_KEY`. Tools: guarded bash, read, edit, write. Sessions persisted as JSONL files.
 
-Both backends implement `AgentBackend` (defined in `backend.ts`). `agent.ts` orchestrates the flow: memory load → prompt build → `backend.run()` → memory save.
+Both backends implement `AgentProvider` (defined in `agent/types.ts`). `agent/index.ts` orchestrates the flow: memory load → prompt build → `provider.run()` → memory save.
+
+**Security trade-off:** The pi-agent backend enforces write protection via code-level guards (`isProtectedPath`). The CLI backend relies on CLAUDE.md instructions in the workspace — this is advisory, not enforced at the code level. The workspace isolation (`/tmp/claw-workspace/`) mitigates most risk since Claude can't reach the project source.
 
 ### Workspace
 
