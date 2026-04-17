@@ -53,7 +53,14 @@ if (config.grantsChannelId && config.grantsAgentsRepo && memoryDir) {
     ? new DiscourseClient(config.discourse.url, config.discourse.apiKey)
     : null;
   if (grantsAgentsDir) {
-    const grants = initGrants(config, memoryDir, grantsAgentsDir, opendclDir, jarvisDir, discourse);
+    const grants = initGrants({
+      config,
+      memoryDir,
+      grantsAgentsDir,
+      opendclDir,
+      jarvisDir,
+      discourse,
+    });
     grantsRouter = grants.router;
     console.log(
       `[startup] Grants feature enabled${discourse ? " (Discourse integration active)" : " (Discourse disabled — !post is local-only)"}`,

@@ -91,33 +91,40 @@ interface PublishTarget {
 
 // --- Public API ---
 
-/**
- * Initialize the grants orchestrator. Returns null if the agents repo couldn't be loaded.
- *
- * @param app - Bolt app (not started yet). The orchestrator registers a `message` listener for new proposals.
- * @param config - Application config (must have grantsChannelId)
- * @param memoryDir - Memory repo dir (for private context + proposal storage)
- * @param grantsAgentsDir - Path to the cloned grants-evaluation-agents repo
- */
-export function initGrants(
-  config: Config,
-  memoryDir: string,
-  grantsAgentsDir: string,
-  opendclDir?: string | null,
-  jarvisDir?: string | null,
-  discourse?: DiscourseClient | null,
-): GrantsHandle {
-  const orchestrator = new GrantsOrchestrator(
-    config,
-    memoryDir,
-    grantsAgentsDir,
-    opendclDir ?? null,
-    jarvisDir ?? null,
-    discourse ?? null,
-  );
+export interface InitGrantsOptions {
+  /** Application config (must have grantsChannelId). */
+  config: Config;
+  /** Memory repo dir (for private context + proposal storage). */
+  memoryDir: string;
+  /** Path to the cloned grants-evaluation-agents repo. */
+  grantsAgentsDir: string;
+  /** Path to the opendcl repo (optional — enables SDK7 skills in agent sessions). */
+  opendclDir?: string | null;
+  /** Path to the jarvis repo (optional — enables DCL infrastructure context). */
+  jarvisDir?: string | null;
+  /** Discourse client (optional — enables forum publishing on !post). */
+  discourse?: DiscourseClient | null;
+}
+
+export function initGrants(options: InitGrantsOptions): GrantsHandle {
+  const orchestrator = new GrantsOrchestrator({
+    ...options,
+    opendclDir: options.opendclDir ?? null,
+    jarvisDir: options.jarvisDir ?? null,
+    discourse: options.discourse ?? null,
+  });
   orchestrator.bootstrap();
 
   return { router: orchestrator.router };
+}
+
+interface OrchestratorOptions {
+  config: Config;
+  memoryDir: string;
+  grantsAgentsDir: string;
+  opendclDir: string | null;
+  jarvisDir: string | null;
+  discourse: DiscourseClient | null;
 }
 
 // --- Orchestrator ---
@@ -130,18 +137,25 @@ class GrantsOrchestrator {
   private grantsContext = "";
   private proposalsDir: string;
 
-  constructor(
-    private config: Config,
-    private memoryDir: string,
-    private grantsAgentsDir: string,
-    private opendclDir: string | null,
-    private jarvisDir: string | null,
-    private discourse: DiscourseClient | null,
-  ) {
-    this.scheduler = new AgentScheduler(config.grantsMaxConcurrentAgents);
-    this.proposalsDir = join(memoryDir, "grants", "proposals");
+  private config: Config;
+  private memoryDir: string;
+  private grantsAgentsDir: string;
+  private opendclDir: string | null;
+  private jarvisDir: string | null;
+  private discourse: DiscourseClient | null;
+
+  constructor(opts: OrchestratorOptions) {
+    this.config = opts.config;
+    this.memoryDir = opts.memoryDir;
+    this.grantsAgentsDir = opts.grantsAgentsDir;
+    this.opendclDir = opts.opendclDir;
+    this.jarvisDir = opts.jarvisDir;
+    this.discourse = opts.discourse;
+
+    this.scheduler = new AgentScheduler(opts.config.grantsMaxConcurrentAgents);
+    this.proposalsDir = join(opts.memoryDir, "grants", "proposals");
     mkdirSync(this.proposalsDir, { recursive: true });
-    mkdirSync(join(memoryDir, "grants", "context"), { recursive: true });
+    mkdirSync(join(opts.memoryDir, "grants", "context"), { recursive: true });
   }
 
   private get discourseConfig(): DiscourseConfig | null {
