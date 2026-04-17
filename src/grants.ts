@@ -9,7 +9,7 @@ import type { Config } from "./config.js";
 import { AgentScheduler } from "./concurrency.js";
 import { markdownToMrkdwn } from "./slack.js";
 import { parseCsv, formatCsvAsProposal } from "./csv.js";
-import { DiscourseClient, type DiscourseConfig } from "./discourse.js";
+import { DiscourseClient, DiscourseError, type DiscourseConfig } from "./discourse.js";
 
 export type AgentName = "voxel" | "canvas" | "loop" | "signal";
 const AGENT_NAMES: AgentName[] = ["voxel", "canvas", "loop", "signal"];
@@ -76,6 +76,18 @@ export interface GrantsHandle {
 }
 
 type ThreadKind = "parent" | AgentName;
+
+interface PublishTarget {
+  label: string;           // Display name ("VOXEL", "ORACLE")
+  logName: string;         // Key for logs ("voxel", "oracle")
+  username: string;        // Discourse username (empty when Discourse disabled)
+  body: string;            // Rendered post body
+  commitLabel: string;     // For git commit subject
+  lockKey: string;         // `${proposalId}:${agentOrOracle}` — prevents duplicate publishes
+  getPostId(): number | null;
+  setPostId(id: number | null): void;
+  setApprovedAt(ts: string): void;
+}
 
 // --- Public API ---
 
@@ -464,13 +476,15 @@ class GrantsOrchestrator {
     // run 4 agents without a forum destination.
     let discourseTopicId: number | null = null;
     let discourseTopicUrl: string | null = null;
-    if (this.discourseEnabled) {
+    const discourse = this.discourse;
+    const discourseConfig = this.discourseConfig;
+    if (discourse && discourseConfig) {
       try {
-        const topic = await this.discourse!.createTopic({
+        const topic = await discourse.createTopic({
           title: `[${proposalId}] ${title}`,
           body: buildDiscourseTopicBody(effectiveProposalText, title, proposalId),
-          categoryId: this.discourseConfig!.categoryId,
-          username: this.discourseConfig!.users.submitter,
+          categoryId: discourseConfig.categoryId,
+          username: discourseConfig.users.submitter,
         });
         discourseTopicId = topic.topicId;
         discourseTopicUrl = topic.topicUrl;
@@ -722,7 +736,7 @@ class GrantsOrchestrator {
 
     state.oracleDecision = result.text;
     state.updatedAt = new Date().toISOString();
-    this.updateOracleSection(state, result.text);
+    this.updateNarrativeSection(state, "oracle", result.text);
     this.saveState(state);
     this.commitAndPush(`grants: oracle decision for ${state.id}`);
 
@@ -761,7 +775,7 @@ class GrantsOrchestrator {
 
     state.oracleDecision = result.text;
     state.updatedAt = new Date().toISOString();
-    this.updateOracleSection(state, result.text);
+    this.updateNarrativeSection(state, "oracle", result.text);
     this.saveState(state);
     this.commitAndPush(`grants: refine oracle for ${state.id}`);
 
@@ -827,6 +841,10 @@ class GrantsOrchestrator {
 
   // --- Discourse publishing ---
 
+  /** In-flight publish set keyed by `${proposalId}:${agentOrOracle}` — prevents
+   * double-click races creating duplicate Discourse posts. */
+  private inFlightPublish = new Set<string>();
+
   private async publishAgentToDiscourse(
     state: ProposalState,
     agent: AgentName,
@@ -840,59 +858,17 @@ class GrantsOrchestrator {
       return;
     }
 
-    if (!this.discourseEnabled) {
-      // Local-only approval fallback
-      state.agents[agent].approvedAt = new Date().toISOString();
-      this.saveState(state);
-      this.commitAndPush(`grants: approve ${agent} for ${state.id}`);
-      await postMessage(params.client, state.channelId, params.threadTs,
-        `:white_check_mark: *APPROVED — ${agent.toUpperCase()}*\n_(Discourse disabled — approval recorded locally)_\n\n_Proposal: ${state.title} (\`${state.id}\`)_\n\n---\n\n${markdownToMrkdwn(agentText)}`);
-      return;
-    }
-
-    if (!state.discourseTopicId) {
-      await postMessage(params.client, state.channelId, params.threadTs,
-        ":warning: No Discourse topic linked to this proposal. Cannot post.");
-      return;
-    }
-
-    const username = this.discourseConfig!.users[agent];
-    const body = formatAgentDiscoursePost(agent, agentText);
-    const existingId = state.agents[agent].lastDiscoursePostId;
-
-    try {
-      let postUrl: string;
-      if (existingId) {
-        await this.discourse!.editPost({
-          postId: existingId,
-          body,
-          username,
-          editReason: "Refined after Slack iteration",
-        });
-        postUrl = this.discourse!.postUrl(existingId);
-      } else {
-        const r = await this.discourse!.reply({
-          topicId: state.discourseTopicId,
-          body,
-          username,
-        });
-        state.agents[agent].lastDiscoursePostId = r.postId;
-        postUrl = r.postUrl;
-      }
-
-      state.agents[agent].approvedAt = new Date().toISOString();
-      state.updatedAt = new Date().toISOString();
-      this.saveState(state);
-      this.commitAndPush(`grants: publish ${agent} evaluation for ${state.id}`);
-
-      const verb = existingId ? "Updated" : "Posted";
-      await postMessage(params.client, state.channelId, params.threadTs,
-        `:white_check_mark: *${verb} to Discourse as \`${username}\`*\n<${postUrl}|View on forum>`);
-    } catch (err) {
-      console.error(`[grants] Failed to publish ${agent} to Discourse:`, err);
-      await postMessage(params.client, state.channelId, params.threadTs,
-        `:x: *Failed to post to Discourse*\n${(err as Error).message}`);
-    }
+    await this.publishToDiscourse(state, params, agentText, {
+      label: agent.toUpperCase(),
+      logName: agent,
+      username: this.discourseConfig?.users[agent] ?? "",
+      body: formatAgentDiscoursePost(agent, agentText),
+      commitLabel: `${agent} evaluation`,
+      lockKey: `${state.id}:${agent}`,
+      getPostId: () => state.agents[agent].lastDiscoursePostId,
+      setPostId: (id) => { state.agents[agent].lastDiscoursePostId = id; },
+      setApprovedAt: (ts) => { state.agents[agent].approvedAt = ts; },
+    });
   }
 
   private async publishOracleToDiscourse(
@@ -907,19 +883,41 @@ class GrantsOrchestrator {
       return;
     }
 
-    // Warn if no agents have been published yet — but allow it
+    // Warn (but allow) if no agents have been published yet
     const publishedAgents = AGENT_NAMES.filter((a) => state.agents[a].lastDiscoursePostId !== null);
     if (this.discourseEnabled && publishedAgents.length === 0) {
       await postMessage(params.client, state.channelId, params.threadTs,
         ":warning: No agent evaluations have been published to Discourse yet. ORACLE will post standalone.");
     }
 
+    await this.publishToDiscourse(state, params, oracleText, {
+      label: "ORACLE",
+      logName: "oracle",
+      username: this.discourseConfig?.users.oracle ?? "",
+      body: formatOracleDiscoursePost(oracleText),
+      commitLabel: "oracle",
+      lockKey: `${state.id}:oracle`,
+      getPostId: () => state.oracle.lastDiscoursePostId,
+      setPostId: (id) => { state.oracle.lastDiscoursePostId = id; },
+      setApprovedAt: (ts) => { state.oracle.approvedAt = ts; },
+    });
+  }
+
+  /** Core publish pipeline shared by agent and ORACLE publishing. */
+  private async publishToDiscourse(
+    state: ProposalState,
+    params: GrantsMentionParams,
+    displayText: string,
+    target: PublishTarget,
+  ): Promise<void> {
+    // Local-only fallback when Discourse isn't configured
     if (!this.discourseEnabled) {
-      state.oracle.approvedAt = new Date().toISOString();
+      target.setApprovedAt(new Date().toISOString());
       this.saveState(state);
-      this.commitAndPush(`grants: approve oracle for ${state.id}`);
+      this.commitAndPush(`grants: approve ${target.commitLabel} for ${state.id}`);
       await postMessage(params.client, state.channelId, params.threadTs,
-        `:white_check_mark: *APPROVED — ORACLE*\n_(Discourse disabled — approval recorded locally)_\n\n_Proposal: ${state.title} (\`${state.id}\`)_\n\n---\n\n${markdownToMrkdwn(oracleText)}`);
+        `:white_check_mark: *APPROVED — ${target.label}*\n_(Discourse disabled — approval recorded locally)_\n\n` +
+        `_Proposal: ${state.title} (\`${state.id}\`)_\n\n---\n\n${markdownToMrkdwn(displayText)}`);
       return;
     }
 
@@ -929,43 +927,80 @@ class GrantsOrchestrator {
       return;
     }
 
-    const username = this.discourseConfig!.users.oracle;
-    const body = formatOracleDiscoursePost(oracleText);
-    const existingId = state.oracle.lastDiscoursePostId;
+    if (this.inFlightPublish.has(target.lockKey)) {
+      await postMessage(params.client, state.channelId, params.threadTs,
+        `:hourglass_flowing_sand: Already publishing ${target.label} — wait for the previous !post to finish.`);
+      return;
+    }
+    this.inFlightPublish.add(target.lockKey);
+
+    const discourse = this.discourse;
+    if (!discourse) {
+      // Defensive — discourseEnabled already implies non-null
+      this.inFlightPublish.delete(target.lockKey);
+      return;
+    }
 
     try {
-      let postUrl: string;
-      if (existingId) {
-        await this.discourse!.editPost({
-          postId: existingId,
-          body,
-          username,
-          editReason: "Refined after Slack iteration",
-        });
-        postUrl = this.discourse!.postUrl(existingId);
-      } else {
-        const r = await this.discourse!.reply({
-          topicId: state.discourseTopicId,
-          body,
-          username,
-        });
-        state.oracle.lastDiscoursePostId = r.postId;
-        postUrl = r.postUrl;
-      }
+      const { postUrl, verb } = await this.writeDiscoursePost(discourse, state, target);
 
-      state.oracle.approvedAt = new Date().toISOString();
+      target.setApprovedAt(new Date().toISOString());
       state.updatedAt = new Date().toISOString();
       this.saveState(state);
-      this.commitAndPush(`grants: publish oracle for ${state.id}`);
+      this.commitAndPush(`grants: publish ${target.commitLabel} for ${state.id}`);
 
-      const verb = existingId ? "Updated" : "Posted";
       await postMessage(params.client, state.channelId, params.threadTs,
-        `:white_check_mark: *${verb} ORACLE to Discourse as \`${username}\`*\n<${postUrl}|View on forum>`);
+        `:white_check_mark: *${verb} ${target.label} to Discourse as \`${target.username}\`*\n<${postUrl}|View on forum>`);
     } catch (err) {
-      console.error("[grants] Failed to publish ORACLE to Discourse:", err);
+      console.error(`[grants] Failed to publish ${target.logName} to Discourse:`, err);
       await postMessage(params.client, state.channelId, params.threadTs,
-        `:x: *Failed to post ORACLE to Discourse*\n${(err as Error).message}`);
+        `:x: *Failed to post ${target.label} to Discourse*\n${(err as Error).message}`);
+    } finally {
+      this.inFlightPublish.delete(target.lockKey);
     }
+  }
+
+  /** Edit the existing post or create a new reply. If the stored post ID is
+   * stale (404), clear it and fall back to a new reply so state self-heals. */
+  private async writeDiscoursePost(
+    discourse: DiscourseClient,
+    state: ProposalState,
+    target: PublishTarget,
+  ): Promise<{ postUrl: string; verb: string }> {
+    const existingId = target.getPostId();
+
+    if (existingId !== null) {
+      try {
+        await discourse.editPost({
+          postId: existingId,
+          body: target.body,
+          username: target.username,
+          editReason: "Refined after Slack iteration",
+        });
+        return { postUrl: discourse.postUrl(existingId), verb: "Updated" };
+      } catch (err) {
+        if (err instanceof DiscourseError && err.status === 404) {
+          console.warn(
+            `[grants] Stale Discourse post ${existingId} for ${target.logName} — clearing and creating a new reply`,
+          );
+          target.setPostId(null);
+          // Fall through to the create path
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    const r = await discourse.reply({
+      topicId: state.discourseTopicId!,
+      body: target.body,
+      username: target.username,
+    });
+    target.setPostId(r.postId);
+    return {
+      postUrl: r.postUrl,
+      verb: existingId !== null ? "Reposted (previous post was deleted)" : "Posted",
+    };
   }
 
   // --- Narrative file (proposal.md) ---
@@ -997,16 +1032,13 @@ class GrantsOrchestrator {
     return parseNarrative(raw);
   }
 
-  private updateNarrativeSection(state: ProposalState, agent: AgentName, text: string): void {
+  private updateNarrativeSection(
+    state: ProposalState,
+    key: AgentName | "oracle",
+    text: string,
+  ): void {
     const sections = this.readNarrative(state);
-    sections[agent] = text;
-    const md = this.renderNarrative(state, sections);
-    writeFileSync(join(this.proposalDir(state.id), "proposal.md"), md, "utf-8");
-  }
-
-  private updateOracleSection(state: ProposalState, text: string): void {
-    const sections = this.readNarrative(state);
-    sections.oracle = text;
+    sections[key] = text;
     const md = this.renderNarrative(state, sections);
     writeFileSync(join(this.proposalDir(state.id), "proposal.md"), md, "utf-8");
   }
@@ -1166,48 +1198,89 @@ function formatOracleDiscoursePost(body: string): string {
 
 /**
  * Backfill missing fields on legacy state.json files loaded from disk.
- * Fields added after shipping: approvedAt on agents, oracle struct, discourseTopicUrl.
+ * Narrows the `unknown` input via per-field type checks rather than bulk casts.
  */
 function migrateState(raw: unknown): ProposalState {
-  if (!raw || typeof raw !== "object") {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("state.json is not an object");
   }
-  const s = raw as Partial<ProposalState> & { agents?: Record<string, Partial<AgentEvalState>> };
+  const s = raw as Record<string, unknown>;
 
-  const agents = (s.agents ?? {}) as Record<string, Partial<AgentEvalState>>;
+  const id = requireString(s, "id");
+  const channelId = requireString(s, "channelId");
+  const parentThreadTs = requireString(s, "parentThreadTs");
+
+  const agentsRaw = asRecord(s.agents) ?? {};
   const migratedAgents: Record<AgentName, AgentEvalState> = {
-    voxel:  normalizeAgent(agents.voxel),
-    canvas: normalizeAgent(agents.canvas),
-    loop:   normalizeAgent(agents.loop),
-    signal: normalizeAgent(agents.signal),
+    voxel:  normalizeAgent(asRecord(agentsRaw.voxel)),
+    canvas: normalizeAgent(asRecord(agentsRaw.canvas)),
+    loop:   normalizeAgent(asRecord(agentsRaw.loop)),
+    signal: normalizeAgent(asRecord(agentsRaw.signal)),
   };
 
+  const oracleRaw = asRecord(s.oracle);
   return {
-    id: s.id!,
-    title: s.title ?? "Untitled",
-    track: s.track ?? null,
-    status: s.status ?? "evaluating",
-    channelId: s.channelId!,
-    submissionTs: s.submissionTs ?? "",
-    parentThreadTs: s.parentThreadTs!,
-    agentThreads: s.agentThreads ?? {},
-    oracleDecision: s.oracleDecision ?? null,
-    createdAt: s.createdAt ?? new Date().toISOString(),
-    updatedAt: s.updatedAt ?? new Date().toISOString(),
-    discourseTopicId: s.discourseTopicId ?? null,
-    discourseTopicUrl: s.discourseTopicUrl ?? null,
+    id,
+    title: optionalString(s.title) ?? "Untitled",
+    track: asTrack(s.track),
+    status: asStatus(s.status) ?? "evaluating",
+    channelId,
+    submissionTs: optionalString(s.submissionTs) ?? "",
+    parentThreadTs,
+    agentThreads: (asRecord(s.agentThreads) ?? {}) as Partial<Record<AgentName, string>>,
+    oracleDecision: optionalString(s.oracleDecision) ?? null,
+    createdAt: optionalString(s.createdAt) ?? new Date().toISOString(),
+    updatedAt: optionalString(s.updatedAt) ?? new Date().toISOString(),
+    discourseTopicId: asNumberOrNull(s.discourseTopicId),
+    discourseTopicUrl: optionalString(s.discourseTopicUrl) ?? null,
     agents: migratedAgents,
-    oracle: s.oracle ?? { lastDiscoursePostId: null, approvedAt: null },
+    oracle: {
+      lastDiscoursePostId: oracleRaw ? asNumberOrNull(oracleRaw.lastDiscoursePostId) : null,
+      approvedAt: oracleRaw ? (optionalString(oracleRaw.approvedAt) ?? null) : null,
+    },
   };
 }
 
-function normalizeAgent(a: Partial<AgentEvalState> | undefined): AgentEvalState {
+function normalizeAgent(a: Record<string, unknown> | null): AgentEvalState {
+  if (!a) {
+    return { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null, approvedAt: null };
+  }
   return {
-    waitingForReply: a?.waitingForReply ?? false,
-    roundsCompleted: a?.roundsCompleted ?? 0,
-    lastDiscoursePostId: a?.lastDiscoursePostId ?? null,
-    approvedAt: a?.approvedAt ?? null,
+    waitingForReply: typeof a.waitingForReply === "boolean" ? a.waitingForReply : false,
+    roundsCompleted: typeof a.roundsCompleted === "number" ? a.roundsCompleted : 0,
+    lastDiscoursePostId: asNumberOrNull(a.lastDiscoursePostId),
+    approvedAt: optionalString(a.approvedAt) ?? null,
   };
+}
+
+function requireString(src: Record<string, unknown>, key: string): string {
+  const v = src[key];
+  if (typeof v !== "string" || v.length === 0) {
+    throw new Error(`state.json missing required field: ${key} (got ${typeof v})`);
+  }
+  return v;
+}
+
+function optionalString(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function asNumberOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function asTrack(v: unknown): ProposalState["track"] {
+  return v === "content" || v === "tech-ecosystem" ? v : null;
+}
+
+function asStatus(v: unknown): ProposalState["status"] | undefined {
+  return v === "evaluating" || v === "deciding" || v === "funded" || v === "rejected" || v === "closed"
+    ? v
+    : undefined;
 }
 
 function stripFrontmatter(content: string): string {

@@ -59,6 +59,10 @@ export function parseCsv(text: string): CsvParseResult {
     i++;
   }
 
+  if (inQuotes) {
+    throw new Error("Unterminated quoted field in CSV (file may be truncated)");
+  }
+
   if (field !== "" || row.length > 0) {
     row.push(field);
     cells.push(row);

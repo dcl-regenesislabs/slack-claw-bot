@@ -104,6 +104,9 @@ export class DiscourseClient {
     username: string,
     body?: unknown,
   ): Promise<T> {
+    if (/[\r\n:]/.test(username)) {
+      throw new Error(`Invalid Discourse username (contains CRLF or colon): ${JSON.stringify(username)}`);
+    }
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers: {
@@ -116,12 +119,25 @@ export class DiscourseClient {
     });
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
-      throw new Error(
-        `Discourse ${method} ${path} as ${username} failed: ${res.status} ${res.statusText}` +
-          (errText ? `\n${errText.slice(0, 500)}` : ""),
+      // Log the full body for debugging, but only surface status + statusText to callers —
+      // response bodies may echo credentials or sensitive metadata that shouldn't reach Slack.
+      if (errText) {
+        console.error(`[discourse] ${method} ${path} as ${username} body:`, errText.slice(0, 2000));
+      }
+      const err = new DiscourseError(
+        `Discourse ${method} ${path} as ${username} failed: ${res.status} ${res.statusText}`,
+        res.status,
       );
+      throw err;
     }
     const json: unknown = await res.json();
     return json as T;
+  }
+}
+
+export class DiscourseError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "DiscourseError";
   }
 }

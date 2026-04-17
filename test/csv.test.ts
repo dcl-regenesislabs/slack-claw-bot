@@ -68,6 +68,20 @@ test("parseCsv: completely empty input", () => {
   assert.equal(result.rows.length, 0);
 });
 
+test("parseCsv: unterminated quote throws", () => {
+  assert.throws(
+    () => parseCsv('Name\n"Alice'),
+    /Unterminated quoted field/,
+  );
+});
+
+test("parseCsv: unterminated quote mid-row throws", () => {
+  assert.throws(
+    () => parseCsv('A,B\n1,"unclosed'),
+    /Unterminated quoted field/,
+  );
+});
+
 test("parseCsv: wide row with many columns", () => {
   const headers = Array.from({ length: 52 }, (_, i) => `Col${i + 1}`);
   const values = Array.from({ length: 52 }, (_, i) => `val${i + 1}`);
