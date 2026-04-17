@@ -492,7 +492,7 @@ class GrantsOrchestrator {
       } catch (err) {
         console.error("[grants] Failed to create Discourse topic:", err);
         await postMessage(client, channelId, parentMessageTs,
-          `:x: *Failed to create Discourse topic*\n${(err as Error).message}\n\nEvaluation aborted.`);
+          `:x: *Failed to create Discourse topic*\n${safeErrorMessage(err)}\n\nEvaluation aborted.`);
         return null;
       }
     }
@@ -954,7 +954,7 @@ class GrantsOrchestrator {
     } catch (err) {
       console.error(`[grants] Failed to publish ${target.logName} to Discourse:`, err);
       await postMessage(params.client, state.channelId, params.threadTs,
-        `:x: *Failed to post ${target.label} to Discourse*\n${(err as Error).message}`);
+        `:x: *Failed to post ${target.label} to Discourse*\n${safeErrorMessage(err)}`);
     } finally {
       this.inFlightPublish.delete(target.lockKey);
     }
@@ -979,11 +979,15 @@ class GrantsOrchestrator {
         });
         return { postUrl: discourse.postUrl(existingId), verb: "Updated" };
       } catch (err) {
-        if (err instanceof DiscourseError && err.status === 404) {
+        if (err instanceof DiscourseError && (err.status === 404 || err.status === 410)) {
           console.warn(
-            `[grants] Stale Discourse post ${existingId} for ${target.logName} — clearing and creating a new reply`,
+            `[grants] Stale Discourse post ${existingId} for ${target.logName} (status ${err.status}) — clearing and creating a new reply`,
           );
           target.setPostId(null);
+          // Persist the cleared ID immediately so it survives a crash even
+          // if the fallback reply below also fails — otherwise the stale ID
+          // would be rehydrated on restart and re-enter the 404 loop.
+          this.saveState(state);
           // Fall through to the create path
         } else {
           throw err;
@@ -1150,6 +1154,14 @@ interface NarrativeSections {
   learnings: string;
 }
 
+/** Return an error message that is safe to post in user-facing Slack messages.
+ * `DiscourseError.message` is already sanitised (only HTTP status + statusText).
+ * Everything else is opaque — a generic string prevents leaking internals. */
+function safeErrorMessage(err: unknown): string {
+  if (err instanceof DiscourseError) return err.message;
+  return "Unexpected error (see server logs for details)";
+}
+
 async function fetchSlackFile(url: string, botToken: string): Promise<string> {
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${botToken}` },
@@ -1227,7 +1239,7 @@ function migrateState(raw: unknown): ProposalState {
     channelId,
     submissionTs: optionalString(s.submissionTs) ?? "",
     parentThreadTs,
-    agentThreads: (asRecord(s.agentThreads) ?? {}) as Partial<Record<AgentName, string>>,
+    agentThreads: normalizeAgentThreads(s.agentThreads),
     oracleDecision: optionalString(s.oracleDecision) ?? null,
     createdAt: optionalString(s.createdAt) ?? new Date().toISOString(),
     updatedAt: optionalString(s.updatedAt) ?? new Date().toISOString(),
@@ -1239,6 +1251,19 @@ function migrateState(raw: unknown): ProposalState {
       approvedAt: oracleRaw ? (optionalString(oracleRaw.approvedAt) ?? null) : null,
     },
   };
+}
+
+function normalizeAgentThreads(raw: unknown): Partial<Record<AgentName, string>> {
+  const src = asRecord(raw);
+  if (!src) return {};
+  const out: Partial<Record<AgentName, string>> = {};
+  for (const agent of AGENT_NAMES) {
+    const v = src[agent];
+    if (typeof v === "string" && v.length > 0) {
+      out[agent] = v;
+    }
+  }
+  return out;
 }
 
 function normalizeAgent(a: Record<string, unknown> | null): AgentEvalState {

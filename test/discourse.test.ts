@@ -5,11 +5,16 @@ import { DiscourseClient, DiscourseError } from "../src/discourse.js";
 type FetchArgs = { url: string; init: RequestInit | undefined };
 
 let fetchCalls: FetchArgs[] = [];
-let fetchImpl: (url: string, init?: RequestInit) => Promise<Response>;
+let fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = async () => {
+  throw new Error("test did not set fetchImpl");
+};
 const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
   fetchCalls = [];
+  fetchImpl = async () => {
+    throw new Error("test did not set fetchImpl");
+  };
   globalThis.fetch = ((url: string, init?: RequestInit) => {
     fetchCalls.push({ url, init });
     return fetchImpl(url, init);
@@ -41,6 +46,7 @@ test("createTopic: sends expected payload and returns topic URL", async () => {
   const headers = init?.headers as Record<string, string>;
   assert.equal(headers["Api-Username"], "grants-bot");
   assert.equal(headers["Api-Key"], "sekret");
+  assert.equal(headers["Content-Type"], "application/json");
   const body = JSON.parse(init?.body as string);
   assert.deepEqual(body, { title: "Hello", raw: "Body text", category: 7 });
 });
@@ -89,6 +95,19 @@ test("404 on editPost throws DiscourseError with status 404", async () => {
     (err: Error) => {
       assert.ok(err instanceof DiscourseError);
       assert.equal((err as DiscourseError).status, 404);
+      return true;
+    },
+  );
+});
+
+test("410 Gone on editPost surfaces status 410", async () => {
+  fetchImpl = async () => new Response("gone", { status: 410, statusText: "Gone" });
+  const client = new DiscourseClient("https://forum.example.org", "k");
+  await assert.rejects(
+    client.editPost({ postId: 99, body: "x", username: "oracle" }),
+    (err: Error) => {
+      assert.ok(err instanceof DiscourseError);
+      assert.equal((err as DiscourseError).status, 410);
       return true;
     },
   );
