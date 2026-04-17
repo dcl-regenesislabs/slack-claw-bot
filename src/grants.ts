@@ -498,7 +498,7 @@ class GrantsOrchestrator {
           title: `[${proposalId}] ${title}`,
           body: buildDiscourseTopicBody(effectiveProposalText, title, proposalId),
           categoryId: discourseConfig.categoryId,
-          username: discourseConfig.users.submitter,
+          username: discourseConfig.username,
         });
         discourseTopicId = topic.topicId;
         discourseTopicUrl = topic.topicUrl;
@@ -875,7 +875,7 @@ class GrantsOrchestrator {
     await this.publishToDiscourse(state, params, agentText, {
       label: agent.toUpperCase(),
       logName: agent,
-      username: this.discourseConfig?.users[agent] ?? "",
+      username: this.discourseConfig?.username ?? "",
       body: formatAgentDiscoursePost(agent, agentText),
       commitLabel: `${agent} evaluation`,
       lockKey: `${state.id}:${agent}`,
@@ -907,7 +907,7 @@ class GrantsOrchestrator {
     await this.publishToDiscourse(state, params, oracleText, {
       label: "ORACLE",
       logName: "oracle",
-      username: this.discourseConfig?.users.oracle ?? "",
+      username: this.discourseConfig?.username ?? "",
       body: formatOracleDiscoursePost(oracleText),
       commitLabel: "oracle",
       lockKey: `${state.id}:oracle`,

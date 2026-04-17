@@ -53,19 +53,12 @@ function loadDiscourseConfig(): DiscourseConfig | null {
     console.warn(`[config] DISCOURSE_CATEGORY_ID is not a number: ${categoryId} — Discourse disabled`);
     return null;
   }
-  return {
-    url,
-    apiKey,
-    categoryId: categoryIdNum,
-    users: {
-      submitter: process.env.DISCOURSE_USER_SUBMITTER || "grants-bot",
-      voxel: process.env.DISCOURSE_USER_VOXEL || "voxel",
-      canvas: process.env.DISCOURSE_USER_CANVAS || "canvas",
-      loop: process.env.DISCOURSE_USER_LOOP || "loop",
-      signal: process.env.DISCOURSE_USER_SIGNAL || "signal",
-      oracle: process.env.DISCOURSE_USER_ORACLE || "oracle",
-    },
-  };
+  const username = process.env.DISCOURSE_USERNAME;
+  if (!username) {
+    console.warn("[config] DISCOURSE_USERNAME is required when Discourse is enabled — Discourse disabled");
+    return null;
+  }
+  return { url, apiKey, categoryId: categoryIdNum, username };
 }
 
 function requireEnv(name: string): string {

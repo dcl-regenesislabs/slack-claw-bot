@@ -62,10 +62,10 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `GRANTS_CHANNEL_ID` | No | Enables the Grants Agents feature — Slack channel ID for grant proposal submissions |
 | `GRANTS_AGENTS_REPO` | No | Public repo with agent personas & context (e.g. `dcl-regenesislabs/grants-evaluation-agents`) |
 | `GRANTS_MAX_CONCURRENT_AGENTS` | No | Concurrency cap for grant agents (default: 4, isolated from main pool) |
-| `DISCOURSE_URL` | No | Discourse forum URL — enables forum publishing when combined with API key + category |
-| `DISCOURSE_API_KEY` | No | Discourse admin API key (impersonates per-user via `Api-Username` header) |
+| `DISCOURSE_URL` | No | Discourse forum URL — enables forum publishing when combined with API key + category + username |
+| `DISCOURSE_API_KEY` | No | Discourse admin API key (impersonates the configured user via `Api-Username` header) |
 | `DISCOURSE_CATEGORY_ID` | No | Category ID where new proposal topics are created |
-| `DISCOURSE_USER_*` | No | Per-agent Discourse usernames (submitter, voxel, canvas, loop, signal, oracle) |
+| `DISCOURSE_USERNAME` | No | Forum account that authors the topic and every reply; per-agent attribution lives in the post body |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
@@ -126,7 +126,11 @@ Proposals are often submitted as single-row CSV exports from Google Forms or sim
 
 ### Discourse integration
 
-When `DISCOURSE_URL`, `DISCOURSE_API_KEY`, and `DISCOURSE_CATEGORY_ID` are set, the bot creates a topic in the configured category as soon as a proposal passes screening. Each `!post` publishes the relevant agent's (or ORACLE's) latest evaluation to that topic. Six Discourse accounts are expected: one submitter and one per agent (VOXEL, CANVAS, LOOP, SIGNAL, ORACLE). The bot uses a single admin API key and impersonates each user via the `Api-Username` header. Re-running `!post` **edits** the existing Discourse post rather than creating a new reply, keeping the topic legible. Without these env vars, `!post` records approval locally only.
+When `DISCOURSE_URL`, `DISCOURSE_API_KEY`, `DISCOURSE_CATEGORY_ID`, and `DISCOURSE_USERNAME` are all set, the bot creates a topic in the configured category as soon as a proposal passes screening. Each `!post` publishes the relevant agent's (or ORACLE's) latest evaluation to that topic. Re-running `!post` **edits** the existing Discourse post rather than creating a new reply, keeping the topic legible. Without these env vars, `!post` records approval locally only.
+
+**Authorship.** All posts are authored by `DISCOURSE_USERNAME` (one forum account). The forum UI shows that same account on every post, but per-agent attribution lives in the post body via headings (`## VOXEL — Technical Feasibility`) and footers (`*— VOXEL Agent*`). Using a single account keeps the setup simple — one forum account to create, one to monitor.
+
+**Auth.** The bot uses a single admin API key with "All Users" scope and impersonates `DISCOURSE_USERNAME` via the `Api-Username` header on every request. Admin keys are powerful (they can post as any user); keep the key in `.env` only and rotate after testing.
 
 ### Agent definitions
 

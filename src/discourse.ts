@@ -1,17 +1,10 @@
-export interface DiscourseUsers {
-  submitter: string;
-  voxel: string;
-  canvas: string;
-  loop: string;
-  signal: string;
-  oracle: string;
-}
-
 export interface DiscourseConfig {
   url: string;
   apiKey: string;
   categoryId: number;
-  users: DiscourseUsers;
+  /** Single Discourse username used for all posts (topic + agents + ORACLE).
+   * Per-agent attribution lives in the post body (headings + footer). */
+  username: string;
 }
 
 export interface CreateTopicOpts {
