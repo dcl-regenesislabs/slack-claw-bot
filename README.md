@@ -59,6 +59,9 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 | `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |
+| `GRANTS_CHANNEL_ID` | No | Enables the Grants Agents feature — Slack channel ID for grant proposal submissions |
+| `GRANTS_AGENTS_REPO` | No | Public repo with agent personas & context (e.g. `dcl-regenesislabs/grants-evaluation-agents`) |
+| `GRANTS_MAX_CONCURRENT_AGENTS` | No | Concurrency cap for grant agents (default: 4, isolated from main pool) |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
@@ -95,6 +98,41 @@ When `MEMORY_REPO` is set, memory files are backed by a GitHub repository:
 
 Without `MEMORY_REPO`, the bot works normally but memory doesn't survive container restarts. Sessions are always ephemeral.
 
+## Grants Agents (optional)
+
+When `GRANTS_CHANNEL_ID` and `GRANTS_AGENTS_REPO` are set, the bot enables a multi-agent grant proposal evaluation flow. This is fully feature-flagged — without these env vars, the bot behaves normally.
+
+### How it works
+
+1. Team pastes a grant proposal in the designated grants channel (top-level message, ≥100 chars)
+2. The bot automatically creates a parent "Evaluating proposal" thread
+3. Four domain agents run in parallel, each posting in its own thread:
+   - **🔧 VOXEL** — Technical Feasibility
+   - **🎨 CANVAS** — Art & Creativity
+   - **🎮 LOOP** — Gameplay & Mechanics
+   - **📣 SIGNAL** — Marketing & Growth
+4. Team iterates per-agent by `@mentioning` the bot in each agent's thread
+5. Team runs `@bot !decide` in the parent thread to trigger ORACLE, which synthesizes all 4 evaluations into a final FUND / NO FUND / CONDITIONAL recommendation
+
+### Agent definitions
+
+Agents live in a separate public repo (`GRANTS_AGENTS_REPO`), cloned at startup. Each agent has a persona file and a context file. Private calibration overlays can be added in `{memoryDir}/grants/context/*-private.md`.
+
+### Storage
+
+Each proposal lives under `{memoryDir}/grants/proposals/{id}/`:
+
+- `state.json` — machine state (thread mappings, status, timestamps)
+- `proposal.md` — human-readable narrative with distilled agent answers
+- `{agent}.jsonl` — authoritative agent session (full conversation history)
+- `oracle.jsonl` — ORACLE session (written on `!decide`)
+
+State files are atomic (tempfile + rename). Sessions resume naturally across restarts.
+
+### Concurrency
+
+Grant agents run on a separate `AgentScheduler` (cap set by `GRANTS_MAX_CONCURRENT_AGENTS`, default 4) so they never starve regular Slack users sharing the main scheduler.
+
 ## Docker
 
 ```bash
@@ -111,6 +149,7 @@ src/
   index.ts          Entry point — startup, shutdown, git clone
   slack.ts          Slack event handlers, thread fetching, message formatting
   agent.ts          Session management, memory loading, pi-coding-agent
+  grants.ts         Grants Agents orchestrator (optional, feature-flagged)
   prompt.ts         Prompt builder (extracted for testability)
   config.ts         Environment variable loading
   concurrency.ts    Agent scheduler with queue management and drain

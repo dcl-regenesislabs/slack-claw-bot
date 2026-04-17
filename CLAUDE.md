@@ -19,6 +19,7 @@ src/
   index.ts        Entry point — startup, shutdown, git clone
   slack.ts        Slack event handlers, thread fetching, message formatting
   agent.ts        Session management, memory loading, pi-coding-agent
+  grants.ts       Grants Agents orchestrator (optional, feature-flagged)
   prompt.ts       Prompt builder (extracted for testability)
   config.ts       Environment variable loading
   concurrency.ts  Agent scheduler with queue management and drain
@@ -27,6 +28,7 @@ src/
   health.ts       Health check endpoint
 ```
 
+- **Grants Agents (optional)**: feature-flagged via `GRANTS_CHANNEL_ID` + `GRANTS_AGENTS_REPO`. Multi-agent proposal evaluation with 4 domain agents (VOXEL, CANVAS, LOOP, SIGNAL) and an ORACLE coordinator. Agent personas come from a separate public repo (cloned on startup). Per-proposal state lives at `{memoryDir}/grants/proposals/{id}/` with `state.json`, `proposal.md` (distilled narrative), and `{agent}.jsonl` (authoritative sessions). Uses a separate `AgentScheduler` so grant evals don't starve regular Slack users. Grant agents set `skipMemorySave: true` and `skipMemoryLoad: true` to avoid polluting bot memory. Commands: paste proposal top-level in grants channel to trigger; `@bot` in an agent thread to refine; `@bot !decide` in parent thread to trigger ORACLE synthesis.
 - **Agent SDK**: uses `@mariozechner/pi-coding-agent` (pi-agent) to run Claude with tool use
   - Agent tools: `createGuardedTools(cwd)` provides bash, read, edit, and write tools with write-protection on project source files (`src/`, `test/`, `package.json`, etc.)
   - Extensions: `before_agent_start` injects memory context into system prompt
