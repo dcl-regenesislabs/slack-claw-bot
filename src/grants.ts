@@ -10,6 +10,7 @@ import { AgentScheduler } from "./concurrency.js";
 import { markdownToMrkdwn } from "./slack.js";
 import { parseCsv, formatCsvAsProposal } from "./csv.js";
 import { DiscourseClient, DiscourseError, type DiscourseConfig } from "./discourse.js";
+import { distillTopic, distillAgent, distillOracle } from "./distill.js";
 
 export type AgentName = "voxel" | "canvas" | "loop" | "signal";
 const AGENT_NAMES: AgentName[] = ["voxel", "canvas", "loop", "signal"];
@@ -484,9 +485,21 @@ class GrantsOrchestrator {
     }
     const effectiveProposalText = normalized.text;
     const effectiveFiles = normalized.files;
-    const title = extractTitle(effectiveProposalText, effectiveFiles);
 
-    // Step 2: Create Discourse topic (if enabled). Abort on failure so we don't
+    // Step 2: Distill a forum-ready title + body from the raw proposal. The
+    // raw (full) text is what agents see during evaluation; the distilled
+    // version is what humans read in the forum topic.
+    let title = extractTitle(effectiveProposalText, effectiveFiles);
+    let forumTopicBody = effectiveProposalText;
+    try {
+      const distilled = await distillTopic(effectiveProposalText);
+      title = distilled.title;
+      forumTopicBody = distilled.body;
+    } catch (err) {
+      console.warn(`[grants] Topic distillation failed, falling back to raw: ${(err as Error).message}`);
+    }
+
+    // Step 3: Create Discourse topic (if enabled). Abort on failure so we don't
     // run 4 agents without a forum destination.
     let discourseTopicId: number | null = null;
     let discourseTopicUrl: string | null = null;
@@ -496,7 +509,7 @@ class GrantsOrchestrator {
       try {
         const topic = await discourse.createTopic({
           title: `[${proposalId}] ${title}`,
-          body: buildDiscourseTopicBody(effectiveProposalText, title, proposalId),
+          body: buildDiscourseTopicBody(forumTopicBody, title, proposalId),
           categoryId: discourseConfig.categoryId,
           username: discourseConfig.username,
         });
@@ -872,11 +885,21 @@ class GrantsOrchestrator {
       return;
     }
 
+    // Distill the full evaluation into a forum-ready summary + questions.
+    // Fall back to the raw text if distillation fails — better to post raw
+    // than to block the team from publishing.
+    let forumBody = agentText;
+    try {
+      forumBody = await distillAgent(agent.toUpperCase(), agentText);
+    } catch (err) {
+      console.warn(`[grants] ${agent} distillation failed, posting raw: ${(err as Error).message}`);
+    }
+
     await this.publishToDiscourse(state, params, agentText, {
       label: agent.toUpperCase(),
       logName: agent,
       username: this.discourseConfig?.username ?? "",
-      body: formatAgentDiscoursePost(agent, agentText),
+      body: formatAgentDiscoursePost(agent, forumBody),
       commitLabel: `${agent} evaluation`,
       lockKey: `${state.id}:${agent}`,
       getPostId: () => state.agents[agent].lastDiscoursePostId,
@@ -904,11 +927,18 @@ class GrantsOrchestrator {
         ":warning: No agent evaluations have been published to Discourse yet. ORACLE will post standalone.");
     }
 
+    let forumBody = oracleText;
+    try {
+      forumBody = await distillOracle(oracleText);
+    } catch (err) {
+      console.warn(`[grants] ORACLE distillation failed, posting raw: ${(err as Error).message}`);
+    }
+
     await this.publishToDiscourse(state, params, oracleText, {
       label: "ORACLE",
       logName: "oracle",
       username: this.discourseConfig?.username ?? "",
-      body: formatOracleDiscoursePost(oracleText),
+      body: formatOracleDiscoursePost(forumBody),
       commitLabel: "oracle",
       lockKey: `${state.id}:oracle`,
       getPostId: () => state.oracle.lastDiscoursePostId,
