@@ -329,7 +329,7 @@ async function createSession(
 ) {
   const systemPrompt = systemPromptOverride
     ?? readFileSync(join(projectDir, "prompts/system.md"), "utf-8").trim();
-  const modelRegistry = new ModelRegistry(authStorage!);
+  const modelRegistry = ModelRegistry.create(authStorage!);
   const model = modelRegistry.find("anthropic", modelId);
   if (!model) throw new Error(`Model "anthropic/${modelId}" not found`);
 
