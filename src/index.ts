@@ -8,9 +8,12 @@ process.on("uncaughtException", (err) => {
 
 import { loadConfig } from "./config.js";
 import { initAgent } from "./agent.js";
-import { startSlackBot, createScheduler } from "./slack.js";
+import { createSlackApp, startSlackApp, createScheduler } from "./slack.js";
 import { startHealthServer } from "./health.js";
-import { resolveMemoryDir } from "./memory.js";
+import { resolveMemoryDir, resolveGrantsAgentsDir, clonePublicRepo } from "./memory.js";
+import { initGrants } from "./grants.js";
+import type { GrantsRouter } from "./grants.js";
+import { DiscourseClient } from "./discourse.js";
 
 const config = loadConfig();
 if (process.env.DEBUG) console.log("[debug] Debug mode enabled");
@@ -36,7 +39,40 @@ await initAgent({
 });
 
 const scheduler = createScheduler(config.maxConcurrentAgents);
-const app = await startSlackBot(config, scheduler);
+
+// Grants feature — opt-in via env vars. The router is wired lazily so that
+// initGrants() can attach its own listeners to the same App instance.
+let grantsRouter: GrantsRouter | null = null;
+const app = createSlackApp(config, scheduler, () => grantsRouter);
+
+if (config.grantsChannelId && config.grantsAgentsRepo && memoryDir) {
+  const grantsAgentsDir = resolveGrantsAgentsDir(config.grantsAgentsRepo);
+  const opendclDir = clonePublicRepo(config.opendclRepo, "opendcl", "opendcl");
+  const jarvisDir = clonePublicRepo(config.jarvisRepo, "jarvis", "jarvis");
+  const discourse = config.discourse
+    ? new DiscourseClient(config.discourse.url, config.discourse.apiKey)
+    : null;
+  if (grantsAgentsDir) {
+    const grants = initGrants({
+      config,
+      memoryDir,
+      grantsAgentsDir,
+      opendclDir,
+      jarvisDir,
+      discourse,
+    });
+    grantsRouter = grants.router;
+    console.log(
+      `[startup] Grants feature enabled${discourse ? " (Discourse integration active)" : " (Discourse disabled — !post is local-only)"}`,
+    );
+  } else {
+    console.warn("[startup] Grants agents repo unavailable — grants feature disabled");
+  }
+} else if (config.grantsChannelId) {
+  console.warn("[startup] GRANTS_CHANNEL_ID set but GRANTS_AGENTS_REPO or memory dir missing — feature disabled");
+}
+
+await startSlackApp(app);
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`[shutdown] ${signal} received — draining...`);

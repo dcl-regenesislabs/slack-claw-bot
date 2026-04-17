@@ -128,6 +128,41 @@ function ensureMemoryDirs(memoryDir: string): void {
   mkdirSync(join(memoryDir, "skills"), { recursive: true });
 }
 
+/**
+ * Clone or pull a public repo to a local directory.
+ * Returns the resolved directory on success, or null on failure.
+ */
+export function clonePublicRepo(repo: string, localName: string, label: string): string | null {
+  try {
+    const rawDir = join(tmpdir(), localName);
+    const dir = existsSync(rawDir) ? realpathSync(rawDir) : realpathSync(tmpdir()) + "/" + localName;
+
+    if (existsSync(join(dir, ".git"))) {
+      execFileSync("git", ["pull", "--rebase", "--autostash"], {
+        cwd: dir,
+        encoding: "utf-8",
+        timeout: 30_000,
+      });
+      console.log(`[${label}] Pulled latest from ${repo}`);
+    } else {
+      execFileSync("gh", ["repo", "clone", repo, dir], {
+        encoding: "utf-8",
+        timeout: 30_000,
+      });
+      console.log(`[${label}] Cloned ${repo} → ${dir}`);
+    }
+    return dir;
+  } catch (err) {
+    console.warn(`[${label}] Failed to resolve repo: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+/** @deprecated Use clonePublicRepo instead */
+export function resolveGrantsAgentsDir(repo: string): string | null {
+  return clonePublicRepo(repo, "grants-agents", "grants");
+}
+
 export function loadMemoryContext(memoryDir: string, userId: string, username: string): string {
   const blocks: string[] = [];
 
