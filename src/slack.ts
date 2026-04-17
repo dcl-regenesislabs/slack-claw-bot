@@ -170,7 +170,7 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
 
 // --- Reactions ---
 
-async function react(client: WebClient, channel: string, ts: string, name: string): Promise<void> {
+export async function react(client: WebClient, channel: string, ts: string, name: string): Promise<void> {
   try {
     await client.reactions.add({ channel, timestamp: ts, name });
   } catch (err: unknown) {
@@ -178,7 +178,7 @@ async function react(client: WebClient, channel: string, ts: string, name: strin
   }
 }
 
-async function unreact(client: WebClient, channel: string, ts: string, name: string): Promise<void> {
+export async function unreact(client: WebClient, channel: string, ts: string, name: string): Promise<void> {
   try {
     await client.reactions.remove({ channel, timestamp: ts, name });
   } catch (err: unknown) {

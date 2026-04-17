@@ -7,7 +7,7 @@ import { runAgent } from "./agent.js";
 import type { FileAttachment } from "./prompt.js";
 import type { Config } from "./config.js";
 import { AgentScheduler } from "./concurrency.js";
-import { markdownToMrkdwn } from "./slack.js";
+import { markdownToMrkdwn, react, unreact } from "./slack.js";
 import { parseCsv, formatCsvAsProposal } from "./csv.js";
 import { DiscourseClient, DiscourseError, type DiscourseConfig } from "./discourse.js";
 import { distillTopic, distillAgent, distillOracle } from "./distill.js";
@@ -332,6 +332,22 @@ class GrantsOrchestrator {
   }
 
   private async handleMention(params: GrantsMentionParams): Promise<void> {
+    // Show live status on the user's message: thinking → success / error.
+    // Matches the main bot's reaction pattern so grants feels like the same bot.
+    const { client, channelId, eventTs } = params;
+    await react(client, channelId, eventTs, "rl-bonk-doge").catch(() => {});
+    try {
+      await this.dispatchMention(params);
+      await unreact(client, channelId, eventTs, "rl-bonk-doge").catch(() => {});
+      await react(client, channelId, eventTs, "white_check_mark").catch(() => {});
+    } catch (err) {
+      await unreact(client, channelId, eventTs, "rl-bonk-doge").catch(() => {});
+      await react(client, channelId, eventTs, "x").catch(() => {});
+      throw err;
+    }
+  }
+
+  private async dispatchMention(params: GrantsMentionParams): Promise<void> {
     const entry = this.threadIndex.get(params.threadTs);
 
     // If thread is not indexed, this is either a new proposal or a random message.
