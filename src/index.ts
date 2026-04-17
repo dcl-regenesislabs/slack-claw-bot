@@ -13,6 +13,7 @@ import { startHealthServer } from "./health.js";
 import { resolveMemoryDir, resolveGrantsAgentsDir, clonePublicRepo } from "./memory.js";
 import { initGrants } from "./grants.js";
 import type { GrantsRouter } from "./grants.js";
+import { DiscourseClient } from "./discourse.js";
 
 const config = loadConfig();
 if (process.env.DEBUG) console.log("[debug] Debug mode enabled");
@@ -48,10 +49,15 @@ if (config.grantsChannelId && config.grantsAgentsRepo && memoryDir) {
   const grantsAgentsDir = resolveGrantsAgentsDir(config.grantsAgentsRepo);
   const opendclDir = clonePublicRepo(config.opendclRepo, "opendcl", "opendcl");
   const jarvisDir = clonePublicRepo(config.jarvisRepo, "jarvis", "jarvis");
+  const discourse = config.discourse
+    ? new DiscourseClient(config.discourse.url, config.discourse.apiKey)
+    : null;
   if (grantsAgentsDir) {
-    const grants = initGrants(config, memoryDir, grantsAgentsDir, opendclDir, jarvisDir);
+    const grants = initGrants(config, memoryDir, grantsAgentsDir, opendclDir, jarvisDir, discourse);
     grantsRouter = grants.router;
-    console.log("[startup] Grants feature enabled");
+    console.log(
+      `[startup] Grants feature enabled${discourse ? " (Discourse integration active)" : " (Discourse disabled — !post is local-only)"}`,
+    );
   } else {
     console.warn("[startup] Grants agents repo unavailable — grants feature disabled");
   }

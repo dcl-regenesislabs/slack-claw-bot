@@ -1,4 +1,5 @@
 import "dotenv/config";
+import type { DiscourseConfig } from "./discourse.js";
 
 export interface Config {
   slackBotToken: string;
@@ -17,6 +18,7 @@ export interface Config {
   grantsMaxConcurrentAgents: number;
   opendclRepo: string;
   jarvisRepo: string;
+  discourse: DiscourseConfig | null;
 }
 
 export function loadConfig(): Config {
@@ -37,6 +39,32 @@ export function loadConfig(): Config {
     grantsMaxConcurrentAgents: parseInt(process.env.GRANTS_MAX_CONCURRENT_AGENTS || "4", 10),
     opendclRepo: process.env.OPENDCL_REPO || "dcl-regenesislabs/opendcl",
     jarvisRepo: process.env.JARVIS_REPO || "decentraland/jarvis",
+    discourse: loadDiscourseConfig(),
+  };
+}
+
+function loadDiscourseConfig(): DiscourseConfig | null {
+  const url = process.env.DISCOURSE_URL;
+  const apiKey = process.env.DISCOURSE_API_KEY;
+  const categoryId = process.env.DISCOURSE_CATEGORY_ID;
+  if (!url || !apiKey || !categoryId) return null;
+  const categoryIdNum = parseInt(categoryId, 10);
+  if (!Number.isFinite(categoryIdNum)) {
+    console.warn(`[config] DISCOURSE_CATEGORY_ID is not a number: ${categoryId} — Discourse disabled`);
+    return null;
+  }
+  return {
+    url,
+    apiKey,
+    categoryId: categoryIdNum,
+    users: {
+      submitter: process.env.DISCOURSE_USER_SUBMITTER || "grants-bot",
+      voxel: process.env.DISCOURSE_USER_VOXEL || "voxel",
+      canvas: process.env.DISCOURSE_USER_CANVAS || "canvas",
+      loop: process.env.DISCOURSE_USER_LOOP || "loop",
+      signal: process.env.DISCOURSE_USER_SIGNAL || "signal",
+      oracle: process.env.DISCOURSE_USER_ORACLE || "oracle",
+    },
   };
 }
 

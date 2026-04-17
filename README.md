@@ -62,6 +62,10 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `GRANTS_CHANNEL_ID` | No | Enables the Grants Agents feature — Slack channel ID for grant proposal submissions |
 | `GRANTS_AGENTS_REPO` | No | Public repo with agent personas & context (e.g. `dcl-regenesislabs/grants-evaluation-agents`) |
 | `GRANTS_MAX_CONCURRENT_AGENTS` | No | Concurrency cap for grant agents (default: 4, isolated from main pool) |
+| `DISCOURSE_URL` | No | Discourse forum URL — enables forum publishing when combined with API key + category |
+| `DISCOURSE_API_KEY` | No | Discourse admin API key (impersonates per-user via `Api-Username` header) |
+| `DISCOURSE_CATEGORY_ID` | No | Category ID where new proposal topics are created |
+| `DISCOURSE_USER_*` | No | Per-agent Discourse usernames (submitter, voxel, canvas, loop, signal, oracle) |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
@@ -112,7 +116,17 @@ When `GRANTS_CHANNEL_ID` and `GRANTS_AGENTS_REPO` are set, the bot enables a mul
    - **🎮 LOOP** — Gameplay & Mechanics
    - **📣 SIGNAL** — Marketing & Growth
 4. Team iterates per-agent by `@mentioning` the bot in each agent's thread
-5. Team runs `@bot !decide` in the parent thread to trigger ORACLE, which synthesizes all 4 evaluations into a final FUND / NO FUND / CONDITIONAL recommendation
+5. Team runs `@bot !post` in an agent thread to publish that agent's evaluation to the Discourse topic (as that agent's Discourse user)
+6. Team runs `@bot !decide` in the parent thread to trigger ORACLE, which synthesizes all 4 evaluations into a final FUND / NO FUND / CONDITIONAL recommendation
+7. Team runs `@bot !post` in the parent thread to publish ORACLE's recommendation to Discourse
+
+### CSV submissions
+
+Proposals are often submitted as single-row CSV exports from Google Forms or similar. CSV attachments are parsed server-side and converted to explicit markdown blocks before reaching the agents — this prevents hallucination from raw CSV structure. Multi-row CSVs are rejected; split into one CSV per proposal.
+
+### Discourse integration
+
+When `DISCOURSE_URL`, `DISCOURSE_API_KEY`, and `DISCOURSE_CATEGORY_ID` are set, the bot creates a topic in the configured category as soon as a proposal passes screening. Each `!post` publishes the relevant agent's (or ORACLE's) latest evaluation to that topic. Six Discourse accounts are expected: one submitter and one per agent (VOXEL, CANVAS, LOOP, SIGNAL, ORACLE). The bot uses a single admin API key and impersonates each user via the `Api-Username` header. Re-running `!post` **edits** the existing Discourse post rather than creating a new reply, keeping the topic legible. Without these env vars, `!post` records approval locally only.
 
 ### Agent definitions
 
@@ -150,6 +164,8 @@ src/
   slack.ts          Slack event handlers, thread fetching, message formatting
   agent.ts          Session management, memory loading, pi-coding-agent
   grants.ts         Grants Agents orchestrator (optional, feature-flagged)
+  discourse.ts      Discourse forum API client (used by grants.ts when enabled)
+  csv.ts            CSV parser + proposal normalizer (used by grants.ts)
   prompt.ts         Prompt builder (extracted for testability)
   config.ts         Environment variable loading
   concurrency.ts    Agent scheduler with queue management and drain

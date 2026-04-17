@@ -8,6 +8,8 @@ import type { FileAttachment } from "./prompt.js";
 import type { Config } from "./config.js";
 import { AgentScheduler } from "./concurrency.js";
 import { markdownToMrkdwn } from "./slack.js";
+import { parseCsv, formatCsvAsProposal } from "./csv.js";
+import { DiscourseClient, type DiscourseConfig } from "./discourse.js";
 
 export type AgentName = "voxel" | "canvas" | "loop" | "signal";
 const AGENT_NAMES: AgentName[] = ["voxel", "canvas", "loop", "signal"];
@@ -21,9 +23,15 @@ const AGENT_LABELS: Record<AgentName, string> = {
 // --- Types ---
 
 export interface AgentEvalState {
-  waitingForReply: boolean;        // Phase 3 reserved
-  roundsCompleted: number;         // Phase 3 reserved
-  lastDiscoursePostId: number | null; // Phase 3 reserved
+  waitingForReply: boolean;
+  roundsCompleted: number;
+  lastDiscoursePostId: number | null;
+  approvedAt: string | null;
+}
+
+export interface OracleEvalState {
+  lastDiscoursePostId: number | null;
+  approvedAt: string | null;
 }
 
 export interface ProposalState {
@@ -39,9 +47,10 @@ export interface ProposalState {
   createdAt: string;
   updatedAt: string;
 
-  // Phase 3 reserved fields
   discourseTopicId: number | null;
+  discourseTopicUrl: string | null;
   agents: Record<AgentName, AgentEvalState>;
+  oracle: OracleEvalState;
 }
 
 export interface GrantsRouter {
@@ -84,8 +93,16 @@ export function initGrants(
   grantsAgentsDir: string,
   opendclDir?: string | null,
   jarvisDir?: string | null,
+  discourse?: DiscourseClient | null,
 ): GrantsHandle {
-  const orchestrator = new GrantsOrchestrator(config, memoryDir, grantsAgentsDir, opendclDir ?? null, jarvisDir ?? null);
+  const orchestrator = new GrantsOrchestrator(
+    config,
+    memoryDir,
+    grantsAgentsDir,
+    opendclDir ?? null,
+    jarvisDir ?? null,
+    discourse ?? null,
+  );
   orchestrator.bootstrap();
 
   return { router: orchestrator.router };
@@ -107,11 +124,20 @@ class GrantsOrchestrator {
     private grantsAgentsDir: string,
     private opendclDir: string | null,
     private jarvisDir: string | null,
+    private discourse: DiscourseClient | null,
   ) {
     this.scheduler = new AgentScheduler(config.grantsMaxConcurrentAgents);
     this.proposalsDir = join(memoryDir, "grants", "proposals");
     mkdirSync(this.proposalsDir, { recursive: true });
     mkdirSync(join(memoryDir, "grants", "context"), { recursive: true });
+  }
+
+  private get discourseConfig(): DiscourseConfig | null {
+    return this.config.discourse;
+  }
+
+  private get discourseEnabled(): boolean {
+    return this.discourse !== null && this.discourseConfig !== null;
   }
 
   // --- Bootstrap ---
@@ -240,7 +266,8 @@ class GrantsOrchestrator {
       const statePath = join(this.proposalsDir, entry.name, "state.json");
       if (!existsSync(statePath)) continue;
       try {
-        const state: ProposalState = JSON.parse(readFileSync(statePath, "utf-8"));
+        const raw: unknown = JSON.parse(readFileSync(statePath, "utf-8"));
+        const state = migrateState(raw);
         this.proposals.set(state.id, state);
         this.addToThreadIndex(state);
       } catch (err) {
@@ -324,14 +351,7 @@ class GrantsOrchestrator {
         return;
       }
       if (command === "!post") {
-        const narrative = this.readNarrative(proposal);
-        if (!proposal.oracleDecision) {
-          await postMessage(params.client, proposal.channelId, params.threadTs,
-            ":warning: No ORACLE decision yet. Run `!decide` first.");
-          return;
-        }
-        await postMessage(params.client, proposal.channelId, params.threadTs,
-          `:white_check_mark: *APPROVED — ORACLE recommendation ready to post*\n\n_Proposal: ${proposal.title} (\`${proposal.id}\`)_\n\n---\n\n${markdownToMrkdwn(narrative.oracle || proposal.oracleDecision)}`);
+        await this.publishOracleToDiscourse(proposal, params);
         return;
       }
       // If ORACLE has already run, treat other mentions as ORACLE refinement
@@ -346,15 +366,7 @@ class GrantsOrchestrator {
 
     // Agent thread commands
     if (command === "!post") {
-      const narrative = this.readNarrative(proposal);
-      const agentText = narrative[entry.kind];
-      if (!agentText) {
-        await postMessage(params.client, proposal.channelId, params.threadTs,
-          ":warning: No evaluation found for this agent yet.");
-        return;
-      }
-      await postMessage(params.client, proposal.channelId, params.threadTs,
-        `:white_check_mark: *APPROVED — Ready to post to forum*\n\n_Agent: ${entry.kind.toUpperCase()}_\n_Proposal: ${proposal.title} (\`${proposal.id}\`)_\n\n---\n\n${markdownToMrkdwn(agentText)}`);
+      await this.publishAgentToDiscourse(proposal, entry.kind, params);
       return;
     }
 
@@ -429,24 +441,64 @@ class GrantsOrchestrator {
     userId: string;
     client: WebClient;
     files?: FileAttachment[];
-  }): Promise<ProposalState> {
-    const { proposalText, channelId, parentMessageTs, userId, client, files } = params;
+  }): Promise<ProposalState | null> {
+    const { proposalText, channelId, parentMessageTs, client, files } = params;
 
     const proposalId = makeProposalId();
-    const title = extractTitle(proposalText, files);
 
-    // Post the parent summary message (in a thread off the submission, so the channel stays clean)
+    // Step 1: Pre-process CSV attachments. Single-row CSVs are converted to explicit
+    // markdown blocks so agents don't hallucinate extra proposals from raw CSV structure.
+    const normalized = await this.normalizeCsvFiles(proposalText, files).catch(
+      (err): NormalizeResult => ({ ok: false, reason: (err as Error).message }),
+    );
+    if (!normalized.ok) {
+      await postMessage(client, channelId, parentMessageTs,
+        `:x: *Cannot evaluate proposal*\n${normalized.reason}`);
+      return null;
+    }
+    const effectiveProposalText = normalized.text;
+    const effectiveFiles = normalized.files;
+    const title = extractTitle(effectiveProposalText, effectiveFiles);
+
+    // Step 2: Create Discourse topic (if enabled). Abort on failure so we don't
+    // run 4 agents without a forum destination.
+    let discourseTopicId: number | null = null;
+    let discourseTopicUrl: string | null = null;
+    if (this.discourseEnabled) {
+      try {
+        const topic = await this.discourse!.createTopic({
+          title: `[${proposalId}] ${title}`,
+          body: buildDiscourseTopicBody(effectiveProposalText, title, proposalId),
+          categoryId: this.discourseConfig!.categoryId,
+          username: this.discourseConfig!.users.submitter,
+        });
+        discourseTopicId = topic.topicId;
+        discourseTopicUrl = topic.topicUrl;
+        console.log(`[grants] Created Discourse topic ${topic.topicId} for ${proposalId}`);
+      } catch (err) {
+        console.error("[grants] Failed to create Discourse topic:", err);
+        await postMessage(client, channelId, parentMessageTs,
+          `:x: *Failed to create Discourse topic*\n${(err as Error).message}\n\nEvaluation aborted.`);
+        return null;
+      }
+    }
+
+    const discourseLine = discourseTopicUrl
+      ? `\n\n:link: Discourse topic: <${discourseTopicUrl}|view on forum>`
+      : "";
+
+    // Step 3: Post the parent summary message in Slack
     const parentMsg = await client.chat.postMessage({
       channel: channelId,
       thread_ts: parentMessageTs,
-      text: `:mag: *Evaluating proposal:* ${title}\n_Proposal ID: \`${proposalId}\`_\n\n` +
+      text: `:mag: *Evaluating proposal:* ${title}\n_Proposal ID: \`${proposalId}\`_${discourseLine}\n\n` +
             `Running 4 domain agents in parallel (VOXEL, CANVAS, LOOP, SIGNAL).\n\n` +
             `*Commands:*\n` +
             `• \`@bot <feedback>\` in an agent thread — refine that agent's evaluation\n` +
-            `• \`@bot !post\` in an agent thread — mark the evaluation as approved\n` +
+            `• \`@bot !post\` in an agent thread — publish this agent's evaluation${this.discourseEnabled ? " to Discourse" : ""}\n` +
             `• \`@bot !decide\` in this thread — run ORACLE final recommendation\n` +
             `• \`@bot <feedback>\` in this thread (after !decide) — refine ORACLE's recommendation\n` +
-            `• \`@bot !post\` in this thread — mark ORACLE recommendation as approved`,
+            `• \`@bot !post\` in this thread — publish ORACLE recommendation${this.discourseEnabled ? " to Discourse" : ""}`,
     });
     const parentThreadTs = parentMsg.ts!;
 
@@ -462,13 +514,15 @@ class GrantsOrchestrator {
       oracleDecision: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      discourseTopicId: null,
+      discourseTopicId,
+      discourseTopicUrl,
       agents: {
-        voxel:  { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null },
-        canvas: { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null },
-        loop:   { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null },
-        signal: { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null },
+        voxel:  { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null, approvedAt: null },
+        canvas: { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null, approvedAt: null },
+        loop:   { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null, approvedAt: null },
+        signal: { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null, approvedAt: null },
       },
+      oracle: { lastDiscoursePostId: null, approvedAt: null },
     };
 
     // Ensure the proposal folder exists and persist initial state + narrative
@@ -478,12 +532,12 @@ class GrantsOrchestrator {
     // Slack uses the submission ts as thread_ts for all replies in the thread
     this.indexThread(parentMessageTs, proposalId, "parent");
     this.indexThread(parentThreadTs, proposalId, "parent");
-    this.writeNarrative(state, proposalText);
+    this.writeNarrative(state, effectiveProposalText);
     this.saveState(state);
 
     // Trigger 4 agents in parallel, collect per-agent costs
     const results = await Promise.all(AGENT_NAMES.map((agent) =>
-      this.runAgentEvaluation(state, agent, proposalText, client, files)
+      this.runAgentEvaluation(state, agent, effectiveProposalText, client, effectiveFiles)
         .catch((err): { agent: AgentName; cost: number; tokens: number } => {
           console.error(`[grants] ${agent} evaluation failed:`, err);
           postMessage(client, channelId, parentThreadTs,
@@ -718,6 +772,202 @@ class GrantsOrchestrator {
     await result.done.catch(() => {});
   }
 
+  // --- CSV pre-processing ---
+
+  /**
+   * Convert CSV attachments into explicit markdown proposal blocks so agents
+   * cannot hallucinate extra proposals from raw CSV structure. Hard-caps at
+   * single-row CSVs for now — multi-row batch submission is out of scope.
+   */
+  private async normalizeCsvFiles(
+    proposalText: string,
+    files: FileAttachment[] | undefined,
+  ): Promise<NormalizeResult> {
+    if (!files?.length) return { ok: true, text: proposalText, files: files ?? [] };
+
+    const isCsv = (f: FileAttachment): boolean =>
+      f.name.toLowerCase().endsWith(".csv") ||
+      f.mimetype === "text/csv" ||
+      f.mimetype === "application/vnd.ms-excel";
+
+    const csvFiles = files.filter(isCsv);
+    const otherFiles = files.filter((f) => !isCsv(f));
+
+    if (csvFiles.length === 0) return { ok: true, text: proposalText, files };
+
+    const normalizedBlocks: string[] = [];
+    for (const f of csvFiles) {
+      const content = await fetchSlackFile(f.url, this.config.slackBotToken);
+      const parsed = parseCsv(content);
+
+      if (parsed.rows.length === 0) {
+        return {
+          ok: false,
+          reason: `CSV \`${f.name}\` has no data rows (only headers or empty).`,
+        };
+      }
+      if (parsed.rows.length > 1) {
+        return {
+          ok: false,
+          reason:
+            `CSV \`${f.name}\` has ${parsed.rows.length} rows. Only single-proposal CSVs are supported right now. ` +
+            `Please split into one CSV per proposal and resubmit.`,
+        };
+      }
+
+      normalizedBlocks.push(`### From \`${f.name}\`\n\n${formatCsvAsProposal(parsed, f.name)}`);
+    }
+
+    const combined = proposalText.trim()
+      ? `${proposalText}\n\n---\n\n${normalizedBlocks.join("\n\n")}`
+      : normalizedBlocks.join("\n\n");
+
+    return { ok: true, text: combined, files: otherFiles };
+  }
+
+  // --- Discourse publishing ---
+
+  private async publishAgentToDiscourse(
+    state: ProposalState,
+    agent: AgentName,
+    params: GrantsMentionParams,
+  ): Promise<void> {
+    const narrative = this.readNarrative(state);
+    const agentText = narrative[agent];
+    if (!agentText) {
+      await postMessage(params.client, state.channelId, params.threadTs,
+        ":warning: No evaluation found for this agent yet.");
+      return;
+    }
+
+    if (!this.discourseEnabled) {
+      // Local-only approval fallback
+      state.agents[agent].approvedAt = new Date().toISOString();
+      this.saveState(state);
+      this.commitAndPush(`grants: approve ${agent} for ${state.id}`);
+      await postMessage(params.client, state.channelId, params.threadTs,
+        `:white_check_mark: *APPROVED — ${agent.toUpperCase()}*\n_(Discourse disabled — approval recorded locally)_\n\n_Proposal: ${state.title} (\`${state.id}\`)_\n\n---\n\n${markdownToMrkdwn(agentText)}`);
+      return;
+    }
+
+    if (!state.discourseTopicId) {
+      await postMessage(params.client, state.channelId, params.threadTs,
+        ":warning: No Discourse topic linked to this proposal. Cannot post.");
+      return;
+    }
+
+    const username = this.discourseConfig!.users[agent];
+    const body = formatAgentDiscoursePost(agent, agentText);
+    const existingId = state.agents[agent].lastDiscoursePostId;
+
+    try {
+      let postUrl: string;
+      if (existingId) {
+        await this.discourse!.editPost({
+          postId: existingId,
+          body,
+          username,
+          editReason: "Refined after Slack iteration",
+        });
+        postUrl = this.discourse!.postUrl(existingId);
+      } else {
+        const r = await this.discourse!.reply({
+          topicId: state.discourseTopicId,
+          body,
+          username,
+        });
+        state.agents[agent].lastDiscoursePostId = r.postId;
+        postUrl = r.postUrl;
+      }
+
+      state.agents[agent].approvedAt = new Date().toISOString();
+      state.updatedAt = new Date().toISOString();
+      this.saveState(state);
+      this.commitAndPush(`grants: publish ${agent} evaluation for ${state.id}`);
+
+      const verb = existingId ? "Updated" : "Posted";
+      await postMessage(params.client, state.channelId, params.threadTs,
+        `:white_check_mark: *${verb} to Discourse as \`${username}\`*\n<${postUrl}|View on forum>`);
+    } catch (err) {
+      console.error(`[grants] Failed to publish ${agent} to Discourse:`, err);
+      await postMessage(params.client, state.channelId, params.threadTs,
+        `:x: *Failed to post to Discourse*\n${(err as Error).message}`);
+    }
+  }
+
+  private async publishOracleToDiscourse(
+    state: ProposalState,
+    params: GrantsMentionParams,
+  ): Promise<void> {
+    const narrative = this.readNarrative(state);
+    const oracleText = narrative.oracle || state.oracleDecision;
+    if (!oracleText) {
+      await postMessage(params.client, state.channelId, params.threadTs,
+        ":warning: No ORACLE decision yet. Run `!decide` first.");
+      return;
+    }
+
+    // Warn if no agents have been published yet — but allow it
+    const publishedAgents = AGENT_NAMES.filter((a) => state.agents[a].lastDiscoursePostId !== null);
+    if (this.discourseEnabled && publishedAgents.length === 0) {
+      await postMessage(params.client, state.channelId, params.threadTs,
+        ":warning: No agent evaluations have been published to Discourse yet. ORACLE will post standalone.");
+    }
+
+    if (!this.discourseEnabled) {
+      state.oracle.approvedAt = new Date().toISOString();
+      this.saveState(state);
+      this.commitAndPush(`grants: approve oracle for ${state.id}`);
+      await postMessage(params.client, state.channelId, params.threadTs,
+        `:white_check_mark: *APPROVED — ORACLE*\n_(Discourse disabled — approval recorded locally)_\n\n_Proposal: ${state.title} (\`${state.id}\`)_\n\n---\n\n${markdownToMrkdwn(oracleText)}`);
+      return;
+    }
+
+    if (!state.discourseTopicId) {
+      await postMessage(params.client, state.channelId, params.threadTs,
+        ":warning: No Discourse topic linked to this proposal. Cannot post.");
+      return;
+    }
+
+    const username = this.discourseConfig!.users.oracle;
+    const body = formatOracleDiscoursePost(oracleText);
+    const existingId = state.oracle.lastDiscoursePostId;
+
+    try {
+      let postUrl: string;
+      if (existingId) {
+        await this.discourse!.editPost({
+          postId: existingId,
+          body,
+          username,
+          editReason: "Refined after Slack iteration",
+        });
+        postUrl = this.discourse!.postUrl(existingId);
+      } else {
+        const r = await this.discourse!.reply({
+          topicId: state.discourseTopicId,
+          body,
+          username,
+        });
+        state.oracle.lastDiscoursePostId = r.postId;
+        postUrl = r.postUrl;
+      }
+
+      state.oracle.approvedAt = new Date().toISOString();
+      state.updatedAt = new Date().toISOString();
+      this.saveState(state);
+      this.commitAndPush(`grants: publish oracle for ${state.id}`);
+
+      const verb = existingId ? "Updated" : "Posted";
+      await postMessage(params.client, state.channelId, params.threadTs,
+        `:white_check_mark: *${verb} ORACLE to Discourse as \`${username}\`*\n<${postUrl}|View on forum>`);
+    } catch (err) {
+      console.error("[grants] Failed to publish ORACLE to Discourse:", err);
+      await postMessage(params.client, state.channelId, params.threadTs,
+        `:x: *Failed to post ORACLE to Discourse*\n${(err as Error).message}`);
+    }
+  }
+
   // --- Narrative file (proposal.md) ---
 
   private buildInitialPrompt(proposalText: string, agent: AgentName): string {
@@ -854,6 +1104,10 @@ ${sections.learnings || "_(none yet)_"}
 
 // --- Helpers ---
 
+type NormalizeResult =
+  | { ok: true; text: string; files: FileAttachment[] }
+  | { ok: false; reason: string };
+
 interface NarrativeSections {
   submission: string;
   voxel: string;
@@ -862,6 +1116,98 @@ interface NarrativeSections {
   signal: string;
   oracle: string;
   learnings: string;
+}
+
+async function fetchSlackFile(url: string, botToken: string): Promise<string> {
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${botToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Fetch failed for ${url}: ${res.status} ${res.statusText}`);
+  }
+  return res.text();
+}
+
+function buildDiscourseTopicBody(proposalText: string, title: string, proposalId: string): string {
+  return (
+    `${proposalText.trim()}\n\n` +
+    `---\n\n` +
+    `*This proposal is being evaluated by the Grants Agents. Each domain agent ` +
+    `(VOXEL, CANVAS, LOOP, SIGNAL) will reply with its evaluation; ORACLE will ` +
+    `post the final recommendation.*\n\n` +
+    `_Proposal ID: \`${proposalId}\` · Title: ${title}_`
+  );
+}
+
+const DISCOURSE_AGENT_LABELS: Record<AgentName, string> = {
+  voxel: "VOXEL — Technical Feasibility",
+  canvas: "CANVAS — Art & Creativity",
+  loop: "LOOP — Gameplay & Mechanics",
+  signal: "SIGNAL — Marketing & Growth",
+};
+
+function formatAgentDiscoursePost(agent: AgentName, body: string): string {
+  return (
+    `## ${DISCOURSE_AGENT_LABELS[agent]}\n\n` +
+    `${body.trim()}\n\n` +
+    `---\n\n` +
+    `*— ${agent.toUpperCase()} Agent*`
+  );
+}
+
+function formatOracleDiscoursePost(body: string): string {
+  return (
+    `## ORACLE — Final Recommendation\n\n` +
+    `${body.trim()}\n\n` +
+    `---\n\n` +
+    `*— ORACLE*`
+  );
+}
+
+/**
+ * Backfill missing fields on legacy state.json files loaded from disk.
+ * Fields added after shipping: approvedAt on agents, oracle struct, discourseTopicUrl.
+ */
+function migrateState(raw: unknown): ProposalState {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("state.json is not an object");
+  }
+  const s = raw as Partial<ProposalState> & { agents?: Record<string, Partial<AgentEvalState>> };
+
+  const agents = (s.agents ?? {}) as Record<string, Partial<AgentEvalState>>;
+  const migratedAgents: Record<AgentName, AgentEvalState> = {
+    voxel:  normalizeAgent(agents.voxel),
+    canvas: normalizeAgent(agents.canvas),
+    loop:   normalizeAgent(agents.loop),
+    signal: normalizeAgent(agents.signal),
+  };
+
+  return {
+    id: s.id!,
+    title: s.title ?? "Untitled",
+    track: s.track ?? null,
+    status: s.status ?? "evaluating",
+    channelId: s.channelId!,
+    submissionTs: s.submissionTs ?? "",
+    parentThreadTs: s.parentThreadTs!,
+    agentThreads: s.agentThreads ?? {},
+    oracleDecision: s.oracleDecision ?? null,
+    createdAt: s.createdAt ?? new Date().toISOString(),
+    updatedAt: s.updatedAt ?? new Date().toISOString(),
+    discourseTopicId: s.discourseTopicId ?? null,
+    discourseTopicUrl: s.discourseTopicUrl ?? null,
+    agents: migratedAgents,
+    oracle: s.oracle ?? { lastDiscoursePostId: null, approvedAt: null },
+  };
+}
+
+function normalizeAgent(a: Partial<AgentEvalState> | undefined): AgentEvalState {
+  return {
+    waitingForReply: a?.waitingForReply ?? false,
+    roundsCompleted: a?.roundsCompleted ?? 0,
+    lastDiscoursePostId: a?.lastDiscoursePostId ?? null,
+    approvedAt: a?.approvedAt ?? null,
+  };
 }
 
 function stripFrontmatter(content: string): string {
