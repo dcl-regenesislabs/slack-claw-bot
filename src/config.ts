@@ -53,12 +53,25 @@ function loadDiscourseConfig(): DiscourseConfig | null {
     console.warn(`[config] DISCOURSE_CATEGORY_ID is not a number: ${categoryId} — Discourse disabled`);
     return null;
   }
-  const username = process.env.DISCOURSE_USERNAME;
-  if (!username) {
-    console.warn("[config] DISCOURSE_USERNAME is required when Discourse is enabled — Discourse disabled");
+  const users = {
+    submitter: process.env.DISCOURSE_USER_SUBMITTER,
+    voxel: process.env.DISCOURSE_USER_VOXEL,
+    canvas: process.env.DISCOURSE_USER_CANVAS,
+    loop: process.env.DISCOURSE_USER_LOOP,
+    signal: process.env.DISCOURSE_USER_SIGNAL,
+    oracle: process.env.DISCOURSE_USER_ORACLE,
+  };
+  const missing = Object.entries(users).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length > 0) {
+    console.warn(`[config] Discourse missing usernames for: ${missing.join(", ")} — Discourse disabled`);
     return null;
   }
-  return { url, apiKey, categoryId: categoryIdNum, username };
+  return {
+    url,
+    apiKey,
+    categoryId: categoryIdNum,
+    users: users as Record<keyof typeof users, string>,
+  };
 }
 
 function requireEnv(name: string): string {

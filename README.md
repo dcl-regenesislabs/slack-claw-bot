@@ -62,10 +62,15 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `GRANTS_CHANNEL_ID` | No | Enables the Grants Agents feature — Slack channel ID for grant proposal submissions |
 | `GRANTS_AGENTS_REPO` | No | Public repo with agent personas & context (e.g. `dcl-regenesislabs/grants-evaluation-agents`) |
 | `GRANTS_MAX_CONCURRENT_AGENTS` | No | Concurrency cap for grant agents (default: 4, isolated from main pool) |
-| `DISCOURSE_URL` | No | Discourse forum URL — enables forum publishing when combined with API key + category + username |
-| `DISCOURSE_API_KEY` | No | Discourse admin API key (impersonates the configured user via `Api-Username` header) |
+| `DISCOURSE_URL` | No | Discourse forum URL — enables forum publishing when combined with API key + category + all 6 usernames |
+| `DISCOURSE_API_KEY` | No | Discourse admin API key with "All Users" scope (impersonates each configured user via `Api-Username`) |
 | `DISCOURSE_CATEGORY_ID` | No | Category ID where new proposal topics are created |
-| `DISCOURSE_USERNAME` | No | Forum account that authors the topic and every reply; per-agent attribution lives in the post body |
+| `DISCOURSE_USER_SUBMITTER` | No | Forum account that creates the topic (e.g. `dclgrants`) |
+| `DISCOURSE_USER_VOXEL` | No | Forum account for VOXEL agent replies |
+| `DISCOURSE_USER_CANVAS` | No | Forum account for CANVAS agent replies |
+| `DISCOURSE_USER_LOOP` | No | Forum account for LOOP agent replies |
+| `DISCOURSE_USER_SIGNAL` | No | Forum account for SIGNAL agent replies |
+| `DISCOURSE_USER_ORACLE` | No | Forum account for ORACLE final recommendations |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
@@ -126,11 +131,16 @@ Proposals are often submitted as single-row CSV exports from Google Forms or sim
 
 ### Discourse integration
 
-When `DISCOURSE_URL`, `DISCOURSE_API_KEY`, `DISCOURSE_CATEGORY_ID`, and `DISCOURSE_USERNAME` are all set, the bot creates a topic in the configured category as soon as a proposal passes screening. Each `!post` publishes the relevant agent's (or ORACLE's) latest evaluation to that topic. Re-running `!post` **edits** the existing Discourse post rather than creating a new reply, keeping the topic legible. Without these env vars, `!post` records approval locally only.
+When `DISCOURSE_URL`, `DISCOURSE_API_KEY`, `DISCOURSE_CATEGORY_ID`, and all six `DISCOURSE_USER_*` env vars are set, the bot creates a topic in the configured category as soon as a proposal passes screening. Each `!post` publishes the relevant agent's (or ORACLE's) latest evaluation to that topic. Re-running `!post` **edits** the existing Discourse post rather than creating a new reply, keeping the topic legible. Without these env vars, `!post` records approval locally only.
 
-**Authorship.** All posts are authored by `DISCOURSE_USERNAME` (one forum account). The forum UI shows that same account on every post, but per-agent attribution lives in the post body via headings (`## VOXEL — Technical Feasibility`) and footers (`*— VOXEL Agent*`). Using a single account keeps the setup simple — one forum account to create, one to monitor.
+**Authorship.** Each stage of the review is authored by a dedicated Discourse account:
+- `DISCOURSE_USER_SUBMITTER` — creates the topic (e.g. `dclgrants`)
+- `DISCOURSE_USER_VOXEL` / `CANVAS` / `LOOP` / `SIGNAL` — post their respective agent evaluations
+- `DISCOURSE_USER_ORACLE` — posts the final recommendation
 
-**Auth.** The bot uses a single admin API key with "All Users" scope and impersonates `DISCOURSE_USERNAME` via the `Api-Username` header on every request. Admin keys are powerful (they can post as any user); keep the key in `.env` only and rotate after testing.
+All 6 accounts must exist on the Discourse instance with write access to the configured category.
+
+**Auth.** The bot uses a single admin API key with "All Users" scope and impersonates each configured user via the `Api-Username` header on every request. Admin keys are powerful (they can post as any user); keep the key in `.env` only and rotate after testing.
 
 ### Agent definitions
 

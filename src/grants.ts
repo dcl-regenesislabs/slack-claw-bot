@@ -539,7 +539,7 @@ class GrantsOrchestrator {
           title: `[Grant Proposal] ${title} #${idSuffix}`,
           body: buildDiscourseTopicBody(forumTopicBody, title, proposalId),
           categoryId: discourseConfig.categoryId,
-          username: discourseConfig.username,
+          username: discourseConfig.users.submitter,
         });
         discourseTopicId = topic.topicId;
         discourseTopicUrl = topic.topicUrl;
@@ -931,7 +931,7 @@ class GrantsOrchestrator {
     await this.publishToDiscourse(state, params, agentText, {
       label: agent.toUpperCase(),
       logName: agent,
-      username: this.discourseConfig?.username ?? "",
+      username: this.discourseConfig?.users[agent] ?? "",
       body: formatAgentDiscoursePost(agent, forumBody),
       commitLabel: `${agent} evaluation`,
       lockKey: `${state.id}:${agent}`,
@@ -970,7 +970,7 @@ class GrantsOrchestrator {
     await this.publishToDiscourse(state, params, oracleText, {
       label: "ORACLE",
       logName: "oracle",
-      username: this.discourseConfig?.username ?? "",
+      username: this.discourseConfig?.users.oracle ?? "",
       body: formatOracleDiscoursePost(forumBody),
       commitLabel: "oracle",
       lockKey: `${state.id}:oracle`,
