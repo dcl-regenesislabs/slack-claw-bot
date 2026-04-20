@@ -70,7 +70,12 @@ export function parseCsv(text: string): CsvParseResult {
 
   if (cells.length === 0) return { headers: [], rows: [] };
 
-  const headers = cells[0].map((h) => h.trim());
+  // Disambiguate duplicate header names with a "(2)", "(3)" suffix.
+  // Google Forms exports the same question label once per conditional branch
+  // (e.g. "Project title" appears in both the Content and Tech track blocks);
+  // without this, the later column would silently overwrite the earlier one.
+  const rawHeaders = cells[0].map((h) => h.trim());
+  const headers = dedupeHeaders(rawHeaders);
   const rows: CsvRow[] = cells
     .slice(1)
     .filter((r) => r.some((cell) => cell.trim() !== ""))
@@ -83,6 +88,32 @@ export function parseCsv(text: string): CsvParseResult {
     });
 
   return { headers, rows };
+}
+
+function dedupeHeaders(raw: string[]): string[] {
+  const seen = new Map<string, number>();
+  return raw.map((h) => {
+    const count = seen.get(h) ?? 0;
+    seen.set(h, count + 1);
+    return count === 0 ? h : `${h} (${count + 1})`;
+  });
+}
+
+/** Headers that should not appear in the agent-facing or forum-facing rendering.
+ * Contains PII (email) and bureaucratic acknowledgments that add noise without
+ * evaluation value. Also exported so the deterministic topic template can reuse it. */
+export const BUREAUCRACY_HEADERS = new Set<string>([
+  "Timestamp",
+  "Applying for",
+  "I understand that proposals must align with the selected category theme for this season",
+  "Email address",
+  "I confirm that the information submitted here is accurate to the best of my knowledge",
+  "I understand that the program is intended to support open-source work",
+  "I understand that DCL Regenesis Labs may contact me for follow-up questions or clarifications during review",
+]);
+
+function stripHeaderSuffix(h: string): string {
+  return h.replace(/\s*\(\d+\)$/, "");
 }
 
 export function formatCsvAsProposal(parsed: CsvParseResult, sourceName: string): string {
@@ -99,9 +130,11 @@ export function formatCsvAsProposal(parsed: CsvParseResult, sourceName: string):
   const blocks = rows.map((row, idx) => {
     const fields = headers
       .map((h) => {
+        const label = stripHeaderSuffix(h);
+        if (BUREAUCRACY_HEADERS.has(label)) return null;
         const v = row[h];
         if (!v || v.trim() === "") return null;
-        return `- **${h}**: ${v}`;
+        return `- **${label}**: ${v}`;
       })
       .filter((line): line is string => line !== null)
       .join("\n");

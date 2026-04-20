@@ -122,3 +122,29 @@ test("formatCsvAsProposal: multi-row count", () => {
   assert.match(output, /Proposal 1 of 3/);
   assert.match(output, /Proposal 3 of 3/);
 });
+
+test("parseCsv: disambiguates duplicate headers with (N) suffix", () => {
+  const parsed = parseCsv("Project title,Budget,Project title\nAlpha,100,Beta");
+  assert.deepEqual(parsed.headers, ["Project title", "Budget", "Project title (2)"]);
+  assert.equal(parsed.rows[0]["Project title"], "Alpha");
+  assert.equal(parsed.rows[0]["Project title (2)"], "Beta");
+});
+
+test("formatCsvAsProposal: strips (N) suffix from display labels", () => {
+  const parsed = parseCsv("Project title,Project title\nAlpha,Beta");
+  const output = formatCsvAsProposal(parsed, "x.csv");
+  // Both values shown, but labels are both "Project title" (no "(2)")
+  assert.match(output, /\*\*Project title\*\*: Alpha/);
+  assert.match(output, /\*\*Project title\*\*: Beta/);
+  assert.doesNotMatch(output, /Project title \(2\)/);
+});
+
+test("formatCsvAsProposal: drops bureaucracy fields (email + acknowledgments)", () => {
+  const parsed = parseCsv(
+    "Email address,Project title,I confirm that the information submitted here is accurate to the best of my knowledge\nuser@x.com,MyProject,I confirm",
+  );
+  const output = formatCsvAsProposal(parsed, "x.csv");
+  assert.doesNotMatch(output, /user@x\.com/);
+  assert.doesNotMatch(output, /I confirm/);
+  assert.match(output, /MyProject/);
+});

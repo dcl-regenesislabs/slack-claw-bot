@@ -8,9 +8,10 @@ import type { FileAttachment } from "./prompt.js";
 import type { Config } from "./config.js";
 import { AgentScheduler } from "./concurrency.js";
 import { markdownToMrkdwn, react, unreact } from "./slack.js";
-import { parseCsv, formatCsvAsProposal } from "./csv.js";
+import { parseCsv, formatCsvAsProposal, type CsvRow } from "./csv.js";
 import { DiscourseClient, DiscourseError, type DiscourseConfig } from "./discourse.js";
 import { distillTopic, distillAgent, distillOracle } from "./distill.js";
+import { renderProposalTopic } from "./proposal-template.js";
 
 export type AgentName = "voxel" | "canvas" | "loop" | "signal";
 const AGENT_NAMES: AgentName[] = ["voxel", "canvas", "loop", "signal"];
@@ -502,17 +503,24 @@ class GrantsOrchestrator {
     const effectiveProposalText = normalized.text;
     const effectiveFiles = normalized.files;
 
-    // Step 2: Distill a forum-ready title + body from the raw proposal. The
-    // raw (full) text is what agents see during evaluation; the distilled
-    // version is what humans read in the forum topic.
+    // Step 2: Produce a forum-ready title + body. When the proposal came from
+    // a recognisable Google Form CSV, render deterministically from the known
+    // column schema — no LLM, no hallucinations. Otherwise, fall back to the
+    // LLM distiller for free-text submissions.
     let title = extractTitle(effectiveProposalText, effectiveFiles);
     let forumTopicBody = effectiveProposalText;
-    try {
-      const distilled = await distillTopic(effectiveProposalText);
-      title = distilled.title;
-      forumTopicBody = distilled.body;
-    } catch (err) {
-      console.warn(`[grants] Topic distillation failed, falling back to raw: ${(err as Error).message}`);
+    const templated = normalized.csvRow ? renderProposalTopic(normalized.csvRow) : null;
+    if (templated) {
+      title = templated.title;
+      forumTopicBody = templated.body;
+    } else {
+      try {
+        const distilled = await distillTopic(effectiveProposalText);
+        title = distilled.title;
+        forumTopicBody = distilled.body;
+      } catch (err) {
+        console.warn(`[grants] Topic distillation failed, falling back to raw: ${(err as Error).message}`);
+      }
     }
 
     // Step 3: Create Discourse topic (if enabled). Abort on failure so we don't
@@ -840,7 +848,7 @@ class GrantsOrchestrator {
     proposalText: string,
     files: FileAttachment[] | undefined,
   ): Promise<NormalizeResult> {
-    if (!files?.length) return { ok: true, text: proposalText, files: files ?? [] };
+    if (!files?.length) return { ok: true, text: proposalText, files: files ?? [], csvRow: null };
 
     const isCsv = (f: FileAttachment): boolean =>
       f.name.toLowerCase().endsWith(".csv") ||
@@ -850,9 +858,10 @@ class GrantsOrchestrator {
     const csvFiles = files.filter(isCsv);
     const otherFiles = files.filter((f) => !isCsv(f));
 
-    if (csvFiles.length === 0) return { ok: true, text: proposalText, files };
+    if (csvFiles.length === 0) return { ok: true, text: proposalText, files, csvRow: null };
 
     const normalizedBlocks: string[] = [];
+    let firstRow: CsvRow | null = null;
     for (const f of csvFiles) {
       const content = await fetchSlackFile(f.url, this.config.slackBotToken);
       const parsed = parseCsv(content);
@@ -872,6 +881,10 @@ class GrantsOrchestrator {
         };
       }
 
+      // First CSV row is passed back for the deterministic topic renderer.
+      // Multiple CSV uploads in one submission are rare; first-wins is fine.
+      if (firstRow === null) firstRow = parsed.rows[0];
+
       normalizedBlocks.push(`### From \`${f.name}\`\n\n${formatCsvAsProposal(parsed, f.name)}`);
     }
 
@@ -879,7 +892,7 @@ class GrantsOrchestrator {
       ? `${proposalText}\n\n---\n\n${normalizedBlocks.join("\n\n")}`
       : normalizedBlocks.join("\n\n");
 
-    return { ok: true, text: combined, files: otherFiles };
+    return { ok: true, text: combined, files: otherFiles, csvRow: firstRow };
   }
 
   // --- Discourse publishing ---
@@ -1201,7 +1214,7 @@ ${sections.learnings || "_(none yet)_"}
 // --- Helpers ---
 
 type NormalizeResult =
-  | { ok: true; text: string; files: FileAttachment[] }
+  | { ok: true; text: string; files: FileAttachment[]; csvRow: CsvRow | null }
   | { ok: false; reason: string };
 
 interface NarrativeSections {
