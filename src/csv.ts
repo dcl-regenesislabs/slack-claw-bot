@@ -10,6 +10,10 @@ export interface CsvParseResult {
 export function parseCsv(text: string): CsvParseResult {
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
 
+  // Google Forms exports in some locales (e.g. EU) use ';' as the field separator.
+  // Auto-detect by counting unquoted commas vs semicolons on the header line.
+  const delimiter = detectDelimiter(text);
+
   const cells: string[][] = [];
   let row: string[] = [];
   let field = "";
@@ -40,7 +44,7 @@ export function parseCsv(text: string): CsvParseResult {
       i++;
       continue;
     }
-    if (ch === ",") {
+    if (ch === delimiter) {
       row.push(field);
       field = "";
       i++;
@@ -88,6 +92,27 @@ export function parseCsv(text: string): CsvParseResult {
     });
 
   return { headers, rows };
+}
+
+/** Pick ',' or ';' as the field separator based on whichever appears more
+ * often outside of quoted regions in the header line. Defaults to ','. */
+function detectDelimiter(text: string): "," | ";" {
+  let commas = 0;
+  let semis = 0;
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') { i++; continue; }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (inQuotes) continue;
+    if (ch === "\n" || ch === "\r") break;
+    if (ch === ",") commas++;
+    else if (ch === ";") semis++;
+  }
+  return semis > commas ? ";" : ",";
 }
 
 function dedupeHeaders(raw: string[]): string[] {

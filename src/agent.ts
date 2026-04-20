@@ -172,6 +172,10 @@ export interface RunOptions {
   skipMemoryLoad?: boolean;
   /** Extra skill paths to load (prepended, so they take priority over defaults). */
   additionalSkillPaths?: string[];
+  /** Override the default guarded tool set (read/bash/edit/write). Pass `[]` to
+   * give the agent no tools — it can only produce text. Used by grant agents
+   * and distillers to prevent any external side-effects (curl, git clone, fs). */
+  tools?: AgentTool<any>[];
 }
 
 export interface RunResult {
@@ -256,7 +260,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     console.log("[memory] No memoryDir configured — memory disabled");
   }
 
-  const { session } = await createSession(modelId, memoryContent, sessionManager, options.systemPrompt, options.additionalSkillPaths);
+  const { session } = await createSession(modelId, memoryContent, sessionManager, options.systemPrompt, options.additionalSkillPaths, options.tools);
 
   try {
     // 1. Build prompt (with gap messages if resuming)
@@ -326,6 +330,7 @@ async function createSession(
   sessionManager: SessionManager,
   systemPromptOverride?: string,
   extraSkillPaths?: string[],
+  toolsOverride?: AgentTool<any>[],
 ) {
   const systemPrompt = systemPromptOverride
     ?? readFileSync(join(projectDir, "prompts/system.md"), "utf-8").trim();
@@ -357,7 +362,7 @@ async function createSession(
     sessionManager,
     settingsManager: SettingsManager.inMemory(),
     resourceLoader,
-    tools: createGuardedTools(cwd),
+    tools: toolsOverride ?? createGuardedTools(cwd),
   });
 }
 
