@@ -531,8 +531,12 @@ class GrantsOrchestrator {
     const discourseConfig = this.discourseConfig;
     if (discourse && discourseConfig) {
       try {
+        // Append the random suffix of the proposal ID so repeat submissions of
+        // the same project don't collide on Discourse's "Title has already
+        // been used" constraint. The full ID still lives in the body footer.
+        const idSuffix = proposalId.split("-").pop() ?? proposalId;
         const topic = await discourse.createTopic({
-          title: `[Grant Proposal] ${title}`,
+          title: `[Grant Proposal] ${title} #${idSuffix}`,
           body: buildDiscourseTopicBody(forumTopicBody, title, proposalId),
           categoryId: discourseConfig.categoryId,
           username: discourseConfig.username,
