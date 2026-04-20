@@ -47,8 +47,15 @@ function loadDiscourseConfig(): DiscourseConfig | null {
   const url = process.env.DISCOURSE_URL;
   const apiKey = process.env.DISCOURSE_API_KEY;
   const categoryId = process.env.DISCOURSE_CATEGORY_ID;
-  if (!url || !apiKey || !categoryId) return null;
-  const categoryIdNum = parseInt(categoryId, 10);
+  const missingBase: string[] = [];
+  if (!url) missingBase.push("DISCOURSE_URL");
+  if (!apiKey) missingBase.push("DISCOURSE_API_KEY");
+  if (!categoryId) missingBase.push("DISCOURSE_CATEGORY_ID");
+  if (missingBase.length > 0) {
+    console.warn(`[config] Discourse missing: ${missingBase.join(", ")} — Discourse disabled`);
+    return null;
+  }
+  const categoryIdNum = parseInt(categoryId!, 10);
   if (!Number.isFinite(categoryIdNum)) {
     console.warn(`[config] DISCOURSE_CATEGORY_ID is not a number: ${categoryId} — Discourse disabled`);
     return null;
@@ -67,8 +74,8 @@ function loadDiscourseConfig(): DiscourseConfig | null {
     return null;
   }
   return {
-    url,
-    apiKey,
+    url: url!,
+    apiKey: apiKey!,
     categoryId: categoryIdNum,
     users: users as Record<keyof typeof users, string>,
   };
