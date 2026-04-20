@@ -59,6 +59,18 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 | `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |
+| `GRANTS_CHANNEL_ID` | No | Enables the Grants Agents feature — Slack channel ID for grant proposal submissions |
+| `GRANTS_AGENTS_REPO` | No | Public repo with agent personas & context (e.g. `dcl-regenesislabs/grants-evaluation-agents`) |
+| `GRANTS_MAX_CONCURRENT_AGENTS` | No | Concurrency cap for grant agents (default: 4, isolated from main pool) |
+| `DISCOURSE_URL` | No | Discourse forum URL — enables forum publishing when combined with API key + category + all 6 usernames |
+| `DISCOURSE_API_KEY` | No | Discourse admin API key with "All Users" scope (impersonates each configured user via `Api-Username`) |
+| `DISCOURSE_CATEGORY_ID` | No | Category ID where new proposal topics are created |
+| `DISCOURSE_USER_SUBMITTER` | No | Forum account that creates the topic (e.g. `dclgrants`) |
+| `DISCOURSE_USER_VOXEL` | No | Forum account for VOXEL agent replies |
+| `DISCOURSE_USER_CANVAS` | No | Forum account for CANVAS agent replies |
+| `DISCOURSE_USER_LOOP` | No | Forum account for LOOP agent replies |
+| `DISCOURSE_USER_SIGNAL` | No | Forum account for SIGNAL agent replies |
+| `DISCOURSE_USER_ORACLE` | No | Forum account for ORACLE final recommendations |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
@@ -95,6 +107,60 @@ When `MEMORY_REPO` is set, memory files are backed by a GitHub repository:
 
 Without `MEMORY_REPO`, the bot works normally but memory doesn't survive container restarts. Sessions are always ephemeral.
 
+## Grants Agents (optional)
+
+When `GRANTS_CHANNEL_ID` and `GRANTS_AGENTS_REPO` are set, the bot enables a multi-agent grant proposal evaluation flow. This is fully feature-flagged — without these env vars, the bot behaves normally.
+
+### How it works
+
+1. Team pastes a grant proposal in the designated grants channel (top-level message, ≥100 chars)
+2. The bot automatically creates a parent "Evaluating proposal" thread
+3. Four domain agents run in parallel, each posting in its own thread:
+   - **🔧 VOXEL** — Technical Feasibility
+   - **🎨 CANVAS** — Art & Creativity
+   - **🎮 LOOP** — Gameplay & Mechanics
+   - **📣 SIGNAL** — Marketing & Growth
+4. Team iterates per-agent by `@mentioning` the bot in each agent's thread
+5. Team runs `@bot !post` in an agent thread to publish that agent's evaluation to the Discourse topic (as that agent's Discourse user)
+6. Team runs `@bot !decide` in the parent thread to trigger ORACLE, which synthesizes all 4 evaluations into a final FUND / NO FUND / CONDITIONAL recommendation
+7. Team runs `@bot !post` in the parent thread to publish ORACLE's recommendation to Discourse
+
+### CSV submissions
+
+Proposals are often submitted as single-row CSV exports from Google Forms or similar. CSV attachments are parsed server-side and converted to explicit markdown blocks before reaching the agents — this prevents hallucination from raw CSV structure. Multi-row CSVs are rejected; split into one CSV per proposal.
+
+### Discourse integration
+
+When `DISCOURSE_URL`, `DISCOURSE_API_KEY`, `DISCOURSE_CATEGORY_ID`, and all six `DISCOURSE_USER_*` env vars are set, the bot creates a topic in the configured category as soon as a proposal passes screening. Each `!post` publishes the relevant agent's (or ORACLE's) latest evaluation to that topic. Re-running `!post` **edits** the existing Discourse post rather than creating a new reply, keeping the topic legible. Without these env vars, `!post` records approval locally only.
+
+**Authorship.** Each stage of the review is authored by a dedicated Discourse account:
+- `DISCOURSE_USER_SUBMITTER` — creates the topic (e.g. `dclgrants`)
+- `DISCOURSE_USER_VOXEL` / `CANVAS` / `LOOP` / `SIGNAL` — post their respective agent evaluations
+- `DISCOURSE_USER_ORACLE` — posts the final recommendation
+
+All 6 accounts must exist on the Discourse instance with write access to the configured category.
+
+**Auth.** The bot uses a single admin API key with "All Users" scope and impersonates each configured user via the `Api-Username` header on every request. Admin keys are powerful (they can post as any user); keep the key in `.env` only and rotate after testing.
+
+### Agent definitions
+
+Agents live in a separate public repo (`GRANTS_AGENTS_REPO`), cloned at startup. Each agent has a persona file and a context file. Private calibration overlays can be added in `{memoryDir}/grants/context/*-private.md`.
+
+### Storage
+
+Each proposal lives under `{memoryDir}/grants/proposals/{id}/`:
+
+- `state.json` — machine state (thread mappings, status, timestamps)
+- `proposal.md` — human-readable narrative with distilled agent answers
+- `{agent}.jsonl` — authoritative agent session (full conversation history)
+- `oracle.jsonl` — ORACLE session (written on `!decide`)
+
+State files are atomic (tempfile + rename). Sessions resume naturally across restarts.
+
+### Concurrency
+
+Grant agents run on a separate `AgentScheduler` (cap set by `GRANTS_MAX_CONCURRENT_AGENTS`, default 4) so they never starve regular Slack users sharing the main scheduler.
+
 ## Docker
 
 ```bash
@@ -111,6 +177,9 @@ src/
   index.ts          Entry point — startup, shutdown, git clone
   slack.ts          Slack event handlers, thread fetching, message formatting
   agent.ts          Session management, memory loading, pi-coding-agent
+  grants.ts         Grants Agents orchestrator (optional, feature-flagged)
+  discourse.ts      Discourse forum API client (used by grants.ts when enabled)
+  csv.ts            CSV parser + proposal normalizer (used by grants.ts)
   prompt.ts         Prompt builder (extracted for testability)
   config.ts         Environment variable loading
   concurrency.ts    Agent scheduler with queue management and drain

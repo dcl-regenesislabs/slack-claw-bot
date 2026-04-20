@@ -160,6 +160,18 @@ export interface RunOptions {
   events?: EventEmitter;
   model?: string;
   files?: FileAttachment[];
+  /** Override the default system prompt (skips reading prompts/system.md). */
+  systemPrompt?: string;
+  /** Skip the post-run memory save. Used by grant agents whose learnings live elsewhere. */
+  skipMemorySave?: boolean;
+  /** Override the default file-backed session. When provided, resolveSession() is bypassed. */
+  sessionManager?: SessionManager;
+  /** Override isResumed detection when sessionManager is provided. Defaults to false. */
+  isResumed?: boolean;
+  /** Skip loading memory context into the system prompt. */
+  skipMemoryLoad?: boolean;
+  /** Extra skill paths to load (prepended, so they take priority over defaults). */
+  additionalSkillPaths?: string[];
 }
 
 export interface RunResult {
@@ -225,16 +237,26 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   if (!authStorage) throw new Error("Agent not initialized — call initAgent() first");
 
   const modelId = options.model || defaultModelId;
-  const { sessionManager, isResumed } = await resolveSession(options.threadTs);
-  const memoryContent = memoryDir ? loadMemoryContext(memoryDir, options.userId, options.username) : "";
-  if (memoryDir) {
+
+  // If caller provided a sessionManager, use it directly and skip resolveSession entirely.
+  const { sessionManager, isResumed } = options.sessionManager
+    ? { sessionManager: options.sessionManager, isResumed: options.isResumed ?? false }
+    : await resolveSession(options.threadTs);
+
+  const shouldLoadMemory = !options.skipMemoryLoad && memoryDir;
+  const memoryContent = shouldLoadMemory
+    ? loadMemoryContext(memoryDir!, options.userId, options.username)
+    : "";
+  if (shouldLoadMemory) {
     console.log(`[memory] Loaded context for ${options.username} (${options.userId}) (${memoryContent.length} chars)`);
     if (process.env.DEBUG && memoryContent) console.log(`[debug] memory context:\n${memoryContent}`);
+  } else if (options.skipMemoryLoad) {
+    console.log("[memory] Memory load skipped per RunOptions");
   } else {
     console.log("[memory] No memoryDir configured — memory disabled");
   }
 
-  const { session } = await createSession(modelId, memoryContent, sessionManager);
+  const { session } = await createSession(modelId, memoryContent, sessionManager, options.systemPrompt, options.additionalSkillPaths);
 
   try {
     // 1. Build prompt (with gap messages if resuming)
@@ -255,9 +277,13 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     const usedTools = hasToolCalls(session.messages);
     const hasSaveMarker = rawResponse.includes(SAVE_MARKER);
 
-    const shouldSave = usedTools || hasSaveMarker;
+    const shouldSave = !options.skipMemorySave && (usedTools || hasSaveMarker);
     if (!shouldSave) {
-      console.log("[agent] Skipping memory save — no tools used and no [SAVE] marker");
+      if (options.skipMemorySave) {
+        console.log("[agent] Skipping memory save — skipMemorySave flag set");
+      } else {
+        console.log("[agent] Skipping memory save — no tools used and no [SAVE] marker");
+      }
       session.dispose();
     }
     const done = shouldSave
@@ -294,9 +320,16 @@ async function resolveSession(threadTs: string): Promise<{ sessionManager: Sessi
   }
 }
 
-async function createSession(modelId: string, memoryContent: string, sessionManager: SessionManager) {
-  const systemPrompt = readFileSync(join(projectDir, "prompts/system.md"), "utf-8").trim();
-  const modelRegistry = new ModelRegistry(authStorage!);
+async function createSession(
+  modelId: string,
+  memoryContent: string,
+  sessionManager: SessionManager,
+  systemPromptOverride?: string,
+  extraSkillPaths?: string[],
+) {
+  const systemPrompt = systemPromptOverride
+    ?? readFileSync(join(projectDir, "prompts/system.md"), "utf-8").trim();
+  const modelRegistry = ModelRegistry.create(authStorage!);
   const model = modelRegistry.find("anthropic", modelId);
   if (!model) throw new Error(`Model "anthropic/${modelId}" not found`);
 
@@ -304,6 +337,7 @@ async function createSession(modelId: string, memoryContent: string, sessionMana
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     additionalSkillPaths: [
+      ...(extraSkillPaths ?? []),
       join(projectDir, "skills"),
       ...(memoryDir ? [join(memoryDir, "skills")] : []),
     ],

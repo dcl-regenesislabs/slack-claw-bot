@@ -4,6 +4,7 @@ import type { Config } from "./config.js";
 import { runAgent, syncAuth, detectReviewModel } from "./agent.js";
 import type { FileAttachment } from "./prompt.js";
 import { AgentScheduler } from "./concurrency.js";
+import type { GrantsRouter } from "./grants.js";
 
 const nameCache = new Map<string, string>();
 let homeTeamId: string | null = null;
@@ -19,7 +20,19 @@ export function createScheduler(maxConcurrent: number): AgentScheduler {
   return new AgentScheduler(maxConcurrent);
 }
 
-export async function startSlackBot(config: Config, scheduler: AgentScheduler): Promise<App> {
+/**
+ * Create and configure the Slack Bolt app. Does NOT start the socket listener.
+ * Call {@link startSlackApp} after any additional setup (e.g. grants orchestrator).
+ *
+ * @param grantsRouterGetter - Optional lazy getter for the grants router. Called on every
+ *   event to check if the router is available. This allows grants to be initialized after
+ *   the app has been created, since initGrants() needs the App instance.
+ */
+export function createSlackApp(
+  config: Config,
+  scheduler: AgentScheduler,
+  grantsRouterGetter?: () => GrantsRouter | null,
+): App {
   const app = new App({
     token: config.slackBotToken,
     appToken: config.slackAppToken,
@@ -33,6 +46,29 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
 
     if (event.user && await isExternalOrGuest(client, event.user)) {
       console.warn(`[slack] Denied non-org user ${event.user}`);
+      return;
+    }
+
+    // Route grants-channel mentions to the grants orchestrator if this thread belongs to it.
+    const grantsRouter = grantsRouterGetter?.() ?? null;
+    if (grantsRouter?.isGrantsThread(event.channel, threadTs)) {
+      const userName = event.user ? await resolveUserName(client, event.user) : "unknown";
+      const mentionFiles = extractAttachments((event as any).files);
+      try {
+        await grantsRouter.handleMention({
+          text,
+          threadTs,
+          channelId: event.channel,
+          eventTs: event.ts,
+          userId: event.user || "unknown",
+          username: userName,
+          client,
+          files: mentionFiles,
+        });
+      } catch (err) {
+        console.error("[slack] Grants router failed:", err);
+        await say({ text: `Grants handler error: ${(err as Error).message}`, thread_ts: threadTs });
+      }
       return;
     }
 
@@ -101,6 +137,14 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
     console.error("[slack] Bolt error:", error);
   });
 
+  return app;
+}
+
+/**
+ * Start the Slack app's socket listener and resolve the home team ID.
+ * Must be called after {@link createSlackApp} and any additional handler registration.
+ */
+export async function startSlackApp(app: App): Promise<void> {
   await app.start();
 
   // Resolve our workspace's team ID so we can reject Slack Connect users from other orgs
@@ -113,12 +157,20 @@ export async function startSlackBot(config: Config, scheduler: AgentScheduler): 
   }
 
   console.log("Slack bot is running");
+}
+
+/**
+ * @deprecated Prefer {@link createSlackApp} + {@link startSlackApp}. Kept for backwards compatibility.
+ */
+export async function startSlackBot(config: Config, scheduler: AgentScheduler): Promise<App> {
+  const app = createSlackApp(config, scheduler);
+  await startSlackApp(app);
   return app;
 }
 
 // --- Reactions ---
 
-async function react(client: WebClient, channel: string, ts: string, name: string): Promise<void> {
+export async function react(client: WebClient, channel: string, ts: string, name: string): Promise<void> {
   try {
     await client.reactions.add({ channel, timestamp: ts, name });
   } catch (err: unknown) {
@@ -126,7 +178,7 @@ async function react(client: WebClient, channel: string, ts: string, name: strin
   }
 }
 
-async function unreact(client: WebClient, channel: string, ts: string, name: string): Promise<void> {
+export async function unreact(client: WebClient, channel: string, ts: string, name: string): Promise<void> {
   try {
     await client.reactions.remove({ channel, timestamp: ts, name });
   } catch (err: unknown) {
