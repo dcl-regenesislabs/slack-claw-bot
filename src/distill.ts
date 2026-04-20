@@ -53,30 +53,28 @@ RULES:
 - If there are multiple contradictions or unclear numbers in the proposal, surface both rather than picking one.`;
 
 const AGENT_SYSTEM_PROMPT = (agentLabel: string) => `You are a precise summarizer for a Decentraland grants review forum.
-Given a full evaluation from the ${agentLabel} agent, produce a concise Discourse forum post.
+You receive the current content from the ${agentLabel} agent. It may be a full evaluation, a questions-only list, or a refined fragment from iteration — you render whatever is there into the forum shape below. You never refuse, never explain the input, never ask meta-questions.
 
-Return the markdown body ONLY (no JSON, no code fences, no preamble), matching this shape:
+Return the markdown body ONLY (no JSON, no code fences, no preamble), in this exact shape:
 
-**Assessment**: <2-3 sentences — the agent's conclusion and the top concern or strength>
+**Assessment**: <1-3 sentences — the agent's conclusion or, if only questions are provided, a one-line framing sentence describing what the questions are probing>
 
 ### Questions for the applicant
 
 1. <specific, answerable question>
-2. <specific, answerable question>
-3. <specific, answerable question>
-<up to 5 questions total>
+<keep as many questions as the input actually contains — render 1 if there's 1, render 7 if there are 7. Do NOT invent or pad questions.>
 
 RULES:
-- Extract ONLY the substantive findings and the real questions.
-- Questions must be specific and directly answerable by the applicant (not rhetorical, not "consider…").
+- Extract ONLY the questions present in the input. Do not fabricate questions that aren't there.
+- Questions must be answerable by the applicant (not rhetorical).
 - Do not include the agent's heading or persona intro.
-- Start directly with "**Assessment**:" — no preamble.
-- No code fences, no explanations, no XML.`;
+- Always start with "**Assessment**:" followed by your summary sentence. Even if the input is only questions, produce a framing sentence.
+- No code fences, no XML, no meta commentary about the input format.`;
 
 const ORACLE_SYSTEM_PROMPT = `You are a precise summarizer for a Decentraland grants review forum.
-Given ORACLE's synthesis of 4 domain evaluations, produce a concise Discourse forum post with the final recommendation.
+You receive ORACLE's current content — may be a full synthesis or a refined fragment after iteration. You render whatever is there into the forum shape below. You never refuse, never explain the input, never ask meta-questions.
 
-Return the markdown body ONLY (no JSON, no code fences, no preamble), matching this shape:
+Return the markdown body ONLY (no JSON, no code fences, no preamble), in this exact shape:
 
 **Recommendation**: FUND / CONDITIONAL / NO FUND
 
@@ -89,10 +87,11 @@ Return the markdown body ONLY (no JSON, no code fences, no preamble), matching t
 - <bullet for each condition or next step, 3-5 max>
 
 RULES:
-- Use FUND / CONDITIONAL / NO FUND verbatim — one of those three.
+- Use FUND / CONDITIONAL / NO FUND verbatim — pick whichever best matches the input content.
 - Do not include ORACLE's intro or persona.
 - If the recommendation is FUND with no conditions, write "- None" under Conditions / Next steps.
-- Start directly with "**Recommendation**:" — no preamble.`;
+- Always start with "**Recommendation**:" — no preamble.
+- No code fences, no XML, no meta commentary about the input format.`;
 
 async function runDistiller(systemPrompt: string, content: string, label: string): Promise<string> {
   const ts = `distill-${label}-${Date.now()}`;
@@ -137,9 +136,21 @@ export async function distillTopic(proposalText: string): Promise<DistilledTopic
 }
 
 export async function distillAgent(agentLabel: string, evaluation: string): Promise<string> {
-  return runDistiller(AGENT_SYSTEM_PROMPT(agentLabel), evaluation, `agent-${agentLabel}`);
+  const out = await runDistiller(AGENT_SYSTEM_PROMPT(agentLabel), evaluation, `agent-${agentLabel}`);
+  assertShape(out, /\*\*Assessment\*\*:/, "agent distillation");
+  return out;
 }
 
 export async function distillOracle(oracleText: string): Promise<string> {
-  return runDistiller(ORACLE_SYSTEM_PROMPT, oracleText, "oracle");
+  const out = await runDistiller(ORACLE_SYSTEM_PROMPT, oracleText, "oracle");
+  assertShape(out, /\*\*Recommendation\*\*:/, "oracle distillation");
+  return out;
+}
+
+/** Reject distiller output that doesn't match the required shape (e.g. refusals,
+ * meta commentary). The caller catches and falls back to the raw input. */
+function assertShape(output: string, marker: RegExp, context: string): void {
+  if (!marker.test(output)) {
+    throw new Error(`${context} produced output without required marker ${marker}; got: ${output.slice(0, 200)}`);
+  }
 }
