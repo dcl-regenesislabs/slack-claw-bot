@@ -18,5 +18,11 @@ COPY src/ src/
 COPY prompts/ prompts/
 COPY skills/ skills/
 
+# Compile TypeScript to dist/ so production runs a single node process
+# instead of the 5-deep tree (npm → tsx → node → esbuild) that plain
+# `tsx src/index.ts` produces — that stack consumes ~500 MB of RSS on
+# small App Platform instances.
+RUN npm run build:dist
+
 ENTRYPOINT ["tini", "--"]
-CMD ["npx", "tsx", "src/index.ts"]
+CMD ["node", "dist/index.js"]
