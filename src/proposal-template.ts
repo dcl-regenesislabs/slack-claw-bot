@@ -19,9 +19,13 @@ export function renderProposalTopic(row: CsvRow): { title: string; body: string 
   const lines: string[] = [];
 
   // --- Header card
+  // Topic title uses only the top-level track (e.g. "Tech Ecosystem"), not the
+  // sub-category (e.g. "AI-assisted tooling"), so the Discourse title stays
+  // scannable. Full category still appears inside the header card.
+  const topLevelTrack = category.split(/\s*—\s*/)[0].trim();
   const titleForHeader = projectTitle || "Grant Proposal";
-  const headerTitle = category ? `${titleForHeader} — ${category}` : titleForHeader;
-  lines.push(`# [Grant Proposal] ${headerTitle}`);
+  const shortTitle = topLevelTrack ? `${titleForHeader} — ${topLevelTrack}` : titleForHeader;
+  lines.push(`# [Grant Proposal] ${shortTitle}`);
   lines.push("");
   lines.push("| | |", "|---|---|");
   if (projectTitle) lines.push(`| **Project** | ${projectTitle} |`);
@@ -160,7 +164,7 @@ export function renderProposalTopic(row: CsvRow): { title: string; body: string 
   }
 
   return {
-    title: headerTitle,
+    title: shortTitle,
     body: lines.join("\n").trimEnd(),
   };
 }

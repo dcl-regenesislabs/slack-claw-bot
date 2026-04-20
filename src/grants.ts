@@ -532,7 +532,7 @@ class GrantsOrchestrator {
     if (discourse && discourseConfig) {
       try {
         const topic = await discourse.createTopic({
-          title: `[${proposalId}] ${title}`,
+          title: `[Grant Proposal] ${title}`,
           body: buildDiscourseTopicBody(forumTopicBody, title, proposalId),
           categoryId: discourseConfig.categoryId,
           username: discourseConfig.username,
