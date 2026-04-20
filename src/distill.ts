@@ -108,6 +108,7 @@ async function runDistiller(systemPrompt: string, content: string, label: string
     isResumed: false,
     skipMemorySave: true,
     skipMemoryLoad: true,
+    tools: [],
   });
   await result.done.catch(() => {});
   return (result.text || "").trim();

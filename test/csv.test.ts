@@ -82,6 +82,23 @@ test("parseCsv: unterminated quote mid-row throws", () => {
   );
 });
 
+test("parseCsv: semicolon delimiter (EU locale export)", () => {
+  const input = "Name;Age;City\nAlice;30;Austin\nBob;25;Paris";
+  const result = parseCsv(input);
+  assert.deepEqual(result.headers, ["Name", "Age", "City"]);
+  assert.equal(result.rows.length, 2);
+  assert.deepEqual(result.rows[0], { Name: "Alice", Age: "30", City: "Austin" });
+  assert.deepEqual(result.rows[1], { Name: "Bob", Age: "25", City: "Paris" });
+});
+
+test("parseCsv: semicolon delimiter with quoted comma in value", () => {
+  // A comma inside a quoted field must NOT trigger comma-delimiter detection
+  // when semicolons dominate the unquoted header.
+  const input = 'A;B;C\nx;"hello, world";z';
+  const result = parseCsv(input);
+  assert.deepEqual(result.rows[0], { A: "x", B: "hello, world", C: "z" });
+});
+
 test("parseCsv: wide row with many columns", () => {
   const headers = Array.from({ length: 52 }, (_, i) => `Col${i + 1}`);
   const values = Array.from({ length: 52 }, (_, i) => `val${i + 1}`);
