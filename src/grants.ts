@@ -10,7 +10,6 @@ import { AgentScheduler } from "./concurrency.js";
 import { markdownToMrkdwn, react, unreact } from "./slack.js";
 import { parseCsv, formatCsvAsProposal, type CsvRow } from "./csv.js";
 import { DiscourseClient, DiscourseError, type DiscourseConfig } from "./discourse.js";
-import { distillTopic } from "./distill.js";
 import { renderProposalTopic } from "./proposal-template.js";
 
 export type AgentName = "voxel" | "canvas" | "loop" | "signal";
@@ -502,33 +501,23 @@ class GrantsOrchestrator {
     const effectiveProposalText = normalized.text;
     const effectiveFiles = normalized.files;
 
-    // Step 2: Produce a forum-ready title + body. When the proposal came from
-    // a recognisable Google Form CSV, render deterministically from the known
-    // column schema — no LLM, no hallucinations. A CSV that fails to match the
-    // schema is a hard error (wrong form / malformed export) — we refuse to
-    // fall back to the LLM for structured submissions.
-    let title = extractTitle(effectiveProposalText, effectiveFiles);
-    let forumTopicBody = effectiveProposalText;
-    if (normalized.csvRow) {
-      const templated = renderProposalTopic(normalized.csvRow);
-      if (!templated) {
-        await postMessage(client, channelId, parentMessageTs,
-          `:x: *Cannot parse CSV*\nThe uploaded CSV is missing the expected Google Form fields ` +
-          `(e.g. \`Project title\`, \`What is your estimated funding request in USD?\`). ` +
-          `Please re-export from the grants form and resubmit.`);
-        return null;
-      }
-      title = templated.title;
-      forumTopicBody = templated.body;
-    } else {
-      try {
-        const distilled = await distillTopic(effectiveProposalText);
-        title = distilled.title;
-        forumTopicBody = distilled.body;
-      } catch (err) {
-        console.warn(`[grants] Topic distillation failed, falling back to raw: ${(err as Error).message}`);
-      }
+    // Step 2: Produce the forum topic deterministically from the Google Form
+    // CSV. Proposals must come from the CSV export — no free-form fallback.
+    if (!normalized.csvRow) {
+      await postMessage(client, channelId, parentMessageTs,
+        `:x: *No CSV proposal found*\nAttach the Google Form CSV export. Free-form text or other file types aren't accepted.`);
+      return null;
     }
+    const templated = renderProposalTopic(normalized.csvRow);
+    if (!templated) {
+      await postMessage(client, channelId, parentMessageTs,
+        `:x: *Cannot parse CSV*\nThe uploaded CSV is missing the expected Google Form fields ` +
+        `(e.g. \`Project title\`, \`What is your estimated funding request in USD?\`). ` +
+        `Please re-export from the grants form and resubmit.`);
+      return null;
+    }
+    const title = templated.title;
+    const forumTopicBody = templated.body;
 
     // Step 3: Create Discourse topic (if enabled). Abort on failure so we don't
     // run 4 agents without a forum destination.
@@ -1384,27 +1373,6 @@ function stripFrontmatter(content: string): string {
   const end = content.indexOf("\n---\n", 4);
   if (end === -1) return content;
   return content.slice(end + 5).trimStart();
-}
-
-function extractTitle(proposalText: string, files?: FileAttachment[]): string {
-  // Try the first non-empty, non-trivial line from the text
-  const firstLine = proposalText
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => l.length > 5);
-
-  if (firstLine) {
-    const cleaned = firstLine.replace(/^#+\s*/, "").replace(/[*_`]/g, "").trim();
-    return cleaned.length > 80 ? cleaned.slice(0, 77) + "…" : cleaned;
-  }
-
-  // Fall back to filename (strip extension)
-  if (files?.length) {
-    const name = files[0].name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ");
-    return name.length > 80 ? name.slice(0, 77) + "…" : name;
-  }
-
-  return "Untitled";
 }
 
 function makeProposalId(): string {
