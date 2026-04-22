@@ -10,7 +10,7 @@ import { AgentScheduler } from "./concurrency.js";
 import { markdownToMrkdwn, react, unreact } from "./slack.js";
 import { parseCsv, formatCsvAsProposal, type CsvRow } from "./csv.js";
 import { DiscourseClient, DiscourseError, type DiscourseConfig } from "./discourse.js";
-import { distillTopic, distillAgent, distillOracle } from "./distill.js";
+import { distillTopic } from "./distill.js";
 import { renderProposalTopic } from "./proposal-template.js";
 
 export type AgentName = "voxel" | "canvas" | "loop" | "signal";
@@ -929,21 +929,11 @@ class GrantsOrchestrator {
       return;
     }
 
-    // Distill the full evaluation into a forum-ready summary + questions.
-    // Fall back to the raw text if distillation fails — better to post raw
-    // than to block the team from publishing.
-    let forumBody = agentText;
-    try {
-      forumBody = await distillAgent(agent.toUpperCase(), agentText);
-    } catch (err) {
-      console.warn(`[grants] ${agent} distillation failed, posting raw: ${(err as Error).message}`);
-    }
-
     await this.publishToDiscourse(state, params, agentText, {
       label: agent.toUpperCase(),
       logName: agent,
       username: this.discourseConfig?.users[agent] ?? "",
-      body: formatAgentDiscoursePost(agent, forumBody),
+      body: formatAgentDiscoursePost(agent, agentText),
       commitLabel: `${agent} evaluation`,
       lockKey: `${state.id}:${agent}`,
       getPostId: () => state.agents[agent].lastDiscoursePostId,
@@ -971,18 +961,11 @@ class GrantsOrchestrator {
         ":warning: No agent evaluations have been published to Discourse yet. ORACLE will post standalone.");
     }
 
-    let forumBody = oracleText;
-    try {
-      forumBody = await distillOracle(oracleText);
-    } catch (err) {
-      console.warn(`[grants] ORACLE distillation failed, posting raw: ${(err as Error).message}`);
-    }
-
     await this.publishToDiscourse(state, params, oracleText, {
       label: "ORACLE",
       logName: "oracle",
       username: this.discourseConfig?.users.oracle ?? "",
-      body: formatOracleDiscoursePost(forumBody),
+      body: formatOracleDiscoursePost(oracleText),
       commitLabel: "oracle",
       lockKey: `${state.id}:oracle`,
       getPostId: () => state.oracle.lastDiscoursePostId,

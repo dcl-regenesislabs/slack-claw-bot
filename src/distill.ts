@@ -2,8 +2,9 @@ import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { runAgent } from "./agent.js";
 
 /**
- * Forum-focused distillers. Internal Slack threads keep the full agent output;
- * these turn it into concise, human-readable Discourse posts before publishing.
+ * Distills a raw grant proposal into the initial Discourse topic (title + body).
+ * Agent and ORACLE evaluations are published verbatim on `!post`, so they don't
+ * need a distiller.
  */
 
 const TOPIC_SYSTEM_PROMPT = `You are a precise summarizer for a Decentraland grants review forum.
@@ -52,58 +53,22 @@ RULES:
 - Quote the applicant's own specifics (numbers, names, durations) — don't generalise.
 - If there are multiple contradictions or unclear numbers in the proposal, surface both rather than picking one.`;
 
-const AGENT_SYSTEM_PROMPT = (agentLabel: string) => `You are a precise summarizer for a Decentraland grants review forum.
-You receive the current content from the ${agentLabel} agent. It may be a full evaluation, a questions-only list, or a refined fragment from iteration — you render whatever is there into the forum shape below. You never refuse, never explain the input, never ask meta-questions.
+export interface DistilledTopic {
+  title: string;
+  body: string;
+}
 
-Return the markdown body ONLY (no JSON, no code fences, no preamble), in this exact shape:
-
-**Assessment**: <1-3 sentences — the agent's conclusion or, if only questions are provided, a one-line framing sentence describing what the questions are probing>
-
-### Questions for the applicant
-
-1. <specific, answerable question>
-<keep as many questions as the input actually contains — render 1 if there's 1, render 7 if there are 7. Do NOT invent or pad questions.>
-
-RULES:
-- Extract ONLY the questions present in the input. Do not fabricate questions that aren't there.
-- Questions must be answerable by the applicant (not rhetorical).
-- Do not include the agent's heading or persona intro.
-- Always start with "**Assessment**:" followed by your summary sentence. Even if the input is only questions, produce a framing sentence.
-- No code fences, no XML, no meta commentary about the input format.`;
-
-const ORACLE_SYSTEM_PROMPT = `You are a precise summarizer for a Decentraland grants review forum.
-You receive ORACLE's current content — may be a full synthesis or a refined fragment after iteration. You render whatever is there into the forum shape below. You never refuse, never explain the input, never ask meta-questions.
-
-Return the markdown body ONLY (no JSON, no code fences, no preamble), in this exact shape:
-
-**Recommendation**: FUND / CONDITIONAL / NO FUND
-
-## Summary
-
-<1-2 paragraphs synthesizing the key factors driving the decision. Under 150 words.>
-
-### Conditions / Next steps
-
-- <bullet for each condition or next step, 3-5 max>
-
-RULES:
-- Use FUND / CONDITIONAL / NO FUND verbatim — pick whichever best matches the input content.
-- Do not include ORACLE's intro or persona.
-- If the recommendation is FUND with no conditions, write "- None" under Conditions / Next steps.
-- Always start with "**Recommendation**:" — no preamble.
-- No code fences, no XML, no meta commentary about the input format.`;
-
-async function runDistiller(systemPrompt: string, content: string, label: string): Promise<string> {
-  const ts = `distill-${label}-${Date.now()}`;
+export async function distillTopic(proposalText: string): Promise<DistilledTopic> {
+  const ts = `distill-topic-${Date.now()}`;
   const result = await runAgent({
     threadTs: ts,
     eventTs: ts,
     userId: "grants-distiller",
-    username: `DISTILL-${label.toUpperCase()}`,
-    newMessage: content,
-    fetchThread: async () => content,
+    username: "DISTILL-TOPIC",
+    newMessage: proposalText,
+    fetchThread: async () => proposalText,
     fetchThreadSince: async () => "",
-    systemPrompt,
+    systemPrompt: TOPIC_SYSTEM_PROMPT,
     sessionManager: SessionManager.inMemory(),
     isResumed: false,
     skipMemorySave: true,
@@ -111,16 +76,7 @@ async function runDistiller(systemPrompt: string, content: string, label: string
     tools: [],
   });
   await result.done.catch(() => {});
-  return (result.text || "").trim();
-}
-
-export interface DistilledTopic {
-  title: string;
-  body: string;
-}
-
-export async function distillTopic(proposalText: string): Promise<DistilledTopic> {
-  const raw = await runDistiller(TOPIC_SYSTEM_PROMPT, proposalText, "topic");
+  const raw = (result.text || "").trim();
   // Strip ``` fences if the model added them anyway
   const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
   const parsed: unknown = JSON.parse(cleaned);
@@ -134,24 +90,4 @@ export async function distillTopic(proposalText: string): Promise<DistilledTopic
     throw new Error("distillTopic: response missing title or body");
   }
   return { title, body };
-}
-
-export async function distillAgent(agentLabel: string, evaluation: string): Promise<string> {
-  const out = await runDistiller(AGENT_SYSTEM_PROMPT(agentLabel), evaluation, `agent-${agentLabel}`);
-  assertShape(out, /\*\*Assessment\*\*:/, "agent distillation");
-  return out;
-}
-
-export async function distillOracle(oracleText: string): Promise<string> {
-  const out = await runDistiller(ORACLE_SYSTEM_PROMPT, oracleText, "oracle");
-  assertShape(out, /\*\*Recommendation\*\*:/, "oracle distillation");
-  return out;
-}
-
-/** Reject distiller output that doesn't match the required shape (e.g. refusals,
- * meta commentary). The caller catches and falls back to the raw input. */
-function assertShape(output: string, marker: RegExp, context: string): void {
-  if (!marker.test(output)) {
-    throw new Error(`${context} produced output without required marker ${marker}; got: ${output.slice(0, 200)}`);
-  }
 }
