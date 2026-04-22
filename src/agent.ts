@@ -174,7 +174,7 @@ export interface RunOptions {
   additionalSkillPaths?: string[];
   /** Override the default guarded tool set (read/bash/edit/write). Pass `[]` to
    * give the agent no tools — it can only produce text. Used by grant agents
-   * and distillers to prevent any external side-effects (curl, git clone, fs). */
+   * to prevent any external side-effects (curl, git clone, fs). */
   tools?: AgentTool<any>[];
 }
 

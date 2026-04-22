@@ -26,12 +26,10 @@ const AGENT_LABELS: Record<AgentName, string> = {
 export interface AgentEvalState {
   waitingForReply: boolean;
   roundsCompleted: number;
-  lastDiscoursePostId: number | null;
   approvedAt: string | null;
 }
 
 export interface OracleEvalState {
-  lastDiscoursePostId: number | null;
   approvedAt: string | null;
 }
 
@@ -85,8 +83,6 @@ interface PublishTarget {
   body: string;            // Rendered post body
   commitLabel: string;     // For git commit subject
   lockKey: string;         // `${proposalId}:${agentOrOracle}` — prevents duplicate publishes
-  getPostId(): number | null;
-  setPostId(id: number | null): void;
   setApprovedAt(ts: string): void;
 }
 
@@ -582,12 +578,12 @@ class GrantsOrchestrator {
       discourseTopicId,
       discourseTopicUrl,
       agents: {
-        voxel:  { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null, approvedAt: null },
-        canvas: { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null, approvedAt: null },
-        loop:   { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null, approvedAt: null },
-        signal: { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null, approvedAt: null },
+        voxel:  { waitingForReply: false, roundsCompleted: 0, approvedAt: null },
+        canvas: { waitingForReply: false, roundsCompleted: 0, approvedAt: null },
+        loop:   { waitingForReply: false, roundsCompleted: 0, approvedAt: null },
+        signal: { waitingForReply: false, roundsCompleted: 0, approvedAt: null },
       },
-      oracle: { lastDiscoursePostId: null, approvedAt: null },
+      oracle: { approvedAt: null },
     };
 
     // Ensure the proposal folder exists and persist initial state + narrative
@@ -694,7 +690,7 @@ class GrantsOrchestrator {
       text: `${AGENT_LABELS[agent]}\n*Proposal:* ${state.title} (\`${state.id}\`)\n\n:white_check_mark: Evaluation complete — $${result.cost.toFixed(4)}`,
     }).catch(() => {});
 
-    // Update the narrative markdown with the distilled answer
+    // Update the narrative markdown with the agent's answer
     this.updateNarrativeSection(state, agent, result.text);
     state.updatedAt = new Date().toISOString();
     this.saveState(state);
@@ -756,7 +752,7 @@ class GrantsOrchestrator {
     await postMessage(client, state.channelId, state.parentThreadTs,
       ":crystal_ball: Running ORACLE synthesis…");
 
-    // Assemble ORACLE's context: proposal + all 4 agent distilled answers from the narrative
+    // Assemble ORACLE's context: proposal + all 4 agent answers from the narrative
     const narrative = this.readNarrative(state);
     const oraclePrompt = this.agentPrompts.get("oracle") ?? "";
     const combined =
@@ -925,8 +921,6 @@ class GrantsOrchestrator {
       body: formatAgentDiscoursePost(agent, agentText),
       commitLabel: `${agent} evaluation`,
       lockKey: `${state.id}:${agent}`,
-      getPostId: () => state.agents[agent].lastDiscoursePostId,
-      setPostId: (id) => { state.agents[agent].lastDiscoursePostId = id; },
       setApprovedAt: (ts) => { state.agents[agent].approvedAt = ts; },
     });
   }
@@ -944,7 +938,7 @@ class GrantsOrchestrator {
     }
 
     // Warn (but allow) if no agents have been published yet
-    const publishedAgents = AGENT_NAMES.filter((a) => state.agents[a].lastDiscoursePostId !== null);
+    const publishedAgents = AGENT_NAMES.filter((a) => state.agents[a].approvedAt !== null);
     if (this.discourseEnabled && publishedAgents.length === 0) {
       await postMessage(params.client, state.channelId, params.threadTs,
         ":warning: No agent evaluations have been published to Discourse yet. ORACLE will post standalone.");
@@ -957,8 +951,6 @@ class GrantsOrchestrator {
       body: formatOracleDiscoursePost(oracleText),
       commitLabel: "oracle",
       lockKey: `${state.id}:oracle`,
-      getPostId: () => state.oracle.lastDiscoursePostId,
-      setPostId: (id) => { state.oracle.lastDiscoursePostId = id; },
       setApprovedAt: (ts) => { state.oracle.approvedAt = ts; },
     });
   }
@@ -1002,7 +994,13 @@ class GrantsOrchestrator {
     }
 
     try {
-      const { postUrl, verb } = await this.writeDiscoursePost(discourse, state, target);
+      // Always create a new reply — each `!post` produces a fresh Discourse
+      // post, preserving the full history of refinements on the forum.
+      const { postUrl } = await discourse.reply({
+        topicId: state.discourseTopicId!,
+        body: target.body,
+        username: target.username,
+      });
 
       target.setApprovedAt(new Date().toISOString());
       state.updatedAt = new Date().toISOString();
@@ -1010,7 +1008,7 @@ class GrantsOrchestrator {
       this.commitAndPush(`grants: publish ${target.commitLabel} for ${state.id}`);
 
       await postMessage(params.client, state.channelId, params.threadTs,
-        `:white_check_mark: *${verb} ${target.label} to Discourse as \`${target.username}\`*\n<${postUrl}|View on forum>`);
+        `:white_check_mark: *Posted ${target.label} to Discourse as \`${target.username}\`*\n<${postUrl}|View on forum>`);
     } catch (err) {
       console.error(`[grants] Failed to publish ${target.logName} to Discourse:`, err);
       await postMessage(params.client, state.channelId, params.threadTs,
@@ -1018,53 +1016,6 @@ class GrantsOrchestrator {
     } finally {
       this.inFlightPublish.delete(target.lockKey);
     }
-  }
-
-  /** Edit the existing post or create a new reply. If the stored post ID is
-   * stale (404), clear it and fall back to a new reply so state self-heals. */
-  private async writeDiscoursePost(
-    discourse: DiscourseClient,
-    state: ProposalState,
-    target: PublishTarget,
-  ): Promise<{ postUrl: string; verb: string }> {
-    const existingId = target.getPostId();
-
-    if (existingId !== null) {
-      try {
-        await discourse.editPost({
-          postId: existingId,
-          body: target.body,
-          username: target.username,
-          editReason: "Refined after Slack iteration",
-        });
-        return { postUrl: discourse.postUrl(existingId), verb: "Updated" };
-      } catch (err) {
-        if (err instanceof DiscourseError && (err.status === 404 || err.status === 410)) {
-          console.warn(
-            `[grants] Stale Discourse post ${existingId} for ${target.logName} (status ${err.status}) — clearing and creating a new reply`,
-          );
-          target.setPostId(null);
-          // Persist the cleared ID immediately so it survives a crash even
-          // if the fallback reply below also fails — otherwise the stale ID
-          // would be rehydrated on restart and re-enter the 404 loop.
-          this.saveState(state);
-          // Fall through to the create path
-        } else {
-          throw err;
-        }
-      }
-    }
-
-    const r = await discourse.reply({
-      topicId: state.discourseTopicId!,
-      body: target.body,
-      username: target.username,
-    });
-    target.setPostId(r.postId);
-    return {
-      postUrl: r.postUrl,
-      verb: existingId !== null ? "Reposted (previous post was deleted)" : "Posted",
-    };
   }
 
   // --- Narrative file (proposal.md) ---
@@ -1307,7 +1258,6 @@ function migrateState(raw: unknown): ProposalState {
     discourseTopicUrl: optionalString(s.discourseTopicUrl) ?? null,
     agents: migratedAgents,
     oracle: {
-      lastDiscoursePostId: oracleRaw ? asNumberOrNull(oracleRaw.lastDiscoursePostId) : null,
       approvedAt: oracleRaw ? (optionalString(oracleRaw.approvedAt) ?? null) : null,
     },
   };
@@ -1328,12 +1278,11 @@ function normalizeAgentThreads(raw: unknown): Partial<Record<AgentName, string>>
 
 function normalizeAgent(a: Record<string, unknown> | null): AgentEvalState {
   if (!a) {
-    return { waitingForReply: false, roundsCompleted: 0, lastDiscoursePostId: null, approvedAt: null };
+    return { waitingForReply: false, roundsCompleted: 0, approvedAt: null };
   }
   return {
     waitingForReply: typeof a.waitingForReply === "boolean" ? a.waitingForReply : false,
     roundsCompleted: typeof a.roundsCompleted === "number" ? a.roundsCompleted : 0,
-    lastDiscoursePostId: asNumberOrNull(a.lastDiscoursePostId),
     approvedAt: optionalString(a.approvedAt) ?? null,
   };
 }
