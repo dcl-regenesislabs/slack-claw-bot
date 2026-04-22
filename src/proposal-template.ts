@@ -6,8 +6,8 @@ import type { CsvRow } from "./csv.js";
  * proposals, so we just pick and lay out the fields we care about.
  *
  * Returns null if the row doesn't look like a standard form submission
- * (e.g. missing both project title and funding request). The caller can
- * fall back to the LLM-based distiller in that case.
+ * (e.g. missing both project title and funding request). The caller
+ * should hard-reject in that case.
  */
 export function renderProposalTopic(row: CsvRow): { title: string; body: string } | null {
   const projectTitle = pick(row, "Project title", "Project title (2)");

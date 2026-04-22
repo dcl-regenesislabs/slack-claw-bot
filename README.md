@@ -131,7 +131,7 @@ Proposals are often submitted as single-row CSV exports from Google Forms or sim
 
 ### Discourse integration
 
-When `DISCOURSE_URL`, `DISCOURSE_API_KEY`, `DISCOURSE_CATEGORY_ID`, and all six `DISCOURSE_USER_*` env vars are set, the bot creates a topic in the configured category as soon as a proposal passes screening. Each `!post` publishes the relevant agent's (or ORACLE's) latest evaluation to that topic. Re-running `!post` **edits** the existing Discourse post rather than creating a new reply, keeping the topic legible. Without these env vars, `!post` records approval locally only.
+When `DISCOURSE_URL`, `DISCOURSE_API_KEY`, `DISCOURSE_CATEGORY_ID`, and all six `DISCOURSE_USER_*` env vars are set, the bot creates a topic in the configured category as soon as a proposal passes screening. Each `!post` publishes the agent's (or ORACLE's) current narrative verbatim to that topic as a **new reply** — running `!post` again after a refinement produces an additional reply rather than editing the previous one, so the forum keeps the full history. Without these env vars, `!post` records approval locally only.
 
 **Authorship.** Each stage of the review is authored by a dedicated Discourse account:
 - `DISCOURSE_USER_SUBMITTER` — creates the topic (e.g. `dclgrants`)
@@ -151,7 +151,7 @@ Agents live in a separate public repo (`GRANTS_AGENTS_REPO`), cloned at startup.
 Each proposal lives under `{memoryDir}/grants/proposals/{id}/`:
 
 - `state.json` — machine state (thread mappings, status, timestamps)
-- `proposal.md` — human-readable narrative with distilled agent answers
+- `proposal.md` — human-readable narrative with the raw agent answers
 - `{agent}.jsonl` — authoritative agent session (full conversation history)
 - `oracle.jsonl` — ORACLE session (written on `!decide`)
 
