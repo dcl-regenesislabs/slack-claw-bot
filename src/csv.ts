@@ -78,7 +78,10 @@ export function parseCsv(text: string): CsvParseResult {
   // Google Forms exports the same question label once per conditional branch
   // (e.g. "Project title" appears in both the Content and Tech track blocks);
   // without this, the later column would silently overwrite the earlier one.
-  const rawHeaders = cells[0].map((h) => h.trim());
+  // Some exporters (pandas, Excel) pre-disambiguate duplicates with a ".1",
+  // ".2" suffix — strip those so dedupeHeaders can re-emit the canonical "(N)"
+  // form and downstream lookups stay schema-stable.
+  const rawHeaders = cells[0].map((h) => h.trim().replace(/\.\d+$/, ""));
   const headers = dedupeHeaders(rawHeaders);
   const rows: CsvRow[] = cells
     .slice(1)
