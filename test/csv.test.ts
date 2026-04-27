@@ -147,6 +147,22 @@ test("parseCsv: disambiguates duplicate headers with (N) suffix", () => {
   assert.equal(parsed.rows[0]["Project title (2)"], "Beta");
 });
 
+test("parseCsv: normalizes pandas-style .N suffix to canonical (N) form", () => {
+  // Some exporters (pandas, Excel) pre-disambiguate duplicates as "Foo.1".
+  // Normalize to the canonical "(2)" form so downstream lookups stay stable.
+  const parsed = parseCsv("Project title,Budget,Project title.1\nAlpha,100,Beta");
+  assert.deepEqual(parsed.headers, ["Project title", "Budget", "Project title (2)"]);
+  assert.equal(parsed.rows[0]["Project title (2)"], "Beta");
+});
+
+test("parseCsv: .1/.2 suffixes collapse and re-emit as (2)/(3)", () => {
+  const parsed = parseCsv("Q,Q.1,Q.2\na,b,c");
+  assert.deepEqual(parsed.headers, ["Q", "Q (2)", "Q (3)"]);
+  assert.equal(parsed.rows[0]["Q"], "a");
+  assert.equal(parsed.rows[0]["Q (2)"], "b");
+  assert.equal(parsed.rows[0]["Q (3)"], "c");
+});
+
 test("formatCsvAsProposal: strips (N) suffix from display labels", () => {
   const parsed = parseCsv("Project title,Project title\nAlpha,Beta");
   const output = formatCsvAsProposal(parsed, "x.csv");
