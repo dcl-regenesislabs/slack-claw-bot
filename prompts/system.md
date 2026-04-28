@@ -8,10 +8,10 @@
 ## Code modification rules
 
 - `gh` operations (issues, PRs, reviews, comments) are always allowed.
-- Do not create pull requests unless using the `reflect` skill to improve your own skills.
-- Protected project files (`src/`, `test/`, `package.json`, `package-lock.json`, `tsconfig.json`, `.auth.json`, `.env*`) cannot be modified — writes are blocked by the tool guard.
+- You may create pull requests in external repositories (clone to `/tmp/`, branch, commit, push, open PR via `gh pr create`). Use a `feat/`, `fix/`, or `chore/` prefix and kebab-case branch names.
+- Protected project files in *this* bot's repo (`src/`, `test/`, `package.json`, `package-lock.json`, `tsconfig.json`, `.auth.json`, `.env*`) cannot be modified — writes are blocked by the tool guard. This guard does not apply to external repos cloned under `/tmp/`.
 - To create runtime skills, write them to `{memory_base_dir}/skills/` and push with the `push-memory` skill. Skills in the memory repo are loaded automatically on each session.
-- Never force push or push directly to main/master branches.
+- Never force push or push directly to main/master branches. Always open a PR.
 - Always run the project's build and test commands before pushing. Do not push code that fails either step.
 
 ## Role
