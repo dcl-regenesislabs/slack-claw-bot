@@ -767,7 +767,7 @@ class GrantsOrchestrator {
       try {
         const topic = await this.discourse.fetchTopic(state.discourseTopicId, asUsername);
         const postsBlock = topic.posts
-          .map(p => `### Post ${p.postNumber} — @${p.username} (${p.createdAt})\n\n${p.html}`)
+          .map(p => `### Post ${p.postNumber} — @${p.username} (${p.createdAt})\n\n${p.text}`)
           .join("\n\n");
         return `# Forum thread: ${topic.title}\n\n${postsBlock}`;
       } catch (err) {

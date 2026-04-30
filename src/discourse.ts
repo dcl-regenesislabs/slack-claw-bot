@@ -57,6 +57,7 @@ interface DiscourseTopicPost {
   id: number;
   username: string;
   cooked: string;
+  raw?: string;
   post_number: number;
   created_at: string;
 }
@@ -71,8 +72,8 @@ export interface FetchedTopicPost {
   postNumber: number;
   username: string;
   createdAt: string;
-  /** HTML rendered by Discourse (`cooked`). Readable by LLMs as-is. */
-  html: string;
+  /** Markdown content (raw if Discourse returned it; otherwise HTML-stripped from `cooked`). */
+  text: string;
 }
 
 export interface FetchedTopic {
@@ -123,7 +124,11 @@ export class DiscourseClient {
   }
 
   async fetchTopic(topicId: number, asUsername: string): Promise<FetchedTopic> {
-    const res = await this.request<DiscourseTopicResponse>(`/t/${topicId}.json`, "GET", asUsername);
+    // include_raw=true asks Discourse to include the markdown source in each post.
+    // Staff users get it; non-staff fall back to HTML-stripped cooked text.
+    const res = await this.request<DiscourseTopicResponse>(
+      `/t/${topicId}.json?include_raw=true`, "GET", asUsername,
+    );
     return {
       id: res.id,
       title: res.title,
@@ -131,7 +136,7 @@ export class DiscourseClient {
         postNumber: p.post_number,
         username: p.username,
         createdAt: p.created_at,
-        html: p.cooked,
+        text: p.raw ?? htmlToText(p.cooked),
       })),
     };
   }
@@ -182,4 +187,21 @@ export class DiscourseError extends Error {
     super(message);
     this.name = "DiscourseError";
   }
+}
+
+/** Minimal HTML → text fallback for Discourse `cooked` when `raw` isn't returned. */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6])>/gi, "\n\n")
+    .replace(/<li[^>]*>/gi, "- ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
