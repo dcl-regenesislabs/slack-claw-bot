@@ -754,9 +754,12 @@ class GrantsOrchestrator {
 
   /**
    * Build ORACLE's user-turn context — pure context, no instructions.
-   * The synthesis prompt lives in `oracle.md` (the system prompt). Prefers the
-   * Discourse topic (the canonical curated record); falls back to local narrative
-   * sections when Discourse is disabled or the topic fetch fails.
+   * The synthesis prompt lives in `oracle.md` (the system prompt).
+   *
+   * When Discourse is enabled, the topic fetch is required: a failure throws so
+   * the caller can surface it to Slack (synthesizing on stale local state would
+   * silently mislead curators). Falls back to local narrative sections only
+   * when Discourse is disabled entirely.
    */
   private async buildOracleContext(
     state: ProposalState,
@@ -764,18 +767,14 @@ class GrantsOrchestrator {
   ): Promise<string> {
     if (this.discourse && this.discourseEnabled && state.discourseTopicId) {
       const asUsername = this.discourseConfig?.users.oracle ?? "system";
-      try {
-        const topic = await this.discourse.fetchTopic(state.discourseTopicId, asUsername);
-        const postsBlock = topic.posts
-          .map(p => `### Post ${p.postNumber} — @${p.username} (${p.createdAt})\n\n${p.text}`)
-          .join("\n\n");
-        return `# Forum thread: ${topic.title}\n\n${postsBlock}`;
-      } catch (err) {
-        console.warn(`[grants] Failed to fetch Discourse topic ${state.discourseTopicId} for ORACLE; falling back to local narrative:`, err);
-      }
+      const topic = await this.discourse.fetchTopic(state.discourseTopicId, asUsername);
+      const postsBlock = topic.posts
+        .map(p => `### Post ${p.postNumber} — @${p.username} (${p.createdAt})\n\n${p.text}`)
+        .join("\n\n");
+      return `# Forum thread: ${topic.title}\n\n${postsBlock}`;
     }
 
-    // Fallback: local narrative sections (Discourse disabled or fetch failed).
+    // Fallback: local narrative sections (Discourse disabled or no topic id).
     const evaluations = AGENT_NAMES
       .filter(a => narrative[a]?.trim())
       .map(a => ({ label: AGENT_LABELS[a], text: narrative[a] }));
@@ -802,7 +801,20 @@ class GrantsOrchestrator {
     // from local narrative sections.
     const narrative = this.readNarrative(state);
     const oraclePrompt = this.agentPrompts.get("oracle") ?? "";
-    const combined = await this.buildOracleContext(state, narrative);
+    let combined: string;
+    try {
+      combined = await this.buildOracleContext(state, narrative);
+    } catch (err) {
+      console.error(`[grants] ORACLE context build failed for ${state.id}:`, err);
+      state.status = "evaluating";
+      state.updatedAt = new Date().toISOString();
+      this.saveState(state);
+      await postMessage(client, state.channelId, state.parentThreadTs,
+        `:x: *Couldn't fetch the Discourse forum thread* (topic ${state.discourseTopicId}).\n` +
+        `${safeErrorMessage(err)}\n\n` +
+        `ORACLE synthesis aborted. Try \`!decide\` again once the forum is reachable.`);
+      return;
+    }
 
     const sessionPath = this.sessionPath(state.id, "oracle");
     const sessionManager = SessionManager.open(sessionPath, this.proposalDir(state.id));
