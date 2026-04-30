@@ -53,6 +53,35 @@ interface DiscoursePostResponse {
   post_number: number;
 }
 
+interface DiscourseTopicPost {
+  id: number;
+  username: string;
+  cooked: string;
+  raw?: string;
+  post_number: number;
+  created_at: string;
+}
+
+interface DiscourseTopicResponse {
+  id: number;
+  title: string;
+  post_stream: { posts: DiscourseTopicPost[] };
+}
+
+export interface FetchedTopicPost {
+  postNumber: number;
+  username: string;
+  createdAt: string;
+  /** Markdown content (raw if Discourse returned it; otherwise HTML-stripped from `cooked`). */
+  text: string;
+}
+
+export interface FetchedTopic {
+  id: number;
+  title: string;
+  posts: FetchedTopicPost[];
+}
+
 export class DiscourseClient {
   private baseUrl: string;
 
@@ -92,6 +121,24 @@ export class DiscourseClient {
         edit_reason: opts.editReason ?? "Refined via grants agents",
       },
     });
+  }
+
+  async fetchTopic(topicId: number, asUsername: string): Promise<FetchedTopic> {
+    // include_raw=true asks Discourse to include the markdown source in each post.
+    // Staff users get it; non-staff fall back to HTML-stripped cooked text.
+    const res = await this.request<DiscourseTopicResponse>(
+      `/t/${topicId}.json?include_raw=true`, "GET", asUsername,
+    );
+    return {
+      id: res.id,
+      title: res.title,
+      posts: res.post_stream.posts.map(p => ({
+        postNumber: p.post_number,
+        username: p.username,
+        createdAt: p.created_at,
+        text: p.raw ?? htmlToText(p.cooked),
+      })),
+    };
   }
 
   postUrl(postId: number): string {
@@ -140,4 +187,21 @@ export class DiscourseError extends Error {
     super(message);
     this.name = "DiscourseError";
   }
+}
+
+/** Minimal HTML → text fallback for Discourse `cooked` when `raw` isn't returned. */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6])>/gi, "\n\n")
+    .replace(/<li[^>]*>/gi, "- ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
