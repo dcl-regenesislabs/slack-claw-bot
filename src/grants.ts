@@ -745,6 +745,51 @@ class GrantsOrchestrator {
 
   // --- ORACLE ---
 
+  /**
+   * Build ORACLE's user-turn context. Prefers the Discourse topic (the canonical
+   * curated record of proposal + published evaluations + community replies);
+   * falls back to local narrative sections when Discourse is disabled or the
+   * topic fetch fails.
+   */
+  private async buildOracleContext(
+    state: ProposalState,
+    narrative: NarrativeSections,
+  ): Promise<string> {
+    const synth =
+      `As ORACLE, synthesize the discussion above and produce a final recommendation: ` +
+      `FUND / NO FUND / CONDITIONAL. Include a brief summary of the key factors driving your decision.`;
+
+    if (this.discourse && this.discourseEnabled && state.discourseTopicId) {
+      const asUsername = this.discourseConfig?.users.oracle ?? "system";
+      try {
+        const topic = await this.discourse.fetchTopic(state.discourseTopicId, asUsername);
+        const postsBlock = topic.posts
+          .map(p => `### Post ${p.postNumber} — @${p.username} (${p.createdAt})\n\n${p.html}`)
+          .join("\n\n");
+        return (
+          `# Forum thread: ${topic.title}\n\n` +
+          `${postsBlock}\n\n` +
+          `---\n\n${synth}`
+        );
+      } catch (err) {
+        console.warn(`[grants] Failed to fetch Discourse topic ${state.discourseTopicId} for ORACLE; falling back to local narrative:`, err);
+      }
+    }
+
+    // Fallback: local narrative sections (Discourse disabled or fetch failed).
+    const evaluations = AGENT_NAMES
+      .filter(a => narrative[a]?.trim())
+      .map(a => ({ label: AGENT_LABELS[a], text: narrative[a] }));
+    const evalSections = evaluations.map(e => `## ${e.label}\n\n${e.text}`).join("\n\n");
+
+    return (
+      `# Proposal for ORACLE Synthesis\n\n` +
+      `## Full proposal\n\n${narrative.submission}\n\n` +
+      (evalSections ? `${evalSections}\n\n` : ``) +
+      `---\n\n${synth}`
+    );
+  }
+
   private async triggerOracle(state: ProposalState, client: WebClient): Promise<void> {
     state.status = "deciding";
     this.saveState(state);
@@ -752,32 +797,15 @@ class GrantsOrchestrator {
     await postMessage(client, state.channelId, state.parentThreadTs,
       ":crystal_ball: Running ORACLE synthesis…");
 
-    // Filter to agents whose evaluation was published via `!post` — every agent
-    // auto-runs an initial pass, so "has narrative" would always include all four.
-    // Without Discourse there's no publish step, so fall back to narrative presence.
+    // ORACLE's context is the Discourse topic when available — it already contains
+    // the curated proposal + each agent evaluation that was `!post`-ed + any
+    // community/proposer replies. Reading the forum avoids re-injecting unpublished
+    // narratives or per-agent question history.
+    // When Discourse is disabled there's no forum to read, so fall back to assembling
+    // from local narrative sections.
     const narrative = this.readNarrative(state);
     const oraclePrompt = this.agentPrompts.get("oracle") ?? "";
-    const includeAgent = (a: AgentName): boolean =>
-      this.discourseEnabled
-        ? state.agents[a].approvedAt !== null
-        : Boolean(narrative[a]?.trim());
-
-    const evaluations = AGENT_NAMES
-      .filter(a => includeAgent(a) && narrative[a]?.trim())
-      .map(a => ({ label: DISCOURSE_AGENT_LABELS[a], text: narrative[a] }));
-
-    const evalSections = evaluations.map(e => `## ${e.label}\n\n${e.text}`).join("\n\n");
-    const count = evaluations.length;
-    const synthVerb = count === 1 ? "synthesize this domain evaluation" : `synthesize these ${count} domain evaluations`;
-    const synthClause = count === 0
-      ? `As ORACLE, no domain agents have evaluated this proposal yet. Produce a final recommendation based on the proposal alone: FUND / NO FUND / CONDITIONAL, with a brief summary of the key factors driving your decision.`
-      : `As ORACLE, ${synthVerb} and produce a final recommendation: FUND / NO FUND / CONDITIONAL. Include a brief summary of the key factors driving your decision.`;
-
-    const combined =
-      `# Proposal for ORACLE Synthesis\n\n` +
-      `## Full proposal\n\n${narrative.submission}\n\n` +
-      (evalSections ? `${evalSections}\n\n` : ``) +
-      `---\n\n${synthClause}`;
+    const combined = await this.buildOracleContext(state, narrative);
 
     const sessionPath = this.sessionPath(state.id, "oracle");
     const sessionManager = SessionManager.open(sessionPath, this.proposalDir(state.id));

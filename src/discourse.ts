@@ -53,6 +53,34 @@ interface DiscoursePostResponse {
   post_number: number;
 }
 
+interface DiscourseTopicPost {
+  id: number;
+  username: string;
+  cooked: string;
+  post_number: number;
+  created_at: string;
+}
+
+interface DiscourseTopicResponse {
+  id: number;
+  title: string;
+  post_stream: { posts: DiscourseTopicPost[] };
+}
+
+export interface FetchedTopicPost {
+  postNumber: number;
+  username: string;
+  createdAt: string;
+  /** HTML rendered by Discourse (`cooked`). Readable by LLMs as-is. */
+  html: string;
+}
+
+export interface FetchedTopic {
+  id: number;
+  title: string;
+  posts: FetchedTopicPost[];
+}
+
 export class DiscourseClient {
   private baseUrl: string;
 
@@ -92,6 +120,20 @@ export class DiscourseClient {
         edit_reason: opts.editReason ?? "Refined via grants agents",
       },
     });
+  }
+
+  async fetchTopic(topicId: number, asUsername: string): Promise<FetchedTopic> {
+    const res = await this.request<DiscourseTopicResponse>(`/t/${topicId}.json`, "GET", asUsername);
+    return {
+      id: res.id,
+      title: res.title,
+      posts: res.post_stream.posts.map(p => ({
+        postNumber: p.post_number,
+        username: p.username,
+        createdAt: p.created_at,
+        html: p.cooked,
+      })),
+    };
   }
 
   postUrl(postId: number): string {
