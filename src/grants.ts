@@ -752,17 +752,32 @@ class GrantsOrchestrator {
     await postMessage(client, state.channelId, state.parentThreadTs,
       ":crystal_ball: Running ORACLE synthesis…");
 
-    // Assemble ORACLE's context: proposal + all 4 agent answers from the narrative
+    // Filter to agents whose evaluation was published via `!post` — every agent
+    // auto-runs an initial pass, so "has narrative" would always include all four.
+    // Without Discourse there's no publish step, so fall back to narrative presence.
     const narrative = this.readNarrative(state);
     const oraclePrompt = this.agentPrompts.get("oracle") ?? "";
+    const includeAgent = (a: AgentName): boolean =>
+      this.discourseEnabled
+        ? state.agents[a].approvedAt !== null
+        : Boolean(narrative[a]?.trim());
+
+    const evaluations = AGENT_NAMES
+      .filter(a => includeAgent(a) && narrative[a]?.trim())
+      .map(a => ({ label: DISCOURSE_AGENT_LABELS[a], text: narrative[a] }));
+
+    const evalSections = evaluations.map(e => `## ${e.label}\n\n${e.text}`).join("\n\n");
+    const count = evaluations.length;
+    const synthVerb = count === 1 ? "synthesize this domain evaluation" : `synthesize these ${count} domain evaluations`;
+    const synthClause = count === 0
+      ? `As ORACLE, no domain agents have evaluated this proposal yet. Produce a final recommendation based on the proposal alone: FUND / NO FUND / CONDITIONAL, with a brief summary of the key factors driving your decision.`
+      : `As ORACLE, ${synthVerb} and produce a final recommendation: FUND / NO FUND / CONDITIONAL. Include a brief summary of the key factors driving your decision.`;
+
     const combined =
       `# Proposal for ORACLE Synthesis\n\n` +
       `## Full proposal\n\n${narrative.submission}\n\n` +
-      `## VOXEL — Technical Feasibility\n\n${narrative.voxel || "_(no evaluation)_"}\n\n` +
-      `## CANVAS — Art & Creativity\n\n${narrative.canvas || "_(no evaluation)_"}\n\n` +
-      `## LOOP — Gameplay & Mechanics\n\n${narrative.loop || "_(no evaluation)_"}\n\n` +
-      `## SIGNAL — Marketing & Growth\n\n${narrative.signal || "_(no evaluation)_"}\n\n` +
-      `---\n\nAs ORACLE, synthesize these four domain evaluations and produce a final recommendation: FUND / NO FUND / CONDITIONAL. Include a brief summary of the key factors driving your decision.`;
+      (evalSections ? `${evalSections}\n\n` : ``) +
+      `---\n\n${synthClause}`;
 
     const sessionPath = this.sessionPath(state.id, "oracle");
     const sessionManager = SessionManager.open(sessionPath, this.proposalDir(state.id));
