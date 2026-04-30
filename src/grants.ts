@@ -746,19 +746,15 @@ class GrantsOrchestrator {
   // --- ORACLE ---
 
   /**
-   * Build ORACLE's user-turn context. Prefers the Discourse topic (the canonical
-   * curated record of proposal + published evaluations + community replies);
-   * falls back to local narrative sections when Discourse is disabled or the
-   * topic fetch fails.
+   * Build ORACLE's user-turn context — pure context, no instructions.
+   * The synthesis prompt lives in `oracle.md` (the system prompt). Prefers the
+   * Discourse topic (the canonical curated record); falls back to local narrative
+   * sections when Discourse is disabled or the topic fetch fails.
    */
   private async buildOracleContext(
     state: ProposalState,
     narrative: NarrativeSections,
   ): Promise<string> {
-    const synth =
-      `As ORACLE, synthesize the discussion above and produce a final recommendation: ` +
-      `FUND / NO FUND / CONDITIONAL. Include a brief summary of the key factors driving your decision.`;
-
     if (this.discourse && this.discourseEnabled && state.discourseTopicId) {
       const asUsername = this.discourseConfig?.users.oracle ?? "system";
       try {
@@ -766,11 +762,7 @@ class GrantsOrchestrator {
         const postsBlock = topic.posts
           .map(p => `### Post ${p.postNumber} — @${p.username} (${p.createdAt})\n\n${p.html}`)
           .join("\n\n");
-        return (
-          `# Forum thread: ${topic.title}\n\n` +
-          `${postsBlock}\n\n` +
-          `---\n\n${synth}`
-        );
+        return `# Forum thread: ${topic.title}\n\n${postsBlock}`;
       } catch (err) {
         console.warn(`[grants] Failed to fetch Discourse topic ${state.discourseTopicId} for ORACLE; falling back to local narrative:`, err);
       }
@@ -783,10 +775,8 @@ class GrantsOrchestrator {
     const evalSections = evaluations.map(e => `## ${e.label}\n\n${e.text}`).join("\n\n");
 
     return (
-      `# Proposal for ORACLE Synthesis\n\n` +
-      `## Full proposal\n\n${narrative.submission}\n\n` +
-      (evalSections ? `${evalSections}\n\n` : ``) +
-      `---\n\n${synth}`
+      `# Proposal\n\n${narrative.submission}` +
+      (evalSections ? `\n\n${evalSections}` : ``)
     );
   }
 
