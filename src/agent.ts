@@ -134,7 +134,7 @@ function createGuardedTools(cwd: string): AgentTool<any>[] {
 // --- Types ---
 
 interface AgentConfig {
-  anthropicOAuthRefreshToken?: string;
+  anthropicOAuthSetupToken?: string;
   githubToken?: string;
   model?: string;
   memoryDir?: string;
@@ -211,7 +211,7 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   sessionDir = join(tmpdir(), "claw-sessions");
   mkdirSync(sessionDir, { recursive: true });
 
-  loadAuth(config.anthropicOAuthRefreshToken);
+  loadAuth(config.anthropicOAuthSetupToken);
   authStorage = AuthStorage.create(authPath);
 }
 
@@ -416,20 +416,32 @@ async function saveMemory(session: AgentSession, userId: string, username: strin
 
 // --- Auth ---
 
-// Auth lives entirely in .auth.json. ANTHROPIC_OAUTH_REFRESH_TOKEN (a long-lived
-// `claude setup-token`, ~1 year) seeds the file on first run; the SDK rotates the
-// access token in-place thereafter. Because the seed stays valid for a year, a fresh
-// container that re-seeds from the env var still authenticates — no external store needed.
-function loadAuth(refreshToken?: string): void {
+// One year in ms — the lifetime of a `claude setup-token`. We stamp the seeded
+// access token with this far-future expiry so the SDK never attempts a refresh.
+const SETUP_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
+// Auth lives entirely in .auth.json. ANTHROPIC_OAUTH_SETUP_TOKEN holds a long-lived
+// `claude setup-token` (sk-ant-oat…, ~1 year) — which is itself the OAuth *access* token,
+// used directly as the Bearer. It is NOT a refresh token, so we seed it into `access` with
+// a far-future expiry; seeding it as `refresh` (expires: 0) makes the SDK attempt a
+// grant_type=refresh_token exchange that fails with "No API key for provider: anthropic".
+// Because the token stays valid for a year, a fresh container that re-seeds from the env
+// var still authenticates — no external store needed.
+function loadAuth(oauthToken?: string): void {
   if (existsSync(authPath)) {
     console.log("[agent] Using existing .auth.json");
-  } else if (refreshToken) {
-    console.log("[agent] Seeding auth from ANTHROPIC_OAUTH_REFRESH_TOKEN");
+  } else if (oauthToken) {
+    console.log("[agent] Seeding auth from ANTHROPIC_OAUTH_SETUP_TOKEN");
     writeFileSync(authPath, JSON.stringify({
-      anthropic: { type: "oauth", refresh: refreshToken, access: "", expires: 0 },
+      anthropic: {
+        type: "oauth",
+        access: oauthToken,
+        refresh: oauthToken,
+        expires: Date.now() + SETUP_TOKEN_TTL_MS,
+      },
     }), "utf-8");
   } else {
-    throw new Error("No auth available. Set ANTHROPIC_OAUTH_REFRESH_TOKEN or place a valid .auth.json");
+    throw new Error("No auth available. Set ANTHROPIC_OAUTH_SETUP_TOKEN or place a valid .auth.json");
   }
 }
 

@@ -30,7 +30,7 @@ try {
 }
 
 await initAgent({
-  anthropicOAuthRefreshToken: config.anthropicOAuthRefreshToken,
+  anthropicOAuthSetupToken: config.anthropicOAuthSetupToken,
   githubToken: config.githubToken,
   model: config.model,
   memoryDir,

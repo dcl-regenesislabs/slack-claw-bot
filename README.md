@@ -17,7 +17,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Node.js 20+
 - A [Slack app](https://api.slack.com/apps) configured for Socket Mode with an `app_mention` event subscription
 - GitHub personal access token
-- Anthropic OAuth refresh token
+- Anthropic OAuth setup token (`claude setup-token`)
 
 ## Setup
 
@@ -51,7 +51,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `SLACK_BOT_TOKEN` | Yes | Bot token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | Yes | App-level token for Socket Mode (`xapp-...`) |
 | `GITHUB_TOKEN` | Yes | GitHub PAT for `gh` CLI |
-| `ANTHROPIC_OAUTH_REFRESH_TOKEN` | No* | Anthropic OAuth refresh token (see Auth section) |
+| `ANTHROPIC_OAUTH_SETUP_TOKEN` | No* | Anthropic OAuth setup token from `claude setup-token` (see Auth section) |
 | `MODEL` | No | Model override (default: `claude-sonnet-4-5`). PR reviews always use `claude-opus-4-6` regardless of this setting. |
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
@@ -76,17 +76,17 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 
 All Anthropic auth uses OAuth — there is no API key path. The OAuth flow works like this:
 
-1. `ANTHROPIC_OAUTH_REFRESH_TOKEN` is a **long-lived setup token** (from `claude setup-token`, valid ~1 year).
-2. It is exchanged for a short-lived **access token**, which the SDK refreshes in-place as needed.
-3. The current auth state (refresh + access + expiry) is persisted in `.auth.json`.
+1. `ANTHROPIC_OAUTH_SETUP_TOKEN` is a **long-lived setup token** (from `claude setup-token`, valid ~1 year). It is itself the OAuth **access token** (`sk-ant-oat…`) — sent directly as the Bearer, not exchanged for anything.
+2. On first run the bot seeds `.auth.json` with that token in the `access` field and a far-future expiry, so the SDK uses it as-is and never attempts a refresh (a setup token is not a valid refresh-grant token — trying to exchange it fails with `No API key for provider: anthropic`).
+3. The auth state is persisted in `.auth.json`.
 
 **Getting started:**
 
-- **First run** — set `ANTHROPIC_OAUTH_REFRESH_TOKEN` in `.env`. The bot writes `.auth.json` on startup and uses that going forward.
+- **First run** — set `ANTHROPIC_OAUTH_SETUP_TOKEN` in `.env`. The bot writes `.auth.json` on startup and uses that going forward.
 - **Existing session** — copy `.auth.json` from another pi-agent or OpenDCL session into the project root. No env var needed.
 - **CLI** — works if `.auth.json` exists (`npm run cli`). No env var needed.
 
-**Restarts:** `.auth.json` holds the working auth state. If it's lost on a container restart, the bot simply re-seeds from `ANTHROPIC_OAUTH_REFRESH_TOKEN` — and because the setup token stays valid for ~1 year, that re-seed authenticates fine. No external token store is needed. Rotate the env token (and delete any stale `.auth.json`) once a year, or whenever auth starts failing with `No API key for provider: anthropic`.
+**Restarts:** `.auth.json` holds the working auth state. If it's lost on a container restart, the bot simply re-seeds from `ANTHROPIC_OAUTH_SETUP_TOKEN` — and because the setup token stays valid for ~1 year, that re-seed authenticates fine. No external token store is needed. Rotate the env token (and delete any stale `.auth.json`) once a year, or whenever auth starts failing with `No API key for provider: anthropic`.
 
 ### Memory persistence (git)
 
