@@ -76,9 +76,9 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 
 All Anthropic auth uses OAuth — there is no API key path. The OAuth flow works like this:
 
-1. `ANTHROPIC_OAUTH_REFRESH_TOKEN` is a **long-lived setup token** (from `claude setup-token`, valid ~1 year).
-2. It is exchanged for a short-lived **access token**, which the SDK refreshes in-place as needed.
-3. The current auth state (refresh + access + expiry) is persisted in `.auth.json`.
+1. `ANTHROPIC_OAUTH_REFRESH_TOKEN` is a **long-lived setup token** (from `claude setup-token`, valid ~1 year). Despite the env var name, this token is itself the OAuth **access token** (`sk-ant-oat…`) — it's sent directly as the Bearer, not exchanged for anything.
+2. On first run the bot seeds `.auth.json` with that token in the `access` field and a far-future expiry, so the SDK uses it as-is and never attempts a refresh (a setup token is not a valid refresh-grant token — trying to exchange it fails with `No API key for provider: anthropic`).
+3. The auth state is persisted in `.auth.json`.
 
 **Getting started:**
 
