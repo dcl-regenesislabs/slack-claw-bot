@@ -153,6 +153,8 @@ export interface RunOptions {
   events?: EventEmitter;
   model?: string;
   files?: FileAttachment[];
+  /** Slack channel name, surfaced to the agent so it can resolve the channel's default repo. */
+  channelName?: string;
   /** Override the default system prompt (skips reading prompts/system.md). */
   systemPrompt?: string;
   /** Skip the post-run memory save. Used by grant agents whose learnings live elsewhere. */
@@ -353,7 +355,7 @@ async function createSession(
 
 async function buildNewPrompt(options: RunOptions): Promise<string> {
   const threadContent = await options.fetchThread();
-  return buildPrompt(threadContent, options.dryRun, options.triggeredBy, undefined, options.files);
+  return buildPrompt(threadContent, options.dryRun, options.triggeredBy, undefined, options.files, options.channelName);
 }
 
 async function buildResumePrompt(options: RunOptions, sessionManager: SessionManager): Promise<string> {
@@ -368,7 +370,7 @@ async function buildResumePrompt(options: RunOptions, sessionManager: SessionMan
       );
     }
   }
-  return buildPrompt(options.newMessage, options.dryRun, options.triggeredBy, true, options.files);
+  return buildPrompt(options.newMessage, options.dryRun, options.triggeredBy, true, options.files, options.channelName);
 }
 
 function findLastSeenTs(sessionManager: SessionManager): string | null {

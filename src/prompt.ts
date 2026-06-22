@@ -10,13 +10,17 @@ export function buildPrompt(
   triggeredBy?: string,
   isFollowUp?: boolean,
   files?: FileAttachment[],
+  channelName?: string,
 ): string {
   const dryRunNotice = dryRun
     ? "IMPORTANT: Do not execute any commands. Just describe what you would do.\n\n"
     : "";
 
-  const attribution = triggeredBy
-    ? `Triggered by: ${triggeredBy}\n\n`
+  const attributionLines: string[] = [];
+  if (channelName) attributionLines.push(`Channel: #${channelName}`);
+  if (triggeredBy) attributionLines.push(`Triggered by: ${triggeredBy}`);
+  const attribution = attributionLines.length
+    ? `${attributionLines.join("\n")}\n\n`
     : "";
 
   const fileSection = files?.length
