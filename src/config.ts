@@ -8,8 +8,6 @@ export interface Config {
   anthropicOAuthRefreshToken?: string;
   model?: string;
   maxConcurrentAgents: number;
-  upstashRedisUrl?: string;
-  upstashRedisToken?: string;
   logChannelId?: string;
   healthPort?: number;
   memoryRepo?: string;
@@ -29,8 +27,6 @@ export function loadConfig(): Config {
     anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
     model: process.env.MODEL,
     maxConcurrentAgents: parseInt(process.env.MAX_CONCURRENT_AGENTS || "3", 10),
-    upstashRedisUrl: process.env.UPSTASH_REDIS_REST_URL,
-    upstashRedisToken: process.env.UPSTASH_REDIS_REST_TOKEN,
     logChannelId: process.env.LOG_CHANNEL_ID,
     healthPort: process.env.HEALTH_PORT ? parseInt(process.env.HEALTH_PORT, 10) : undefined,
     memoryRepo: process.env.MEMORY_REPO,

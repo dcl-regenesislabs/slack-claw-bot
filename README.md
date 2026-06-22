@@ -54,8 +54,6 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `ANTHROPIC_OAUTH_REFRESH_TOKEN` | No* | Anthropic OAuth refresh token (see Auth section) |
 | `MODEL` | No | Model override (default: `claude-sonnet-4-5`). PR reviews always use `claude-opus-4-6` regardless of this setting. |
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
-| `UPSTASH_REDIS_REST_URL` | No | Upstash Redis URL for OAuth token persistence |
-| `UPSTASH_REDIS_REST_TOKEN` | No | Upstash Redis token |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 | `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |
@@ -78,8 +76,8 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 
 All Anthropic auth uses OAuth — there is no API key path. The OAuth flow works like this:
 
-1. A **refresh token** is exchanged for a short-lived **access token** on each API call.
-2. The SDK may **rotate the refresh token** after use, so the original token becomes invalid.
+1. `ANTHROPIC_OAUTH_REFRESH_TOKEN` is a **long-lived setup token** (from `claude setup-token`, valid ~1 year).
+2. It is exchanged for a short-lived **access token**, which the SDK refreshes in-place as needed.
 3. The current auth state (refresh + access + expiry) is persisted in `.auth.json`.
 
 **Getting started:**
@@ -88,14 +86,7 @@ All Anthropic auth uses OAuth — there is no API key path. The OAuth flow works
 - **Existing session** — copy `.auth.json` from another pi-agent or OpenDCL session into the project root. No env var needed.
 - **CLI** — works if `.auth.json` exists (`npm run cli`). No env var needed.
 
-**Why `.auth.json` matters:** because refresh tokens rotate on use, the file is the source of truth. The env var is only a seed for first-time setup.
-
-**Why Redis:** container restarts lose the file, so the original env var token may already be expired. When Upstash Redis is configured (`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`):
-
-1. **On startup** — the bot loads the latest auth state from Redis instead of the env var.
-2. **After each rotation** — the bot syncs the new state back to Redis.
-
-This keeps the bot resilient to restarts without manual token re-provisioning.
+**Restarts:** `.auth.json` holds the working auth state. If it's lost on a container restart, the bot simply re-seeds from `ANTHROPIC_OAUTH_REFRESH_TOKEN` — and because the setup token stays valid for ~1 year, that re-seed authenticates fine. No external token store is needed. Rotate the env token (and delete any stale `.auth.json`) once a year, or whenever auth starts failing with `No API key for provider: anthropic`.
 
 ### Memory persistence (git)
 
