@@ -5,6 +5,14 @@ description: Create a GitHub issue from a Slack thread conversation. Analyzes th
 
 # Create GitHub Issue from Slack Thread
 
+## Choosing the repository
+
+Before anything else, determine the target repo:
+
+1. If the conversation explicitly names a repo or alias, use it.
+2. Otherwise, use the channel's default repo from the `repos` skill (matched against the `Channel: #name` line in the prompt).
+3. If neither applies, **ask the user which repo** — never guess or pick a repo from prior context.
+
 ## Steps
 
 1. **Analyze the thread** — identify the core request, problem, or feature
