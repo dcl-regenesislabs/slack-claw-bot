@@ -133,17 +133,10 @@ function createGuardedTools(cwd: string): AgentTool<any>[] {
 
 // --- Types ---
 
-interface RedisConfig {
-  url: string;
-  token: string;
-}
-
 interface AgentConfig {
   anthropicOAuthRefreshToken?: string;
   githubToken?: string;
   model?: string;
-  upstashRedisUrl?: string;
-  upstashRedisToken?: string;
   memoryDir?: string;
 }
 
@@ -196,8 +189,6 @@ const REVIEW_KEYWORD_PATTERN = /\breview\b/i;
 let authStorage: AuthStorage | null = null;
 let defaultModelId: string;
 const authPath = join(projectDir, ".auth.json");
-let redisConfig: RedisConfig | null = null;
-let lastAuthSnapshot: string | null = null;
 let sessionDir: string | null = null;
 let memoryDir: string | null = null;
 
@@ -220,21 +211,8 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   sessionDir = join(tmpdir(), "claw-sessions");
   mkdirSync(sessionDir, { recursive: true });
 
-  if (config.upstashRedisUrl && config.upstashRedisToken) {
-    redisConfig = { url: config.upstashRedisUrl, token: config.upstashRedisToken };
-  }
-
-  await loadAuth(config.anthropicOAuthRefreshToken);
+  loadAuth(config.anthropicOAuthRefreshToken);
   authStorage = AuthStorage.create(authPath);
-}
-
-export async function syncAuth(): Promise<void> {
-  if (!redisConfig || !existsSync(authPath)) return;
-  const data = readFileSync(authPath, "utf-8");
-  if (data === lastAuthSnapshot) return;
-  lastAuthSnapshot = data;
-  await redisSet(redisConfig, data);
-  console.log("[agent] Auth token rotated — synced to Redis");
 }
 
 export async function runAgent(options: RunOptions): Promise<RunResult> {
@@ -438,14 +416,12 @@ async function saveMemory(session: AgentSession, userId: string, username: strin
 
 // --- Auth ---
 
-async function loadAuth(refreshToken?: string): Promise<void> {
-  const stored = redisConfig ? await redisGet(redisConfig) : null;
-
-  if (stored) {
-    console.log("[agent] Loaded auth state from Redis");
-    writeFileSync(authPath, stored, "utf-8");
-    lastAuthSnapshot = stored;
-  } else if (existsSync(authPath)) {
+// Auth lives entirely in .auth.json. ANTHROPIC_OAUTH_REFRESH_TOKEN (a long-lived
+// `claude setup-token`, ~1 year) seeds the file on first run; the SDK rotates the
+// access token in-place thereafter. Because the seed stays valid for a year, a fresh
+// container that re-seeds from the env var still authenticates — no external store needed.
+function loadAuth(refreshToken?: string): void {
+  if (existsSync(authPath)) {
     console.log("[agent] Using existing .auth.json");
   } else if (refreshToken) {
     console.log("[agent] Seeding auth from ANTHROPIC_OAUTH_REFRESH_TOKEN");
@@ -454,31 +430,6 @@ async function loadAuth(refreshToken?: string): Promise<void> {
     }), "utf-8");
   } else {
     throw new Error("No auth available. Set ANTHROPIC_OAUTH_REFRESH_TOKEN or place a valid .auth.json");
-  }
-}
-
-async function redisGet(cfg: RedisConfig): Promise<string | null> {
-  try {
-    const res = await fetch(`${cfg.url}/get/anthropic_auth`, {
-      headers: { Authorization: `Bearer ${cfg.token}` },
-    });
-    const body = await res.json() as { result: string | null };
-    return body.result ?? null;
-  } catch (err) {
-    console.error("[agent] Failed to load from Redis:", err);
-    return null;
-  }
-}
-
-async function redisSet(cfg: RedisConfig, value: string): Promise<void> {
-  try {
-    await fetch(cfg.url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${cfg.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(["SET", "anthropic_auth", value]),
-    });
-  } catch (err) {
-    console.error("[agent] Failed to save to Redis:", err);
   }
 }
 

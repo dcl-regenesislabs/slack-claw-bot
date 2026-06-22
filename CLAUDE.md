@@ -59,8 +59,8 @@ Sessions are ephemeral, stored in `/tmp/claw-sessions/`.
 NEVER use `ANTHROPIC_API_KEY`. All Anthropic auth uses OAuth sessions.
 
 - `.auth.json` stores `{ refresh, access, expires }` for the OAuth flow
-- Refresh tokens rotate on use — the file is the source of truth
-- The app seeds `.auth.json` from `ANTHROPIC_OAUTH_REFRESH_TOKEN` env var on first run, then persists rotated tokens via Redis
+- `ANTHROPIC_OAUTH_REFRESH_TOKEN` is a long-lived `claude setup-token` (~1 year)
+- The app seeds `.auth.json` from the env var on first run; the SDK refreshes the access token in-place. No external token store — if the file is lost on restart, the long-lived env token re-seeds it
 - The CLI reuses `.auth.json` directly
 
 ## Testing

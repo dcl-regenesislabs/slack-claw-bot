@@ -33,8 +33,6 @@ await initAgent({
   anthropicOAuthRefreshToken: config.anthropicOAuthRefreshToken,
   githubToken: config.githubToken,
   model: config.model,
-  upstashRedisUrl: config.upstashRedisUrl,
-  upstashRedisToken: config.upstashRedisToken,
   memoryDir,
 });
 
