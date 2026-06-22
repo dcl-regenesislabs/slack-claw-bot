@@ -252,6 +252,13 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     // 2. Run agent
     console.log(`[agent] running (model: ${modelId}, prompt: ${prompt.slice(0, 200)})`);
     await session.prompt(prompt);
+
+    // pi-agent does NOT throw on LLM/auth/API failures — it records a final assistant
+    // message with stopReason "error"/"aborted" and an errorMessage, then returns normally.
+    // Detect that here and throw, so the failure surfaces to Slack instead of an empty fallback.
+    const turnError = getTurnError(session.messages);
+    if (turnError) throw new Error(turnError);
+
     const rawResponse = session.getLastAssistantText() || "";
 
     // 3. Save memory async — response goes back to Slack immediately
@@ -461,6 +468,24 @@ function subscribeToDebugLogs(session: AgentSession): void {
         break;
     }
   });
+}
+
+/**
+ * Inspect the final assistant turn for a failed/aborted stopReason. pi-agent encodes
+ * LLM and auth errors this way rather than throwing, so this is the only signal that
+ * a turn silently failed. Returns the error text to throw, or null if the turn succeeded.
+ */
+export function getTurnError(messages: AgentMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "assistant") continue;
+    const { stopReason, errorMessage } = msg as { stopReason?: string; errorMessage?: string };
+    if (stopReason === "error" || stopReason === "aborted") {
+      return errorMessage || `Agent turn ${stopReason} with no error detail`;
+    }
+    return null; // last assistant turn succeeded
+  }
+  return null;
 }
 
 function hasToolCalls(messages: AgentMessage[]): boolean {
