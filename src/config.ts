@@ -5,7 +5,7 @@ export interface Config {
   slackBotToken: string;
   slackAppToken: string;
   githubToken: string;
-  anthropicOAuthRefreshToken?: string;
+  anthropicOAuthSetupToken?: string;
   model?: string;
   maxConcurrentAgents: number;
   logChannelId?: string;
@@ -24,7 +24,7 @@ export function loadConfig(): Config {
     slackBotToken: requireEnv("SLACK_BOT_TOKEN"),
     slackAppToken: requireEnv("SLACK_APP_TOKEN"),
     githubToken: requireEnv("GITHUB_TOKEN"),
-    anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
+    anthropicOAuthSetupToken: process.env.ANTHROPIC_OAUTH_SETUP_TOKEN,
     model: process.env.MODEL,
     maxConcurrentAgents: parseInt(process.env.MAX_CONCURRENT_AGENTS || "3", 10),
     logChannelId: process.env.LOG_CHANNEL_ID,

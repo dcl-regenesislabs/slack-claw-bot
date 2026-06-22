@@ -15,7 +15,7 @@ try {
 }
 
 await initAgent({
-  anthropicOAuthRefreshToken: process.env.ANTHROPIC_OAUTH_REFRESH_TOKEN,
+  anthropicOAuthSetupToken: process.env.ANTHROPIC_OAUTH_SETUP_TOKEN,
   githubToken: process.env.GITHUB_TOKEN,
   model: process.env.MODEL,
   memoryDir,
