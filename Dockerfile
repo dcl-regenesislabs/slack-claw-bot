@@ -1,7 +1,10 @@
-FROM node:20-slim
+# pi-coding-agent 0.80+ (via undici 8) requires Node >= 22.19
+FROM node:24-slim
 
+# python3: node-gyp needs it to compile better-sqlite3, which ships no
+# prebuilt binary for Node 24 yet
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tini git build-essential cmake curl ca-certificates \
+    tini git build-essential cmake curl ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN GH_VERSION=2.67.0 \

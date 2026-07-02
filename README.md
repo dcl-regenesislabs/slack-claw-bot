@@ -14,7 +14,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 24 (LTS) — 22.19 is the minimum pi-coding-agent supports
 - A [Slack app](https://api.slack.com/apps) configured for Socket Mode with an `app_mention` event subscription
 - GitHub personal access token
 - Anthropic OAuth setup token (`claude setup-token`)
