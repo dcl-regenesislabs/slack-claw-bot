@@ -9,18 +9,18 @@ Use this skill when you need context from past runs beyond today.
 
 ## How to search
 
-Use `npx qmd` to search across shared memory files (daily logs, shared knowledge). The search index covers `shared/` only — user-specific files under `users/` are not indexed. The index name and memory base directory are provided in your context.
+Use `npx --yes qmd` to search across shared memory files (daily logs, shared knowledge). Always pass `--yes` — without it, npx may block forever waiting for an install confirmation. The search index covers `shared/` only — user-specific files under `users/` are not indexed. The index name and memory base directory are provided in your context.
 
 ### Quick keyword search
 
 ```bash
-npx qmd --index claw-memory search "PR review" -n 5
+npx --yes qmd --index claw-memory search "PR review" -n 5
 ```
 
 ### Full document output
 
 ```bash
-npx qmd --index claw-memory search "deployment" --full
+npx --yes qmd --index claw-memory search "deployment" --full
 ```
 
 ### Direct file access

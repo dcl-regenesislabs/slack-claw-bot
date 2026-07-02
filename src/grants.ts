@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rename
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import type { WebClient } from "@slack/web-api";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { runAgent } from "./agent.js";
 import type { FileAttachment } from "./prompt.js";
 import type { Config } from "./config.js";

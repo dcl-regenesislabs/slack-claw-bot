@@ -34,6 +34,7 @@ await initAgent({
   githubToken: config.githubToken,
   model: config.model,
   memoryDir,
+  timeoutMs: config.agentTimeoutMs,
 });
 
 const scheduler = createScheduler(config.maxConcurrentAgents);
