@@ -12,7 +12,8 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.73.1",
+    "@earendil-works/pi-agent-core": "^0.80.3",
+    "@earendil-works/pi-coding-agent": "^0.80.3",
     "@slack/bolt": "^4.1.0",
     "@tobilu/qmd": "^1.1.6",
     "dotenv": "^16.4.0"

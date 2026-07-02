@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getTurnError } from "../src/agent.js";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 const assistant = (props: Record<string, unknown>): AgentMessage =>
   ({ role: "assistant", content: [], ...props }) as unknown as AgentMessage;

@@ -23,8 +23,8 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   type CustomEntry,
-} from "@mariozechner/pi-coding-agent";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+} from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { writeFile, mkdir, readFile, access } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 import { constants } from "node:fs";
