@@ -8,6 +8,7 @@ export interface Config {
   anthropicOAuthSetupToken?: string;
   model?: string;
   maxConcurrentAgents: number;
+  agentTimeoutMs: number;
   logChannelId?: string;
   healthPort?: number;
   memoryRepo?: string;
@@ -27,6 +28,7 @@ export function loadConfig(): Config {
     anthropicOAuthSetupToken: process.env.ANTHROPIC_OAUTH_SETUP_TOKEN,
     model: process.env.MODEL,
     maxConcurrentAgents: parseInt(process.env.MAX_CONCURRENT_AGENTS || "3", 10),
+    agentTimeoutMs: parseInt(process.env.AGENT_TIMEOUT_MS || String(15 * 60 * 1000), 10),
     logChannelId: process.env.LOG_CHANNEL_ID,
     healthPort: process.env.HEALTH_PORT ? parseInt(process.env.HEALTH_PORT, 10) : undefined,
     memoryRepo: process.env.MEMORY_REPO,

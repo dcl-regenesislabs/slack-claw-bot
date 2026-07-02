@@ -174,7 +174,7 @@ export function loadMemoryContext(memoryDir: string, userId: string, username: s
     "",
     "Only today's daily log, shared MEMORY.md, and your user file are shown below.",
     "Older daily logs and other shared files are NOT included — search for them when the request might relate to past work or data.",
-    `Memory search (use exactly this command, do NOT replace the index name): npx qmd --index claw-memory search "<query>" -n 5`,
+    `Memory search (use exactly this command, do NOT replace the index name): npx --yes qmd --index claw-memory search "<query>" -n 5`,
     `Use descriptive keywords for search — dates, IDs, and paths won't match.`,
     "",
   );

@@ -54,6 +54,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `ANTHROPIC_OAUTH_SETUP_TOKEN` | No* | Anthropic OAuth setup token from `claude setup-token` (see Auth section) |
 | `MODEL` | No | Model override (default: `claude-sonnet-5` when pi's model registry knows it, otherwise `claude-sonnet-4-5`). PR reviews always use `claude-opus-4-6` regardless of this setting. |
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
+| `AGENT_TIMEOUT_MS` | No | Watchdog timeout per agent run in ms (default: 900000 = 15 min). Runs exceeding it are aborted and the error is posted to the thread |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 | `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |

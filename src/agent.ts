@@ -144,6 +144,8 @@ interface AgentConfig {
   githubToken?: string;
   model?: string;
   memoryDir?: string;
+  /** Watchdog timeout for a single agent run. Defaults to 15 minutes. */
+  timeoutMs?: number;
 }
 
 export interface RunOptions {
@@ -196,11 +198,14 @@ const SAVE_MARKER = "[SAVE]";
 const PR_URL_PATTERN = /github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
 const REVIEW_KEYWORD_PATTERN = /\breview\b/i;
 
+const DEFAULT_AGENT_TIMEOUT_MS = 15 * 60 * 1000;
+
 let authStorage: AuthStorage | null = null;
 let defaultModelId: string;
 const authPath = join(projectDir, ".auth.json");
 let sessionDir: string | null = null;
 let memoryDir: string | null = null;
+let agentTimeoutMs = DEFAULT_AGENT_TIMEOUT_MS;
 
 // --- Public API ---
 
@@ -217,6 +222,7 @@ export async function initAgent(config: AgentConfig): Promise<void> {
     memoryDir = config.memoryDir;
     ensureQmd(memoryDir);
   }
+  if (config.timeoutMs) agentTimeoutMs = config.timeoutMs;
   sessionDir = join(tmpdir(), "claw-sessions");
   mkdirSync(sessionDir, { recursive: true });
 
@@ -267,11 +273,29 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
       : await buildNewPrompt(options);
 
     if (options.events) subscribeToTextDeltas(session, options.events);
+    subscribeToToolLogs(session);
     if (process.env.DEBUG) subscribeToDebugLogs(session);
 
-    // 2. Run agent
+    // 2. Run agent — with a watchdog so a stalled stream or hung tool can't wedge
+    // the run (and its scheduler slot) forever. abort() surfaces through getTurnError.
     console.log(`[agent] running (model: ${modelId}, prompt: ${prompt.slice(0, 200)})`);
-    await session.prompt(prompt);
+    let timedOut = false;
+    const watchdog = setTimeout(() => {
+      timedOut = true;
+      console.warn(`[agent] Run exceeded ${agentTimeoutMs}ms — aborting session`);
+      session.abort().catch(() => {});
+    }, agentTimeoutMs);
+    try {
+      await session.prompt(prompt);
+    } catch (err) {
+      if (!timedOut) throw err;
+    } finally {
+      clearTimeout(watchdog);
+    }
+
+    if (timedOut) {
+      throw new Error(`I gave up after ${Math.round(agentTimeoutMs / 60_000)} minutes — the task took too long. Try breaking it into smaller steps.`);
+    }
 
     // prompt() resolves even on LLM/auth failures — surface them instead of an empty fallback.
     const turnError = getTurnError(session.messages);
@@ -481,15 +505,23 @@ function subscribeToTextDeltas(session: AgentSession, events: EventEmitter): voi
   });
 }
 
-function subscribeToDebugLogs(session: AgentSession): void {
+// Always-on tool activity log — when a run hangs, this shows which tool it died in.
+function subscribeToToolLogs(session: AgentSession): void {
   session.subscribe((event: AgentSessionEvent) => {
     switch (event.type) {
       case "tool_execution_start":
-        console.log(`[debug] tool:start ${event.toolName}`, JSON.stringify(event.args).slice(0, 200));
+        console.log(`[agent] tool:start ${event.toolName}`, JSON.stringify(event.args).slice(0, 200));
         break;
       case "tool_execution_end":
-        console.log(`[debug] tool:end ${event.toolName}`, event.isError ? "ERROR" : "ok", JSON.stringify(event.result).slice(0, 200));
+        console.log(`[agent] tool:end ${event.toolName}`, event.isError ? "ERROR" : "ok", JSON.stringify(event.result).slice(0, 200));
         break;
+    }
+  });
+}
+
+function subscribeToDebugLogs(session: AgentSession): void {
+  session.subscribe((event: AgentSessionEvent) => {
+    switch (event.type) {
       case "turn_start":
         console.log("[debug] turn:start");
         break;
