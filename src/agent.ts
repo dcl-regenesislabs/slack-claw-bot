@@ -10,10 +10,12 @@ import {
   DefaultResourceLoader,
   AuthStorage,
   ModelRegistry,
-  createWriteTool,
-  createEditTool,
-  createBashTool,
-  createReadTool,
+  getAgentDir,
+  createWriteToolDefinition,
+  createEditToolDefinition,
+  createBashToolDefinition,
+  createReadToolDefinition,
+  type ToolDefinition,
   type WriteOperations,
   type EditOperations,
   type BashSpawnContext,
@@ -22,7 +24,7 @@ import {
   type AgentSessionEvent,
   type CustomEntry,
 } from "@mariozechner/pi-coding-agent";
-import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { writeFile, mkdir, readFile, access } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 import { constants } from "node:fs";
@@ -58,9 +60,13 @@ function isProtectedPath(absolutePath: string): boolean {
   return false;
 }
 
-function createGuardedTools(cwd: string): AgentTool<any>[] {
+// `any` type args needed for variance: concrete defs (e.g. the bash tool's typed
+// renderCall) aren't assignable to the default ToolDefinition<TSchema, unknown>.
+type AnyToolDefinition = ToolDefinition<any, any, any>;
+
+function createGuardedTools(cwd: string): AnyToolDefinition[] {
   // Read tool — unrestricted
-  const read = createReadTool(cwd);
+  const read = createReadToolDefinition(cwd);
 
   // Write tool — blocks protected paths
   const guardedWriteOps: WriteOperations = {
@@ -78,7 +84,7 @@ function createGuardedTools(cwd: string): AgentTool<any>[] {
       await mkdir(dir, { recursive: true });
     },
   };
-  const write = createWriteTool(cwd, { operations: guardedWriteOps });
+  const write = createWriteToolDefinition(cwd, { operations: guardedWriteOps });
 
   // Edit tool — blocks protected paths
   const guardedEditOps: EditOperations = {
@@ -95,11 +101,11 @@ function createGuardedTools(cwd: string): AgentTool<any>[] {
       await access(absolutePath, constants.R_OK | constants.W_OK);
     },
   };
-  const edit = createEditTool(cwd, { operations: guardedEditOps });
+  const edit = createEditToolDefinition(cwd, { operations: guardedEditOps });
 
   // Bash tool — best-effort guard against writes to protected paths
   const WRITE_PATTERNS = [">", ">>", "tee ", "cp ", "mv ", "rm ", "sed -i", "chmod ", "chown "];
-  const bash = createBashTool(cwd, {
+  const bash = createBashToolDefinition(cwd, {
     spawnHook(ctx: BashSpawnContext) {
       const cmd = ctx.command;
       for (const pattern of WRITE_PATTERNS) {
@@ -170,7 +176,7 @@ export interface RunOptions {
   /** Override the default guarded tool set (read/bash/edit/write). Pass `[]` to
    * give the agent no tools — it can only produce text. Used by grant agents
    * to prevent any external side-effects (curl, git clone, fs). */
-  tools?: AgentTool<any>[];
+  tools?: AnyToolDefinition[];
 }
 
 export interface RunResult {
@@ -184,6 +190,8 @@ export interface RunResult {
 // --- Module State ---
 
 const REVIEW_MODEL = "claude-opus-4-6";
+// Preferred first; falls back to the next entry pi's model registry knows about.
+const DEFAULT_MODEL_CANDIDATES = ["claude-sonnet-5", "claude-sonnet-4-5"];
 const SAVE_MARKER = "[SAVE]";
 const PR_URL_PATTERN = /github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
 const REVIEW_KEYWORD_PATTERN = /\breview\b/i;
@@ -204,7 +212,6 @@ export function detectReviewModel(text: string): string | undefined {
 
 export async function initAgent(config: AgentConfig): Promise<void> {
   if (config.githubToken) process.env.GITHUB_TOKEN = config.githubToken;
-  defaultModelId = config.model || "claude-sonnet-4-5";
 
   if (config.memoryDir) {
     memoryDir = config.memoryDir;
@@ -215,6 +222,17 @@ export async function initAgent(config: AgentConfig): Promise<void> {
 
   loadAuth(config.anthropicOAuthSetupToken);
   authStorage = AuthStorage.create(authPath);
+
+  defaultModelId = config.model || resolveDefaultModel();
+  console.log(`[agent] default model: ${defaultModelId}`);
+}
+
+function resolveDefaultModel(): string {
+  const registry = ModelRegistry.create(authStorage!);
+  for (const id of DEFAULT_MODEL_CANDIDATES) {
+    if (registry.find("anthropic", id)) return id;
+  }
+  return DEFAULT_MODEL_CANDIDATES[DEFAULT_MODEL_CANDIDATES.length - 1];
 }
 
 export async function runAgent(options: RunOptions): Promise<RunResult> {
@@ -315,7 +333,7 @@ async function createSession(
   sessionManager: SessionManager,
   systemPromptOverride?: string,
   extraSkillPaths?: string[],
-  toolsOverride?: AgentTool<any>[],
+  toolsOverride?: AnyToolDefinition[],
 ) {
   const systemPrompt = systemPromptOverride
     ?? readFileSync(join(projectDir, "prompts/system.md"), "utf-8").trim();
@@ -326,6 +344,7 @@ async function createSession(
   const cwd = process.cwd();
   const resourceLoader = new DefaultResourceLoader({
     cwd,
+    agentDir: getAgentDir(),
     additionalSkillPaths: [
       ...(extraSkillPaths ?? []),
       join(projectDir, "skills"),
@@ -339,6 +358,10 @@ async function createSession(
   });
   await resourceLoader.reload();
 
+  // Guarded tools shadow the built-in read/bash/edit/write by name; the `tools`
+  // allowlist restricts the session to exactly our definitions ([] → no tools).
+  const toolDefinitions = toolsOverride ?? createGuardedTools(cwd);
+
   return createAgentSession({
     cwd,
     authStorage: authStorage!,
@@ -347,7 +370,8 @@ async function createSession(
     sessionManager,
     settingsManager: SettingsManager.inMemory(),
     resourceLoader,
-    tools: toolsOverride ?? createGuardedTools(cwd),
+    tools: toolDefinitions.map((tool) => tool.name),
+    customTools: toolDefinitions,
   });
 }
 

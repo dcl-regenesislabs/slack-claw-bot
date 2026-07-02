@@ -52,7 +52,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `SLACK_APP_TOKEN` | Yes | App-level token for Socket Mode (`xapp-...`) |
 | `GITHUB_TOKEN` | Yes | GitHub PAT for `gh` CLI |
 | `ANTHROPIC_OAUTH_SETUP_TOKEN` | No* | Anthropic OAuth setup token from `claude setup-token` (see Auth section) |
-| `MODEL` | No | Model override (default: `claude-sonnet-4-5`). PR reviews always use `claude-opus-4-6` regardless of this setting. |
+| `MODEL` | No | Model override (default: `claude-sonnet-5` when pi's model registry knows it, otherwise `claude-sonnet-4-5`). PR reviews always use `claude-opus-4-6` regardless of this setting. |
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
