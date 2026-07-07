@@ -14,6 +14,8 @@ import { resolveMemoryDir, resolveGrantsAgentsDir, clonePublicRepo } from "./mem
 import { initGrants } from "./grants.js";
 import type { GrantsRouter } from "./grants.js";
 import { DiscourseClient } from "./discourse.js";
+import { GovernanceClient } from "./governance.js";
+import { PollResolver, startPollResolver, type PollResolverHandle } from "./poll-resolver.js";
 
 const config = loadConfig();
 if (process.env.DEBUG) console.log("[debug] Debug mode enabled");
@@ -73,8 +75,31 @@ if (config.grantsChannelId && config.grantsAgentsRepo && memoryDir) {
 
 await startSlackApp(app);
 
+// Poll auto-resolution (Phase 0: shadow mode) — opt-in via POLLS_CHANNEL_ID.
+// Discovers finished governance polls and announces what it WOULD decide, no action.
+let pollResolverHandle: PollResolverHandle | null = null;
+if (config.polls && memoryDir) {
+  const governance = new GovernanceClient(config.polls.governanceApiUrl);
+  const resolver = new PollResolver({
+    governance,
+    client: app.client,
+    channelId: config.polls.channelId,
+    memoryDir,
+    confidenceThreshold: config.polls.confidenceThreshold,
+    model: config.model,
+  });
+  pollResolverHandle = startPollResolver(resolver, config.polls.intervalMs);
+  console.log(
+    `[startup] Poll resolver enabled (shadow mode) — channel ${config.polls.channelId}, every ${Math.round(config.polls.intervalMs / 1000)}s`,
+  );
+} else if (config.polls) {
+  console.warn("[startup] POLLS_CHANNEL_ID set but memory dir missing — poll resolver disabled");
+}
+
 async function shutdown(signal: string): Promise<void> {
   console.log(`[shutdown] ${signal} received — draining...`);
+
+  pollResolverHandle?.stop();
 
   try {
     await app.stop();
