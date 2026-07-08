@@ -8,6 +8,7 @@ import type { GrantsRouter } from "./grants.js";
 
 const nameCache = new Map<string, string>();
 let homeTeamId: string | null = null;
+let allowedTeamIds: ReadonlySet<string> = new Set();
 
 function isSlackError(err: unknown): err is { data?: { error?: string } } {
   return typeof err === "object" && err !== null && "data" in err;
@@ -33,6 +34,8 @@ export function createSlackApp(
   scheduler: AgentScheduler,
   grantsRouterGetter?: () => GrantsRouter | null,
 ): App {
+  allowedTeamIds = new Set(config.allowedTeamIds);
+
   const app = new App({
     token: config.slackBotToken,
     appToken: config.slackAppToken,
@@ -209,16 +212,39 @@ interface AuthEntry {
 const authCache = new Map<string, AuthEntry>();
 const AUTH_CACHE_TTL_MS = 60 * 60 * 1000;
 
+export interface SlackUserFlags {
+  team_id?: string;
+  is_restricted?: boolean;
+  is_ultra_restricted?: boolean;
+  is_stranger?: boolean;
+}
+
+/**
+ * A user is denied unless they are a full member of the home workspace or of an
+ * explicitly allowed external workspace (ALLOWED_TEAM_IDS, e.g. Decentraland's
+ * Slack shared via Slack Connect). Guests are always denied.
+ */
+export function isDeniedUser(
+  user: SlackUserFlags | undefined,
+  homeTeam: string | null,
+  allowedTeams: ReadonlySet<string>,
+): boolean {
+  const teamId = user?.team_id;
+  if (user?.is_restricted || user?.is_ultra_restricted) return true;
+  if (teamId && allowedTeams.has(teamId)) return false;
+  // is_stranger flags Slack Connect users from other workspaces
+  const isStranger = Boolean(user?.is_stranger);
+  const isExternalTeam = Boolean(homeTeam && teamId && teamId !== homeTeam);
+  return isStranger || isExternalTeam;
+}
+
 async function isExternalOrGuest(client: WebClient, userId: string): Promise<boolean> {
   const cached = authCache.get(userId);
   if (cached && Date.now() - cached.cachedAt <= AUTH_CACHE_TTL_MS) return cached.denied;
 
   try {
     const info = await client.users.info({ user: userId });
-    const user = info.user;
-    const isGuest = Boolean(user?.is_restricted || user?.is_ultra_restricted || user?.is_stranger);
-    const isExternalTeam = Boolean(homeTeamId && user?.team_id && user.team_id !== homeTeamId);
-    const denied = isGuest || isExternalTeam;
+    const denied = isDeniedUser(info.user, homeTeamId, allowedTeamIds);
     authCache.set(userId, { denied, cachedAt: Date.now() });
 
     const name = info.user?.real_name || info.user?.name;

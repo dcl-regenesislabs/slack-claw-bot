@@ -56,6 +56,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
 | `AGENT_TIMEOUT_MS` | No | Watchdog timeout per agent run in ms (default: 900000 = 15 min). Runs exceeding it are aborted and the error is posted to the thread |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
+| `ALLOWED_TEAM_IDS` | No | Comma-separated Slack team IDs whose full members may use the bot, in addition to the bot's own workspace (e.g. the Decentraland team via Slack Connect). Guests are always denied |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 | `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |
 | `GRANTS_CHANNEL_ID` | No | Enables the Grants Agents feature — Slack channel ID for grant proposal submissions |
