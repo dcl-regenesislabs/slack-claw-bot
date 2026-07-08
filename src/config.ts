@@ -10,6 +10,7 @@ export interface Config {
   maxConcurrentAgents: number;
   agentTimeoutMs: number;
   logChannelId?: string;
+  allowedTeamIds: string[];
   healthPort?: number;
   memoryRepo?: string;
   grantsChannelId?: string;
@@ -30,6 +31,10 @@ export function loadConfig(): Config {
     maxConcurrentAgents: parseInt(process.env.MAX_CONCURRENT_AGENTS || "3", 10),
     agentTimeoutMs: parseInt(process.env.AGENT_TIMEOUT_MS || String(15 * 60 * 1000), 10),
     logChannelId: process.env.LOG_CHANNEL_ID,
+    allowedTeamIds: (process.env.ALLOWED_TEAM_IDS || "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
     healthPort: process.env.HEALTH_PORT ? parseInt(process.env.HEALTH_PORT, 10) : undefined,
     memoryRepo: process.env.MEMORY_REPO,
     grantsChannelId: process.env.GRANTS_CHANNEL_ID,
