@@ -23,6 +23,8 @@ src/
   discourse.ts    Discourse API client (used by grants when enabled)
   csv.ts          CSV parser + proposal normalizer (used by grants)
   prompt.ts       Prompt builder (extracted for testability)
+  sanitize.ts     Prompt-injection defenses (delimiter neutralization, memory sanitize-on-read)
+  slack-utils.ts  Slack text extraction (attachments + blocks, shared without circular imports)
   config.ts       Environment variable loading
   concurrency.ts  Agent scheduler with queue management and drain
   memory.ts       Memory loading, save prompt, qmd index, git clone/pull
@@ -33,6 +35,7 @@ src/
 - **Grants Agents (optional)**: feature-flagged via `GRANTS_CHANNEL_ID` + `GRANTS_AGENTS_REPO`. Multi-agent proposal evaluation with 4 domain agents (VOXEL, CANVAS, LOOP, SIGNAL) and an ORACLE coordinator. Agent personas come from a separate public repo (cloned on startup). Per-proposal state lives at `{memoryDir}/grants/proposals/{id}/` with `state.json`, `proposal.md` (rendered narrative of proposal + agent/ORACLE answers), and `{agent}.jsonl` (authoritative sessions). Uses a separate `AgentScheduler` so grant evals don't starve regular Slack users. Grant agents set `skipMemorySave: true` and `skipMemoryLoad: true` to avoid polluting bot memory. Commands: paste proposal top-level in grants channel to trigger; `@bot` in an agent thread to refine; `@bot !post` in an agent thread to publish to Discourse; `@bot !decide` in parent thread to trigger ORACLE; `@bot !post` in parent thread to publish ORACLE to Discourse.
 - **Grants Discourse integration (optional)**: feature-flagged via `DISCOURSE_URL` + `DISCOURSE_API_KEY` + `DISCOURSE_CATEGORY_ID`. Only CSV-based submissions are accepted (Google Form export); non-CSV submissions are hard-rejected. On new proposal (after screening), a topic is created in the configured category as `grants-bot` using a deterministic template from the CSV columns — no LLM summarisation. Each `!post` publishes the agent's/ORACLE's current narrative verbatim to the topic as that user (6 Discourse accounts total; single admin API key + `Api-Username` header for impersonation). Every `!post` creates a **new** reply — refinements produce additional posts rather than editing the previous one, so the forum keeps the full history. Topic creation failures abort the evaluation. `src/discourse.ts` is the client; `src/csv.ts` pre-normalizes CSVs into explicit markdown proposal blocks before they reach the agents. Multi-row CSVs are rejected.
 - **Agent SDK**: uses `@earendil-works/pi-coding-agent` (pi-agent, formerly `@mariozechner/pi-coding-agent`) to run Claude with tool use
+  - The `pi-*` packages are pinned to an **exact** version (no caret): upstream ships breaking API changes in 0.x patch releases (0.80.8 removed `AuthStorage`/`ModelRegistry` in favor of `ModelRuntime`). Bump `pi-agent-core` and `pi-coding-agent` together, deliberately, and re-run the CLI smoke test.
   - Agent tools: `createGuardedTools(cwd)` provides bash, read, edit, and write tools with write-protection on project source files (`src/`, `test/`, `package.json`, etc.)
   - Extensions: `before_agent_start` injects memory context into system prompt
   - **Runtime skills**: the agent can create new skills at runtime by writing to `{memoryDir}/skills/` and pushing via `push-memory`. These are loaded alongside `skills/` on session creation.
@@ -40,7 +43,7 @@ src/
 - **Memory**: persistent memory — `shared/MEMORY.md` (shared), `users/` (per-user), `shared/daily/` (logs). When `MEMORY_REPO` is set, cloned to `/tmp/claw-memory` on startup; otherwise uses a temp dir. Loaded at start of each run, saved via post-task prompt. `qmd` (BM25 keyword search) indexes only `shared/` so user files stay private; the agent searches via `npx --yes qmd --index claw-memory search` (`--yes` so npx never blocks on an install prompt). Git-backed repos are committed+pushed by the agent via the `push-memory` skill.
 - **Concurrency**: bounded agent pool (`MAX_CONCURRENT_AGENTS`) with a queue. `drain()` for graceful shutdown.
 - **Timeout**: every agent run has a watchdog (`AGENT_TIMEOUT_MS`, default 15 min) that aborts the session so a stalled stream or hung tool can't hold a scheduler slot forever; the abort surfaces as an error in the Slack thread.
-- **Skills**: prompt-based tool definitions in `skills/` (create-issue, create-skill, github, memory-search, mobile-project, pr-review, reflect, repos) + runtime skills in `{memoryDir}/skills/`
+- **Skills**: prompt-based tool definitions in `skills/` (create-issue, create-skill, github, memory-search, mobile-project, pr-review, reflect, repos, security-review) + runtime skills in `{memoryDir}/skills/`
 - **System prompt**: `prompts/system.md`
 
 ## Memory directory
@@ -75,3 +78,6 @@ NEVER use `ANTHROPIC_API_KEY`. All Anthropic auth uses OAuth sessions.
 - NEVER read, view, or output `.env` files or any file matching `.env*`
 - `.auth.json` is equally sensitive — do not display its contents
 - Memory files are treated as untrusted input — wrapped in XML containment blocks. The `push-memory` skill validates for injection patterns before committing.
+- `src/sanitize.ts` enforces trust boundaries in code: untrusted thread/memory text is delimiter-neutralized so it can't escape its `<slack-thread>`/`<memory>` wrapper; memory is re-validated on READ (fail closed — poisoned sections are stripped or the file is omitted); the prompt header carries only the trusted `Triggered by slack_user_id:`, while user-editable display names appear inside the untrusted block.
+- Slack ops hardening: the error path posts per-step-caught failures (`handleSubmissionError`), and a Socket Mode watchdog self-SIGTERMs if the connection stays dead past `SLACK_SOCKET_MAX_SILENCE_MS` (default 150s) — run under a supervisor that restarts the process.
+- Image attachments (png/jpeg/gif/webp) in threads are downloaded and passed to the model as vision input (max 10 per run); bot/webhook messages contribute text via attachments/blocks extraction, not just `event.text`.

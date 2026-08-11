@@ -29,13 +29,14 @@ gh pr diff {number} -R {owner}/{repo}
 gh pr checks {number} -R {owner}/{repo}
 ```
 
-**Repo-specific review guidelines** — check for a `REVIEW.md` at the root of the *base* repo. If it exists, its instructions take precedence over the generic checklist below (it knows what matters in this codebase; you don't).
+**Repo-specific review guidelines** — fetch the *base* repo's own `CLAUDE.md` and `REVIEW.md` (if present) as review context. `REVIEW.md` instructions take precedence over the generic checklist below (it knows what matters in this codebase; you don't); `CLAUDE.md` tells you the repo's conventions so you don't flag intentional patterns.
 
 ```bash
+gh api repos/{owner}/{repo}/contents/CLAUDE.md --jq '.content' 2>/dev/null | base64 -d
 gh api repos/{owner}/{repo}/contents/REVIEW.md --jq '.content' 2>/dev/null | base64 -d
 ```
 
-A 404 means it doesn't exist — proceed with the defaults. If it does exist, mention in your Slack response that you followed it (so the user knows their conventions were applied).
+A 404 means the file doesn't exist — proceed with the defaults. If `REVIEW.md` exists, mention in your Slack response that you followed it (so the user knows their conventions were applied).
 
 **Existing comments** — read what others have already said before piling on:
 
@@ -74,18 +75,57 @@ For each issue, anchor to a specific file:line and propose a fix. "This might br
 
 **Large diffs** (>500 changed lines): a thorough line-by-line read is unrealistic. Be honest in the Slack response — say you reviewed N high-risk areas (e.g., the new auth code, the migration, the public API changes) and skimmed the rest. Better that the user knows what you skipped than that you fake confidence.
 
-## Step 3 — Post on GitHub (full reviews only)
+### Severity classification
 
-Pick a verdict:
+Classify every finding — the level drives the verdict in Step 4. Prefix each finding with `[P0]`, `[P1]`, or `[P2]` in the review body and inline comments.
+
+| Level | Description | Examples |
+|-------|-------------|----------|
+| **P0 — Blocker** | Will cause data loss, security breach, crash, or broken build | SQL injection, secrets committed, unhandled null dereference in hot path, broken CI |
+| **P1 — Major** | Real correctness or reliability bug; should be fixed before merge | Logic error affecting real users, swallowed error causing silent failures, breaking API change without migration |
+| **P2 — Minor** | Low-impact improvement; worth noting but not blocking | Naming, docs, minor style affecting readability, non-critical missing test |
+
+### Consumer impact (public-surface changes)
+
+If the diff modifies a **public surface** — HTTP routes, exported symbols of a published package, event/message schemas, env vars, CLI flags — classify the change as breaking or backward-compatible. Skip this for purely internal changes.
+
+For breaking changes, enumerate candidate consumers and verify each:
 
 ```bash
-# Approve — only if you'd merge it yourself
+# Org-wide code search for the changed symbol/route
+gh search code --owner {org} "<symbol-or-route>" --limit 50
+
+# Confirm a candidate actually calls the changed surface
+gh api -X GET search/code -f q='"<exact-string>" repo:{owner}/{consumer}'
+```
+
+Use the `repos` skill to know which repos are worth checking. For HTTP endpoints, also search client helpers that wrap the route, not just the literal path.
+
+**Always state the outcome explicitly** in the review — either "No consumers of `<symbol>` found across A, B, C" or "consumer check was inconclusive (no catalog covers this surface)". Never silently skip: a broken consumer found later is worse than an honest "couldn't verify".
+
+## Step 3 — Security review
+
+Always apply the `security-review` skill as part of every full PR review — work through its checklist and fold its findings (with severities) into the review. If nothing turns up, state "No security issues found" explicitly.
+
+## Step 4 — Post on GitHub (full reviews only)
+
+The verdict is deterministic, driven by the severities from Step 2:
+
+| Findings | Action |
+|----------|--------|
+| Any P0 or P1 | **Request changes** — block merge until resolved |
+| Only P2, or none | **Approve** — safe to merge |
+
+Never leave a comment-only review when a clear approval decision can be made. `--comment` is only for summary-adjacent feedback the user explicitly asked to post without a verdict, or when you're not the right approver.
+
+```bash
+# Approve — only P2 findings, or none
 gh pr review {number} -R {owner}/{repo} --approve --body "<summary>"
 
-# Request changes — there's at least one issue that should block merge
+# Request changes — at least one P0 or P1
 gh pr review {number} -R {owner}/{repo} --request-changes --body "<summary>"
 
-# Comment — feedback worth recording, but not blocking; or you're not the right approver
+# Comment — only when a verdict isn't appropriate (see above)
 gh pr review {number} -R {owner}/{repo} --comment --body "<summary>"
 ```
 
@@ -100,12 +140,14 @@ gh api repos/{owner}/{repo}/pulls/{number}/reviews --method POST --input - <<'EO
     {
       "path": "src/example.ts",
       "line": 42,
-      "body": "`user` can be null here when the cache misses — guard with `if (!user) return null` to avoid the TypeError on line 43."
+      "body": "[P1] `user` can be null here when the cache misses — guard with `if (!user) return null` to avoid the TypeError on line 43."
     }
   ]
 }
 EOF
 ```
+
+When you know the exact fix, prefer a GitHub ```suggestion``` block in the comment body so the author can apply it with one click — a concrete replacement beats prose describing one.
 
 **Tone for inline comments** — these comments are posted as a real GitHub user. Keep them constructive and specific:
 - Lead with what's wrong, follow with the fix. ("X breaks when Y. Add Z.")
@@ -115,7 +157,7 @@ EOF
 
 **Don't double-post**: if you already submitted a review on this PR, don't submit another one with overlapping comments unless the user explicitly asks for a re-review.
 
-## Step 4 — Report back to Slack
+## Step 5 — Report back to Slack
 
 Use Slack mrkdwn (`*bold*`, `_italic_`, `<url|label>`, ` ``` ` for code blocks).
 

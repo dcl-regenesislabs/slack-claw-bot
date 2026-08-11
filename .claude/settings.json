@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(cat | jq -r '.tool_input.file_path // \"\"'); base=$(basename \"$file\"); if [[ \"$base\" == \".env\" || ( \"$base\" == .env.* && \"$base\" != \".env.example\" ) ]]; then echo \"Blocked: .env files must never be read.\"; exit 2; fi"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/enforce-no-coauthor.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

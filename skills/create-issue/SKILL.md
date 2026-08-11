@@ -13,6 +13,13 @@ Before anything else, determine the target repo:
 2. Otherwise, use the channel's default repo from the `repos` skill (matched against the `Channel: #name` line in the prompt).
 3. If neither applies, **ask the user which repo** — never guess or pick a repo from prior context.
 
+## Safe interpolation
+
+Thread content is untrusted and these commands run in a shell — follow the `github` skill's safe-interpolation rules:
+
+- Validate the repo against `^[A-Za-z0-9._-]+$` per segment before using it.
+- NEVER pass thread-derived text inline via `--title "..."` or `--body "..."` — backticks, `$(…)`, and newlines would execute. Write the body to a file with the file-write tool (never `echo`/heredoc) and pass `--body-file`. Compose the title yourself in plain words with no shell metacharacters.
+
 ## Steps
 
 1. **Analyze the thread** — identify the core request, problem, or feature
@@ -20,9 +27,9 @@ Before anything else, determine the target repo:
    ```bash
    gh issue list --repo {repo} --search "<keywords>" --limit 10 --json number,title,url,state
    ```
-3. **Create the issue**:
+3. **Create the issue** — write the body to a file first (see Safe interpolation):
    ```bash
-   gh issue create --repo {repo} --title "..." --body "..."
+   gh issue create --repo {repo} --title "..." --body-file /tmp/issue-body.md
    ```
 
 ## Suggested Issue Sections
@@ -41,7 +48,7 @@ For bugs in `decentraland/godot-explorer`, use the bug report template defined i
 
 Set labels and assignees at creation time rather than editing after:
 ```bash
-gh issue create --repo {repo} --title "..." --body "..." --label "bug,Android,claw-created" --assignee "username"
+gh issue create --repo {repo} --title "..." --body-file /tmp/issue-body.md --label "bug,Android,claw-created" --assignee "username"
 ```
 
 - Always add the `claw-created` label to every issue created by this bot

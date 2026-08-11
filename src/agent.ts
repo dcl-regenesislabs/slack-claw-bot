@@ -8,8 +8,7 @@ import {
   SessionManager,
   SettingsManager,
   DefaultResourceLoader,
-  AuthStorage,
-  ModelRegistry,
+  ModelRuntime,
   getAgentDir,
   createWriteToolDefinition,
   createEditToolDefinition,
@@ -25,6 +24,7 @@ import {
   type CustomEntry,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import { writeFile, mkdir, readFile, access } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 import { constants } from "node:fs";
@@ -148,14 +148,20 @@ interface AgentConfig {
   timeoutMs?: number;
 }
 
+/** Thread fetchers may return plain text, or text plus vision inputs discovered in the thread. */
+export interface ThreadFetch {
+  content: string;
+  images?: ImageContent[];
+}
+
 export interface RunOptions {
   threadTs: string;
   eventTs: string;
   userId: string;
   username: string;
   newMessage: string;
-  fetchThread: () => Promise<string>;
-  fetchThreadSince: (oldest: string) => Promise<string>;
+  fetchThread: () => Promise<string | ThreadFetch>;
+  fetchThreadSince: (oldest: string) => Promise<string | ThreadFetch>;
   dryRun?: boolean;
   triggeredBy?: string;
   events?: EventEmitter;
@@ -200,7 +206,7 @@ const REVIEW_KEYWORD_PATTERN = /\breview\b/i;
 
 const DEFAULT_AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 
-let authStorage: AuthStorage | null = null;
+let modelRuntime: ModelRuntime | null = null;
 let defaultModelId: string;
 const authPath = join(projectDir, ".auth.json");
 let sessionDir: string | null = null;
@@ -227,22 +233,21 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   mkdirSync(sessionDir, { recursive: true });
 
   loadAuth(config.anthropicOAuthSetupToken);
-  authStorage = AuthStorage.create(authPath);
+  modelRuntime = await ModelRuntime.create({ authPath });
 
   defaultModelId = config.model || resolveDefaultModel();
   console.log(`[agent] default model: ${defaultModelId}`);
 }
 
 function resolveDefaultModel(): string {
-  const registry = ModelRegistry.create(authStorage!);
   for (const id of DEFAULT_MODEL_CANDIDATES) {
-    if (registry.find("anthropic", id)) return id;
+    if (modelRuntime!.getModel("anthropic", id)) return id;
   }
   return DEFAULT_MODEL_CANDIDATES[DEFAULT_MODEL_CANDIDATES.length - 1];
 }
 
 export async function runAgent(options: RunOptions): Promise<RunResult> {
-  if (!authStorage) throw new Error("Agent not initialized — call initAgent() first");
+  if (!modelRuntime) throw new Error("Agent not initialized — call initAgent() first");
 
   const modelId = options.model || defaultModelId;
 
@@ -268,7 +273,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
   try {
     // 1. Build prompt (with gap messages if resuming)
-    const prompt = isResumed
+    const { prompt, images } = isResumed
       ? await buildResumePrompt(options, sessionManager)
       : await buildNewPrompt(options);
 
@@ -286,7 +291,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
       session.abort().catch(() => {});
     }, agentTimeoutMs);
     try {
-      await session.prompt(prompt);
+      await session.prompt(prompt, images?.length ? { images } : undefined);
     } catch (err) {
       if (!timedOut) throw err;
     } finally {
@@ -361,8 +366,7 @@ async function createSession(
 ) {
   const systemPrompt = systemPromptOverride
     ?? readFileSync(join(projectDir, "prompts/system.md"), "utf-8").trim();
-  const modelRegistry = ModelRegistry.create(authStorage!);
-  const model = modelRegistry.find("anthropic", modelId);
+  const model = modelRuntime!.getModel("anthropic", modelId);
   if (!model) throw new Error(`Model "anthropic/${modelId}" not found`);
 
   const cwd = process.cwd();
@@ -388,8 +392,7 @@ async function createSession(
 
   return createAgentSession({
     cwd,
-    authStorage: authStorage!,
-    modelRegistry,
+    modelRuntime: modelRuntime!,
     model,
     sessionManager,
     settingsManager: SettingsManager.inMemory(),
@@ -401,24 +404,53 @@ async function createSession(
 
 // --- Prompt Building ---
 
-async function buildNewPrompt(options: RunOptions): Promise<string> {
-  const threadContent = await options.fetchThread();
-  return buildPrompt(threadContent, options.dryRun, options.triggeredBy, undefined, options.files, options.channelName);
+function asThreadFetch(result: string | ThreadFetch): ThreadFetch {
+  return typeof result === "string" ? { content: result } : result;
 }
 
-async function buildResumePrompt(options: RunOptions, sessionManager: SessionManager): Promise<string> {
+interface PromptBuild {
+  prompt: string;
+  images?: ImageContent[];
+}
+
+// The trusted slack_user_id header is only rendered for real Slack users (IDs start with U/W);
+// internal callers (CLI, grants agents) keep the plain trusted label path in buildPrompt.
+function slackUserId(userId: string): string | undefined {
+  return /^[UW][A-Z0-9]+$/.test(userId) ? userId : undefined;
+}
+
+function renderPrompt(options: RunOptions, content: string, isFollowUp?: boolean): string {
+  return buildPrompt(
+    content,
+    options.dryRun,
+    options.triggeredBy,
+    isFollowUp,
+    options.files,
+    options.channelName,
+    slackUserId(options.userId),
+  );
+}
+
+async function buildNewPrompt(options: RunOptions): Promise<PromptBuild> {
+  const { content, images } = asThreadFetch(await options.fetchThread());
+  return { prompt: renderPrompt(options, content), images };
+}
+
+async function buildResumePrompt(options: RunOptions, sessionManager: SessionManager): Promise<PromptBuild> {
   const lastSeenTs = findLastSeenTs(sessionManager);
+  let images: ImageContent[] | undefined;
   if (lastSeenTs) {
-    const gapContent = await options.fetchThreadSince(lastSeenTs);
-    if (gapContent) {
+    const gap = asThreadFetch(await options.fetchThreadSince(lastSeenTs));
+    images = gap.images;
+    if (gap.content) {
       sessionManager.appendCustomMessageEntry(
         "slack_gap",
-        `Messages since last interaction:\n\n${gapContent}`,
+        `Messages since last interaction:\n\n${gap.content}`,
         false,
       );
     }
   }
-  return buildPrompt(options.newMessage, options.dryRun, options.triggeredBy, true, options.files, options.channelName);
+  return { prompt: renderPrompt(options, options.newMessage, true), images };
 }
 
 function findLastSeenTs(sessionManager: SessionManager): string | null {

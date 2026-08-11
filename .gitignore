@@ -5,4 +5,5 @@ dist/
 sessions/
 .auth.json
 .DS_Store
-data/
+data/.claude/settings.local.json
+.claude/worktrees/
