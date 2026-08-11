@@ -89,6 +89,8 @@ Classify every finding — the level drives the verdict in Step 4. Prefix each f
 
 If the diff modifies a **public surface** — HTTP routes, exported symbols of a published package, event/message schemas, env vars, CLI flags — classify the change as breaking or backward-compatible. Skip this for purely internal changes.
 
+**Decentraland repos**: use the `jarvis` skill FIRST. Its manifests tell you which service owns the changed endpoint (`index.yaml` maps repo → service, `{service}.yaml` lists its API/events/entities) and which services depend on it (`graph.yaml` dependents = the blast radius). Then verify each candidate below — the graph names suspects, the code search convicts them.
+
 For breaking changes, enumerate candidate consumers and verify each:
 
 ```bash
@@ -99,7 +101,7 @@ gh search code --owner {org} "<symbol-or-route>" --limit 50
 gh api -X GET search/code -f q='"<exact-string>" repo:{owner}/{consumer}'
 ```
 
-Use the `repos` skill to know which repos are worth checking. For HTTP endpoints, also search client helpers that wrap the route, not just the literal path.
+Use the `repos` skill to know which repos are worth checking (non-Decentraland orgs have no jarvis coverage). For HTTP endpoints, also search client helpers that wrap the route, not just the literal path.
 
 **Always state the outcome explicitly** in the review — either "No consumers of `<symbol>` found across A, B, C" or "consumer check was inconclusive (no catalog covers this surface)". Never silently skip: a broken consumer found later is worse than an honest "couldn't verify".
 

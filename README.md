@@ -185,5 +185,5 @@ src/
 test/               Unit tests (node:test)
 prompts/
   system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, pr-review, push-memory, reflect, repos, security-review)
+skills/             Agent skill definitions (create-issue, create-skill, github, jarvis, memory-search, mobile-project, pr-review, push-memory, reflect, repos, security-review)
 ```
