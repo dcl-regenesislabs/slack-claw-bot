@@ -43,7 +43,7 @@ src/
 - **Memory**: persistent memory — `shared/MEMORY.md` (shared), `users/` (per-user), `shared/daily/` (logs). When `MEMORY_REPO` is set, cloned to `/tmp/claw-memory` on startup; otherwise uses a temp dir. Loaded at start of each run, saved via post-task prompt. `qmd` (BM25 keyword search) indexes only `shared/` so user files stay private; the agent searches via `npx --yes qmd --index claw-memory search` (`--yes` so npx never blocks on an install prompt). Git-backed repos are committed+pushed by the agent via the `push-memory` skill.
 - **Concurrency**: bounded agent pool (`MAX_CONCURRENT_AGENTS`) with a queue. `drain()` for graceful shutdown.
 - **Timeout**: every agent run has a watchdog (`AGENT_TIMEOUT_MS`, default 15 min) that aborts the session so a stalled stream or hung tool can't hold a scheduler slot forever; the abort surfaces as an error in the Slack thread.
-- **Skills**: prompt-based tool definitions in `skills/` (create-issue, create-skill, github, memory-search, mobile-project, pr-review, reflect, repos, security-review) + runtime skills in `{memoryDir}/skills/`
+- **Skills**: prompt-based tool definitions in `skills/` (create-issue, create-skill, github, jarvis, memory-search, mobile-project, pr-review, reflect, repos, security-review) + runtime skills in `{memoryDir}/skills/`
 - **System prompt**: `prompts/system.md`
 
 ## Memory directory
