@@ -15,15 +15,16 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.80.3",
-    "@earendil-works/pi-coding-agent": "^0.80.3",
-    "@slack/bolt": "^4.1.0",
-    "@tobilu/qmd": "^1.1.6",
-    "dotenv": "^16.4.0"
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@slack/bolt": "^5.0.0",
+    "@tobilu/qmd": "^2.5.3",
+    "dotenv": "^17.4.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
   }
 }

@@ -71,7 +71,7 @@ if (config.grantsChannelId && config.grantsAgentsRepo && memoryDir) {
   console.warn("[startup] GRANTS_CHANNEL_ID set but GRANTS_AGENTS_REPO or memory dir missing — feature disabled");
 }
 
-await startSlackApp(app);
+await startSlackApp(app, { socketMaxSilenceMs: config.slackSocketMaxSilenceMs });
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`[shutdown] ${signal} received — draining...`);

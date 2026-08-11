@@ -7,6 +7,15 @@ description: General GitHub operations using the gh CLI. Search issues, read iss
 
 Use the `gh` CLI for all GitHub operations. The tool is pre-authenticated via GITHUB_TOKEN.
 
+## Safe interpolation
+
+These commands run in a shell — never interpolate thread-derived text into a command line. Backticks, `$(…)`, and newlines in a title, message, or path would execute.
+
+- Validate `{owner}` and `{repo}` against `^[A-Za-z0-9._-]+$`; reject anything else.
+- Branch names must match the `{type}/{kebab-summary}` shape (`feat|fix|chore` prefix, kebab-case) — nothing free-form.
+- Stage files with the `--` separator (`git add -- <path>`) and only paths you verified exist, so a path can never parse as a flag.
+- NEVER pass untrusted text inline with `git commit -m "…"` or `gh issue create --title "…"` / `--body "…"`. Write the message/title/body to a file with the file-write tool (never `echo` or a heredoc — those go through the shell too) and use `git commit -F <file>` / `--body-file <file>`.
+
 ## Common Operations
 
 ### Search Issues
@@ -20,8 +29,11 @@ gh issue view {number} --repo {repo} --json title,body,comments,labels,state
 ```
 
 ### Create Issue
+
+Write the body to a file first (see Safe interpolation), then:
+
 ```bash
-gh issue create --repo {repo} --title "..." --body "..." --label "bug,enhancement" --assignee "username"
+gh issue create --repo {repo} --title "..." --body-file /tmp/issue-body.md --label "bug,enhancement" --assignee "username"
 ```
 
 ### Edit Issue (labels, assignees)
@@ -58,15 +70,20 @@ Branch naming: `feat/`, `fix/`, or `chore/` prefix, kebab-case (e.g. `fix/valida
 Edit files as needed. Always run the project's build and test commands before committing.
 
 ### 3. Commit and push
+
+Write the commit message to a file with the file-write tool (not `echo`/heredoc), then:
+
 ```bash
-git add {specific-files}
-git commit -m "Short imperative description"
+git add -- {specific-files}
+git commit -F .git/COMMIT_MSG
 git push -u origin HEAD
 ```
 
 ### 4. Open the PR
-```bash
-gh pr create --repo {owner}/{repo} --title "Short title" --body "$(cat <<'EOF'
+
+Write the body to a file with the file-write tool, using this structure:
+
+```markdown
 ## Summary
 - <what changed and why>
 
@@ -75,8 +92,12 @@ gh pr create --repo {owner}/{repo} --title "Short title" --body "$(cat <<'EOF'
 
 ## How to test
 - <steps to verify>
-EOF
-)"
+```
+
+Then:
+
+```bash
+gh pr create --repo {owner}/{repo} --title "Short title" --body-file "$WORK/PR_BODY.md"
 ```
 
 ### Rules

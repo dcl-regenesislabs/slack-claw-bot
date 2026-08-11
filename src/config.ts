@@ -10,6 +10,7 @@ export interface Config {
   maxConcurrentAgents: number;
   agentTimeoutMs: number;
   logChannelId?: string;
+  slackSocketMaxSilenceMs?: number;
   allowedTeamIds: string[];
   healthPort?: number;
   memoryRepo?: string;
@@ -31,6 +32,9 @@ export function loadConfig(): Config {
     maxConcurrentAgents: parseInt(process.env.MAX_CONCURRENT_AGENTS || "3", 10),
     agentTimeoutMs: parseInt(process.env.AGENT_TIMEOUT_MS || String(15 * 60 * 1000), 10),
     logChannelId: process.env.LOG_CHANNEL_ID,
+    slackSocketMaxSilenceMs: process.env.SLACK_SOCKET_MAX_SILENCE_MS
+      ? parseInt(process.env.SLACK_SOCKET_MAX_SILENCE_MS, 10)
+      : undefined,
     allowedTeamIds: (process.env.ALLOWED_TEAM_IDS || "")
       .split(",")
       .map((id) => id.trim())

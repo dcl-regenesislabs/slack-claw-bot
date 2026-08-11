@@ -56,6 +56,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
 | `AGENT_TIMEOUT_MS` | No | Watchdog timeout per agent run in ms (default: 900000 = 15 min). Runs exceeding it are aborted and the error is posted to the thread |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
+| `SLACK_SOCKET_MAX_SILENCE_MS` | No | Max ms the Socket Mode connection may stay down before the bot self-restarts via SIGTERM (default: 150000). Needs a supervisor that restarts the process |
 | `ALLOWED_TEAM_IDS` | No | Comma-separated Slack team IDs whose full members may use the bot, in addition to the bot's own workspace (e.g. the Decentraland team via Slack Connect). Guests are always denied |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 | `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |
@@ -174,6 +175,8 @@ src/
   discourse.ts      Discourse forum API client (used by grants.ts when enabled)
   csv.ts            CSV parser + proposal normalizer (used by grants.ts)
   prompt.ts         Prompt builder (extracted for testability)
+  sanitize.ts       Prompt-injection defenses (delimiter neutralization, memory sanitize-on-read)
+  slack-utils.ts    Slack text extraction (attachments + blocks)
   config.ts         Environment variable loading
   concurrency.ts    Agent scheduler with queue management and drain
   memory.ts         Memory loading, save prompt, qmd index, git clone/pull
@@ -182,5 +185,5 @@ src/
 test/               Unit tests (node:test)
 prompts/
   system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, pr-review, reflect, repos, triage)
+skills/             Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, pr-review, push-memory, reflect, repos, security-review)
 ```
