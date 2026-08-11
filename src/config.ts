@@ -20,6 +20,14 @@ export interface Config {
   opendclRepo: string;
   jarvisRepo: string;
   discourse: DiscourseConfig | null;
+  polls: PollsConfig | null;
+}
+
+export interface PollsConfig {
+  channelId: string;
+  governanceApiUrl: string;
+  intervalMs: number;
+  confidenceThreshold: number;
 }
 
 export function loadConfig(): Config {
@@ -47,6 +55,23 @@ export function loadConfig(): Config {
     opendclRepo: process.env.OPENDCL_REPO || "dcl-regenesislabs/opendcl",
     jarvisRepo: process.env.JARVIS_REPO || "decentraland/jarvis",
     discourse: loadDiscourseConfig(),
+    polls: loadPollsConfig(),
+  };
+}
+
+// Poll auto-resolution (Phase 0: shadow mode). Feature-flagged on POLLS_CHANNEL_ID —
+// without it the resolver never starts. See ~/Documents/poll-auto-resolution-plan.md.
+function loadPollsConfig(): PollsConfig | null {
+  const channelId = process.env.POLLS_CHANNEL_ID;
+  if (!channelId) return null;
+
+  const intervalMs = parseInt(process.env.POLLS_INTERVAL_MS || String(10 * 60 * 1000), 10);
+  const confidenceThreshold = parseFloat(process.env.POLLS_CONFIDENCE_THRESHOLD || "0.85");
+  return {
+    channelId,
+    governanceApiUrl: process.env.GOVERNANCE_API_URL || "https://governance.decentraland.org/api",
+    intervalMs: Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 10 * 60 * 1000,
+    confidenceThreshold: Number.isFinite(confidenceThreshold) ? confidenceThreshold : 0.85,
   };
 }
 
