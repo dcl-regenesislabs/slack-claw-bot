@@ -197,7 +197,7 @@ export interface RunResult {
 
 // --- Module State ---
 
-const REVIEW_MODEL = "claude-opus-4-6";
+const REVIEW_MODEL = "claude-opus-5";
 // Preferred first; falls back to the next entry pi's model registry knows about.
 const DEFAULT_MODEL_CANDIDATES = ["claude-sonnet-5", "claude-sonnet-4-5"];
 const SAVE_MARKER = "[SAVE]";
