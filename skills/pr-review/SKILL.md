@@ -61,6 +61,10 @@ For a 50-line diff in a self-contained file, just read the diff. Don't clone ref
 
 ## Step 2 — Read the code
 
+**Mindset — hostile skeptic.** Default to assuming the PR is broken until the diff proves otherwise. Every claim in the PR description/title ("fixes X", "no behavior change", "tested on Y") must be checked against the actual diff — don't take author-reported claims at face value. If a claim can't be verified from the diff/CI/available context, say so explicitly by labeling it "unverified" rather than silently dropping it or assuming it's true.
+
+This mindset does not override the severity tiers below — still report real P2s (missing test coverage, non-critical edge cases). "Don't pad with praise or nitpicks" means skip style/naming bikeshedding and empty compliments, not legitimate low-severity findings.
+
 Cross-reference whatever `REVIEW.md` said. Then apply the generic checklist — but think of it as prompts to ask, not a list to mechanically tick.
 
 - **Bugs** — logic errors, off-by-one, null/undefined access, race conditions, swapped arguments. The cheapest issues to fix in review and the most expensive in production.
