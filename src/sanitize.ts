@@ -50,6 +50,54 @@ export function neutralizePromptDelimiters(text: string): string {
   );
 }
 
+// Env vars whose *values* are credentials. The agent has a shell, so it can print them
+// (`env | grep -i posthog`) no matter what the prompt says — redaction has to happen where
+// we write the output, not where the agent produces it.
+const SECRET_ENV_NAME = /(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIAL)/i;
+const MIN_SECRET_LENGTH = 8;
+
+// Backstop for secrets that never sat in process.env — a token read out of .auth.json,
+// a key pasted into a thread, a value the agent derived.
+const TOKEN_SHAPES: RegExp[] = [
+  /\b(?:phx|phc|phs)_[A-Za-z0-9_-]{16,}/g,
+  /\bsk-ant-[A-Za-z0-9._-]{16,}/g,
+  /\bxox[baprse]-[A-Za-z0-9-]{10,}/g,
+  /\bxapp-[A-Za-z0-9-]{10,}/g,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
+  /\bBearer\s+[A-Za-z0-9._~+/-]{16,}={0,2}/gi,
+];
+
+let secretValuesCache: string[] | null = null;
+
+function secretValues(): string[] {
+  if (secretValuesCache) return secretValuesCache;
+  secretValuesCache = Object.entries(process.env)
+    .filter(([name, value]) => SECRET_ENV_NAME.test(name) && !!value && value.length >= MIN_SECRET_LENGTH)
+    .map(([, value]) => value as string)
+    // Longest first, so a secret that contains another is redacted whole.
+    .sort((a, b) => b.length - a.length);
+  return secretValuesCache;
+}
+
+/** Test seam — process.env is read once and cached. */
+export function resetSecretCache(): void {
+  secretValuesCache = null;
+}
+
+/**
+ * Strips credentials from text on its way to a log, an audit post, or any other sink.
+ * Redacts exact values of secret-named environment variables first (the precise case), then
+ * known token shapes as a backstop. Safe to call on arbitrary text; non-secret content is
+ * returned unchanged.
+ */
+export function redactSecrets(text: string): string {
+  let out = text;
+  for (const secret of secretValues()) out = out.split(secret).join("[REDACTED]");
+  for (const shape of TOKEN_SHAPES) out = out.replace(shape, "[REDACTED]");
+  return out;
+}
+
 /**
  * Sanitizes a short, single-line metadata value (channel name, username, file name) for safe
  * interpolation into a prompt header or wrapper: NFKC-normalizes and drops Unicode format

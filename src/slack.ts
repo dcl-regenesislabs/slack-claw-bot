@@ -8,6 +8,7 @@ import type { FileAttachment } from "./prompt.js";
 import { extractEventText } from "./slack-utils.js";
 import type { SlackBlock } from "./slack-utils.js";
 import { AgentScheduler } from "./concurrency.js";
+import { redactSecrets } from "./sanitize.js";
 import type { GrantsRouter } from "./grants.js";
 
 const nameCache = new Map<string, string>();
@@ -118,7 +119,7 @@ export function createSlackApp(
 
       if (response) {
         await react(client, event.channel, event.ts, "white_check_mark");
-        await say({ text: markdownToMrkdwn(response), thread_ts: threadTs });
+        await say({ text: redactSecrets(markdownToMrkdwn(response)), thread_ts: threadTs });
       } else {
         await react(client, event.channel, event.ts, "warning");
         await say({ text: "I wasn't able to produce a response.", thread_ts: threadTs });
@@ -190,7 +191,7 @@ const MAX_ERROR_LENGTH = 300;
 const SLACK_ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
 
 function sanitizeForSlack(text: string): string {
-  const escaped = text.replace(/[&<>]/g, (ch) => SLACK_ESCAPES[ch]);
+  const escaped = redactSecrets(text).replace(/[&<>]/g, (ch) => SLACK_ESCAPES[ch]);
   return escaped.length > MAX_ERROR_LENGTH ? escaped.slice(0, MAX_ERROR_LENGTH) + "…" : escaped;
 }
 
@@ -474,7 +475,7 @@ async function postAuditLog(
     const icon = outcome.status === "ok" ? "✅" : "❌";
     await client.chat.postMessage({
       channel: logChannelId,
-      text: `${icon} <@${event.user}> in <#${event.channel}>: ${text} — ${detail}\n<${permalink}|View message>`,
+      text: redactSecrets(`${icon} <@${event.user}> in <#${event.channel}>: ${text} — ${detail}\n<${permalink}|View message>`),
     });
   } catch (err) {
     console.error("[slack] Failed to post audit log:", err);

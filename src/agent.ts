@@ -35,6 +35,7 @@ import {
   ensureQmd,
   reindexMemory,
 } from "./memory.js";
+import { redactSecrets } from "./sanitize.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectDir = join(__dirname, "..");
@@ -262,7 +263,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     : "";
   if (shouldLoadMemory) {
     console.log(`[memory] Loaded context for ${options.username} (${options.userId}) (${memoryContent.length} chars)`);
-    if (process.env.DEBUG && memoryContent) console.log(`[debug] memory context:\n${memoryContent}`);
+    if (process.env.DEBUG && memoryContent) console.log(`[debug] memory context:\n${redactSecrets(memoryContent)}`);
   } else if (options.skipMemoryLoad) {
     console.log("[memory] Memory load skipped per RunOptions");
   } else {
@@ -283,7 +284,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
     // 2. Run agent — with a watchdog so a stalled stream or hung tool can't wedge
     // the run (and its scheduler slot) forever. abort() surfaces through getTurnError.
-    console.log(`[agent] running (model: ${modelId}, prompt: ${prompt.slice(0, 200)})`);
+    console.log(`[agent] running (model: ${modelId}, prompt: ${redactSecrets(prompt).slice(0, 200)})`);
     let timedOut = false;
     const watchdog = setTimeout(() => {
       timedOut = true;
@@ -542,10 +543,14 @@ function subscribeToToolLogs(session: AgentSession): void {
   session.subscribe((event: AgentSessionEvent) => {
     switch (event.type) {
       case "tool_execution_start":
-        console.log(`[agent] tool:start ${event.toolName}`, JSON.stringify(event.args).slice(0, 200));
+        console.log(`[agent] tool:start ${event.toolName}`, redactSecrets(JSON.stringify(event.args)).slice(0, 200));
         break;
       case "tool_execution_end":
-        console.log(`[agent] tool:end ${event.toolName}`, event.isError ? "ERROR" : "ok", JSON.stringify(event.result).slice(0, 200));
+        console.log(
+          `[agent] tool:end ${event.toolName}`,
+          event.isError ? "ERROR" : "ok",
+          redactSecrets(JSON.stringify(event.result)).slice(0, 200),
+        );
         break;
     }
   });
