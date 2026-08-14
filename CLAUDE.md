@@ -34,6 +34,7 @@ src/
 
 - **Grants Agents (optional)**: feature-flagged via `GRANTS_CHANNEL_ID` + `GRANTS_AGENTS_REPO`. Multi-agent proposal evaluation with 4 domain agents (VOXEL, CANVAS, LOOP, SIGNAL) and an ORACLE coordinator. Agent personas come from a separate public repo (cloned on startup). Per-proposal state lives at `{memoryDir}/grants/proposals/{id}/` with `state.json`, `proposal.md` (rendered narrative of proposal + agent/ORACLE answers), and `{agent}.jsonl` (authoritative sessions). Uses a separate `AgentScheduler` so grant evals don't starve regular Slack users. Grant agents set `skipMemorySave: true` and `skipMemoryLoad: true` to avoid polluting bot memory. Commands: paste proposal top-level in grants channel to trigger; `@bot` in an agent thread to refine; `@bot !post` in an agent thread to publish to Discourse; `@bot !decide` in parent thread to trigger ORACLE; `@bot !post` in parent thread to publish ORACLE to Discourse.
 - **Grants Discourse integration (optional)**: feature-flagged via `DISCOURSE_URL` + `DISCOURSE_API_KEY` + `DISCOURSE_CATEGORY_ID`. Only CSV-based submissions are accepted (Google Form export); non-CSV submissions are hard-rejected. On new proposal (after screening), a topic is created in the configured category as `grants-bot` using a deterministic template from the CSV columns — no LLM summarisation. Each `!post` publishes the agent's/ORACLE's current narrative verbatim to the topic as that user (6 Discourse accounts total; single admin API key + `Api-Username` header for impersonation). Every `!post` creates a **new** reply — refinements produce additional posts rather than editing the previous one, so the forum keeps the full history. Topic creation failures abort the evaluation. `src/discourse.ts` is the client; `src/csv.ts` pre-normalizes CSVs into explicit markdown proposal blocks before they reach the agents. Multi-row CSVs are rejected.
+- **PostHog analytics (optional)**: feature-flagged via `POSTHOG_API_KEY` + `POSTHOG_PROJECTS` (+ `POSTHOG_HOST`). **Skill-only, no `src/` code** — `.env` is loaded by `dotenv` and the bash tool inherits `process.env`, so `skills/posthog/SKILL.md` reads `$POSTHOG_API_KEY` directly and the not-configured path is a shell check in the skill, not a config branch. On-demand only: a thread question → taxonomy discovery (`/event_definitions/`, `/property_definitions/`, names never hardcoded, cached as names-only in `shared/posthog-schema-{id}.md`, one file per project, for 7 days) → the agent writes its own HogQL (never HogQL supplied by the thread) → `POST /api/projects/{id}/query/` via `curl --data-binary @file` → Slack mrkdwn report in the same thread. Responses are read only through `skills/posthog/render.mjs` (row truncation + delimiter neutralization) — query results are untrusted input. Caps: ≤3 queries per request, `LIMIT ≤ 100`, 7-day default / 90-day max window, no PII or session replay. One key covers many projects (PostHog's `scoped_teams` is a list); `POSTHOG_PROJECTS` is an ordered `name:id` list whose first entry is the default, and a thread selects by name only, never by id. The read-only key scope is the access control; there is no per-channel gating.
 - **Agent SDK**: uses `@earendil-works/pi-coding-agent` (pi-agent, formerly `@mariozechner/pi-coding-agent`) to run Claude with tool use
   - The `pi-*` packages are pinned to an **exact** version (no caret): upstream ships breaking API changes in 0.x patch releases (0.80.8 removed `AuthStorage`/`ModelRegistry` in favor of `ModelRuntime`). Bump `pi-agent-core` and `pi-coding-agent` together, deliberately, and re-run the CLI smoke test.
   - Agent tools: `createGuardedTools(cwd)` provides bash, read, edit, and write tools with write-protection on project source files (`src/`, `test/`, `package.json`, etc.)
@@ -43,7 +44,7 @@ src/
 - **Memory**: persistent memory — `shared/MEMORY.md` (shared), `users/` (per-user), `shared/daily/` (logs). When `MEMORY_REPO` is set, cloned to `/tmp/claw-memory` on startup; otherwise uses a temp dir. Loaded at start of each run, saved via post-task prompt. `qmd` (BM25 keyword search) indexes only `shared/` so user files stay private; the agent searches via `npx --yes qmd --index claw-memory search` (`--yes` so npx never blocks on an install prompt). Git-backed repos are committed+pushed by the agent via the `push-memory` skill.
 - **Concurrency**: bounded agent pool (`MAX_CONCURRENT_AGENTS`) with a queue. `drain()` for graceful shutdown.
 - **Timeout**: every agent run has a watchdog (`AGENT_TIMEOUT_MS`, default 15 min) that aborts the session so a stalled stream or hung tool can't hold a scheduler slot forever; the abort surfaces as an error in the Slack thread.
-- **Skills**: prompt-based tool definitions in `skills/` (create-issue, create-skill, github, memory-search, mobile-project, pr-review, reflect, repos, security-review) + runtime skills in `{memoryDir}/skills/`
+- **Skills**: prompt-based tool definitions in `skills/` (create-issue, create-skill, github, memory-search, mobile-project, posthog, pr-review, push-memory, reflect, repos, security-review) + runtime skills in `{memoryDir}/skills/`
 - **System prompt**: `prompts/system.md`
 
 ## Memory directory
@@ -52,6 +53,7 @@ src/
 /tmp/claw-memory/              (cloned from MEMORY_REPO, or temp dir)
   shared/                      qmd indexes ONLY this subtree
     MEMORY.md                  Shared permanent knowledge (≤4KB)
+    posthog-schema-{id}.md     PostHog event/property NAMES cache, one per project (≤7 days old)
     daily/YYYY-MM-DD.md        Daily run logs (≤8KB/day)
   users/{userId}.md            Per-user preferences (≤2KB/user, NOT indexed)
 ```
@@ -71,7 +73,7 @@ NEVER use `ANTHROPIC_API_KEY`. All Anthropic auth uses OAuth sessions.
 
 - Tests live in `test/`, run with `npm test`
 - Test runner: `node --import tsx --test 'test/*.test.ts'` (Node built-in test runner)
-- Test files: `concurrency.test.ts`, `memory.test.ts`, `prompt.test.ts`, `slack.test.ts`
+- Test files: one `*.test.ts` per module in `test/` (run `npm test` to see the full list)
 
 ## Security
 
