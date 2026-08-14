@@ -23,11 +23,14 @@ function toText(value) {
   return JSON.stringify(value);
 }
 
+function neutralize(s) {
+  return s.replace(RESERVED, (m) => m.replace(/</g, "&lt;").replace(/>/g, "&gt;"));
+}
+
 // NFKC folds full-width variants onto ASCII before RESERVED runs; control and
 // format characters are flattened only afterwards, so they cannot hide a tag.
 function clean(value, max = MAX_CELL) {
-  let s = toText(value).normalize("NFKC");
-  s = s.replace(RESERVED, (m) => m.replace(/</g, "&lt;").replace(/>/g, "&gt;"));
+  let s = neutralize(toText(value).normalize("NFKC"));
   s = s.replace(/\p{Cf}/gu, "");
   s = s.replace(/\p{Cc}/gu, " ");
   s = s.replace(/```/g, "'''");
@@ -53,7 +56,7 @@ export function renderResponse(raw, status, maxRows = 20) {
   if (status !== "200") {
     out.push(`HTTP ${status} ${clean(raw?.type ?? "error")} / ${clean(raw?.code ?? "-")}`);
     out.push(clean(raw?.detail ?? JSON.stringify(raw ?? {}), MAX_DETAIL));
-    return out.join("\n");
+    return neutralize(out.join("\n"));
   }
   const rows = Array.isArray(raw?.results) ? raw.results : [];
   const cols = Array.isArray(raw?.columns) ? raw.columns : null;
@@ -61,7 +64,9 @@ export function renderResponse(raw, status, maxRows = 20) {
   out.push(`rows_returned: ${rows.length}${raw?.hasMore ? " (server truncated)" : ""}`);
   for (const row of rows.slice(0, maxRows)) out.push(formatRow(row));
   if (rows.length > maxRows) out.push(`… ${rows.length - maxRows} more rows not shown`);
-  return out.join("\n");
+  // Cells are escaped individually, but `" | "` / "\n" joins can reconstruct a
+  // tag from two adjacent values, so the assembled string is escaped again.
+  return neutralize(out.join("\n"));
 }
 
 const [file, status = "200", maxRows = "20"] = process.argv.slice(2);

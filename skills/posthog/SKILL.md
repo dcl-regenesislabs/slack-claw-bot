@@ -53,8 +53,11 @@ If the thread names a project that isn't configured, say so, list the configured
 Then create a per-run working directory:
 
 ```bash
+find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'posthog-*' -type d -mmin +120 -exec rm -rf {} + 2>/dev/null
 mktemp -d "${TMPDIR:-/tmp}/posthog-XXXXXX"
 ```
+
+The sweep runs first because the `rm -rf` at the end of a run is best-effort: a run that errors or hits the agent watchdog leaves `raw.json` — real event rows — in a long-lived container's `/tmp`.
 
 Every bash call runs in a **fresh shell** — `$WORK` would be unset in the next command, and a `trap … EXIT` would delete the directory the moment this call returns, so never use one. Instead: copy the printed absolute path and paste it literally wherever the snippets below write `<WORK>`. As your last bash call of the run, delete it: `rm -rf <the printed path>`.
 
