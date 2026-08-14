@@ -92,11 +92,22 @@ FROM events WHERE event = '<event>' AND timestamp >= now() - INTERVAL 7 DAY LIMI
 
 Use for "what's the drop-off", "how many who did A also did B". No personal data leaves the query — only counts.
 
+Aggregate per person first, then count the people who did both. Counting step 2 across the whole window instead would include people who never did step 1 (deep links, or a step 1 that happened before the window), inflating step 2 — conversion can exceed 100%.
+
 ```sql
-SELECT uniqIf(person_id, event = '<step1_event>') AS step1,
-       uniqIf(person_id, event = '<step2_event>') AS step2
-FROM events WHERE event IN ('<step1_event>','<step2_event>') AND timestamp >= now() - INTERVAL 7 DAY LIMIT 1
+SELECT countIf(did_step1) AS step1,
+       countIf(did_step1 AND did_step2) AS step1_then_step2
+FROM (
+  SELECT person_id,
+         maxIf(1, event = '<step1_event>') AS did_step1,
+         maxIf(1, event = '<step2_event>') AS did_step2
+  FROM events
+  WHERE event IN ('<step1_event>','<step2_event>') AND timestamp >= now() - INTERVAL 7 DAY
+  GROUP BY person_id
+) LIMIT 1
 ```
+
+This still ignores ordering — someone who did step 2 before step 1 counts as converted. Say so in the report when it matters, or add `minIf(timestamp, event = …)` per step and compare, rather than presenting it as a strict funnel.
 
 ## Gotchas
 

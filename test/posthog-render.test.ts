@@ -32,6 +32,39 @@ test("neutralizes evasive delimiter forms", () => {
   }
 });
 
+test("neutralizes delimiters split by control characters", () => {
+  // C0, C1 and whitespace wedged between the tag's letters must not hide it.
+  const evasions = ["</slack-thread>", "</slack-thread>", "<memory>", "</slack- thread>"];
+  for (const evasion of evasions) {
+    const out = renderResponse({ results: [[evasion]] }, "200");
+    assert.ok(out.includes("&lt;"), `no escape for ${JSON.stringify(evasion)}`);
+  }
+});
+
+test("leaves non-reserved tags alone", () => {
+  const out = renderResponse({ results: [["<slack-threading>"]] }, "200");
+  assert.ok(out.includes("<slack-threading>"));
+  assert.ok(!out.includes("&lt;"));
+});
+
+test("202 is reported as still running, not a failure", () => {
+  const out = renderResponse({ query_status: { id: "abc", complete: false } }, "202");
+  assert.ok(out.includes("still running"));
+  assert.ok(out.includes("abc"));
+  assert.ok(!out.includes("error"));
+});
+
+test("error detail survives past the cell cap", () => {
+  const detail = `Syntax error at line 1, column 137: ${"x".repeat(300)}`;
+  const out = renderResponse({ type: "validation_error", code: "syntax", detail }, "400");
+  assert.ok(out.includes("column 137"));
+  assert.ok(out.length > 300);
+});
+
+test("non-array results and columns do not throw", () => {
+  assert.ok(renderResponse({ results: { a: 1 }, columns: "nope" }, "200").includes("rows_returned: 0"));
+});
+
 test("strips control characters", () => {
   const out = renderResponse({ results: [["a\u0000b\u001fc\u007f"]] }, "200");
   assert.ok(out.includes("a b c "));
