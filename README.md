@@ -73,7 +73,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `DISCOURSE_USER_SIGNAL` | No | Forum account for SIGNAL agent replies |
 | `DISCOURSE_USER_ORACLE` | No | Forum account for ORACLE final recommendations |
 | `POSTHOG_API_KEY` | No | Enables the `posthog` skill — read-only **personal** API key (`phx_...`), scoped to the projects the bot may see |
-| `POSTHOG_PROJECTS` | No | The projects that key reaches, as ordered `name:id` pairs (`scenes:12345,explorer:67890`). First is the default; a thread can name another, but ids are never taken from thread text |
+| `POSTHOG_PROJECTS` | No | Allowlist of projects, as ordered `name:id` pairs (`scenes:12345,explorer:67890`); first is the default. **Unset = every project the key can reach**, discovered via `/api/projects/` (needs the `Project` read scope). Either way a thread selects by name, never by an id it supplies |
 | `POSTHOG_HOST` | No | PostHog API host (default `https://us.posthog.com`; EU: `https://eu.posthog.com`). Must be the private host, not `us.i.posthog.com` |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
@@ -174,7 +174,7 @@ There is no `src/` code for this: `.env` is already loaded via `dotenv` and the 
 
 ### Key scoping (this is the access control)
 
-Create a **personal** API key at `https://us.posthog.com/settings/user-api-keys` (EU host for EU projects), name it `slack-bot-readonly`, scope it to *specific projects* → every project the bot may see, and grant exactly three read scopes: `Query`, `Event Definition`, `Property Definition`. Do **not** grant "All access", `Person`, `Session Recording`, `Feature Flag`, `Export`/`Batch Export`, `Insight`, `Cohort`, or any write scope — those would turn a hijacked prompt into a data-exfiltration path via PostHog's REST endpoints (`/persons/`, `/session_recordings/`, `/exports/`).
+Create a **personal** API key at `https://us.posthog.com/settings/user-api-keys` (EU host for EU projects), name it `slack-bot-readonly`, scope it to the projects the bot may see, and grant these read scopes: `Query`, `Event Definition`, `Property Definition` — plus `Project` if you leave `POSTHOG_PROJECTS` unset, so the bot can discover the project list. Do **not** grant "All access", `Person`, `Session Recording`, `Feature Flag`, `Export`/`Batch Export`, `Insight`, `Cohort`, or any write scope — those would turn a hijacked prompt into a data-exfiltration path via PostHog's REST endpoints (`/persons/`, `/session_recordings/`, `/exports/`).
 
 **What `Query` read grants — read this before assuming the scopes bound the blast radius.** `query:read` is the *data* scope: HogQL over the `events` table is how the bot reads your actual event rows, and PostHog has no separate "read event data" scope (`posthog/scopes.py`: `"query",  # Covers query and events endpoints`). More importantly, `HogQLQuery` is absent from `_QUERY_KIND_SCOPES` in `posthog/api/query.py`, so it requires *only* `query:read` — a query such as `SELECT person.properties.email FROM events` is **not** blocked by withholding `Person`, and `session_replay_events` is reachable the same way. Scope-based table hiding in `posthog/hogql/database/database.py` applies only to Postgres-backed system tables, which these are not.
 
@@ -182,15 +182,21 @@ So the missing scopes stop the REST paths, not HogQL. Inside HogQL the PII and s
 
 `Query` only needs **read**, even though the bot POSTs to `/query/` — PostHog classifies `create` on that endpoint as a read action (`scope_object_read_actions = ["retrieve", "create", "list", "destroy"]` in `posthog/api/query.py`). If the UI ever seems to demand `query:write`, that is the wrong key type, not a missing scope.
 
-A project id is the number in `https://us.posthog.com/project/12345/…`. (`/api/projects/@current/` also returns it as `.id`, but only for a key that additionally carries the `Project` read scope — deliberately not granted above, and not needed.)
+A project id is the number in `https://us.posthog.com/project/12345/…`, and you only need it if you're setting `POSTHOG_PROJECTS`.
 
-**Multiple projects share one key.** PostHog stores a personal key's project scoping as a list (`scoped_teams`), so tick every project the bot should reach on the *same* key — there is no key-per-project. Then name them in `POSTHOG_PROJECTS`:
+**Multiple projects share one key.** PostHog stores a personal key's project scoping as a list (`scoped_teams`), so tick every project the bot should reach on the *same* key — there is no key-per-project.
+
+**Leave `POSTHOG_PROJECTS` unset** and the bot queries whatever the key can reach, discovering the list from `/api/projects/` and caching it for 7 days. This needs the **`Project` read** scope in addition to the three above. Simplest to run, and the key's own scoping is then the only boundary.
+
+**Set it** to restrict the bot further than the key does:
 
 ```bash
 POSTHOG_PROJECTS=scenes:12345,explorer:67890
 ```
 
-The first pair is the default. A thread can say *"how many loads in explorer last week?"* and the bot resolves `explorer` to its id — names resolve only against this variable, so a project id written in a thread is always ignored and nobody can steer the bot at a project the key wasn't scoped to. Adding a project later means ticking it on the key and appending one pair; the bot keeps a separate schema cache per project.
+The first pair is the default, and nothing outside the list is queryable even if the key could reach it. Worth doing when the key is broadly scoped but only some projects belong in Slack.
+
+Either way a thread says *"how many loads in explorer last week?"* and the bot resolves `explorer` by name — a project **id** written in a thread is always ignored, so nobody can steer the bot outside the resolved set. The bot keeps a separate schema cache per project and names the project it queried in every report.
 
 Restart the bot after editing `.env` (it is read at startup), then smoke-test from a thread: *"@bot what events are we sending to PostHog and how many in the last 7 days?"* Rotate the key on a schedule — treat it like `GITHUB_TOKEN`.
 

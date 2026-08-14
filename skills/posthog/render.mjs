@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 // Renders a PostHog API response for the agent: truncated, delimiter-neutralized,
-// never raw. Usage: node render.mjs <response.json> <http_status> [maxRows]
+// never raw. Usage: node render.mjs <response.json> <http_status> [maxRows] [fields]
+// `fields` picks the object-row allowlist: "definition" (default) or "project".
 import { readFileSync } from "node:fs";
 
 const MAX_CELL = 120;
 const MAX_DETAIL = 600; // errors carry position info the agent needs to fix a query
-const DEFINITION_FIELDS = ["name", "property_type", "last_seen_at", "is_numerical"];
+// Object rows are rendered through an allowlist so unrequested fields (internal
+// uuids, api tokens on a project row) never reach the model.
+const FIELD_SETS = {
+  definition: ["name", "property_type", "last_seen_at", "is_numerical"],
+  project: ["id", "name"],
+};
 
 // Mirrors the GAP construction in src/sanitize.ts: a reserved tag stays reserved
 // however many invisible or whitespace characters are wedged between its letters.
@@ -37,17 +43,19 @@ function clean(value, max = MAX_CELL) {
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
-function formatRow(row) {
+function formatRow(row, fields) {
   if (Array.isArray(row)) return row.map((cell) => clean(cell)).join(" | ");
   if (row && typeof row === "object") {
-    return DEFINITION_FIELDS.filter((k) => k in row)
+    return fields
+      .filter((k) => k in row)
       .map((k) => `${k}=${clean(row[k])}`)
       .join(" | ");
   }
   return clean(row);
 }
 
-export function renderResponse(raw, status, maxRows = 20) {
+export function renderResponse(raw, status, maxRows = 20, fieldSet = "definition") {
+  const fields = FIELD_SETS[fieldSet] ?? FIELD_SETS.definition;
   // 202 means PostHog accepted the query and is still computing it — not a failure.
   if (status === "202") {
     return `HTTP 202 query accepted but still running (query_status.id=${clean(raw?.query_status?.id ?? "-")}); results are not ready`;
@@ -62,14 +70,14 @@ export function renderResponse(raw, status, maxRows = 20) {
   const cols = Array.isArray(raw?.columns) ? raw.columns : null;
   if (cols) out.push(`columns: ${cols.map((c) => clean(c)).join(" | ")}`);
   out.push(`rows_returned: ${rows.length}${raw?.hasMore ? " (server truncated)" : ""}`);
-  for (const row of rows.slice(0, maxRows)) out.push(formatRow(row));
+  for (const row of rows.slice(0, maxRows)) out.push(formatRow(row, fields));
   if (rows.length > maxRows) out.push(`… ${rows.length - maxRows} more rows not shown`);
   // Cells are escaped individually, but `" | "` / "\n" joins can reconstruct a
   // tag from two adjacent values, so the assembled string is escaped again.
   return neutralize(out.join("\n"));
 }
 
-const [file, status = "200", maxRows = "20"] = process.argv.slice(2);
+const [file, status = "200", maxRows = "20", fieldSet = "definition"] = process.argv.slice(2);
 if (file) {
   let raw;
   try {
@@ -78,6 +86,6 @@ if (file) {
     console.log(`HTTP ${status}: response was not valid JSON (empty or truncated)`);
     process.exit(1);
   }
-  console.log(renderResponse(raw, status, Math.min(parseInt(maxRows, 10) || 20, 50)));
+  console.log(renderResponse(raw, status, Math.min(parseInt(maxRows, 10) || 20, 50), fieldSet));
   if (status !== "200" && status !== "202") process.exit(1);
 }
