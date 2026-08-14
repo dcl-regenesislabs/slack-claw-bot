@@ -72,6 +72,9 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `DISCOURSE_USER_LOOP` | No | Forum account for LOOP agent replies |
 | `DISCOURSE_USER_SIGNAL` | No | Forum account for SIGNAL agent replies |
 | `DISCOURSE_USER_ORACLE` | No | Forum account for ORACLE final recommendations |
+| `POSTHOG_API_KEY` | No | Enables the `posthog` skill — read-only **personal** API key (`phx_...`), scoped to the projects the bot may see |
+| `POSTHOG_PROJECTS` | No | The projects that key reaches, as ordered `name:id` pairs (`scenes:12345,explorer:67890`). First is the default; a thread can name another, but ids are never taken from thread text |
+| `POSTHOG_HOST` | No | PostHog API host (default `https://us.posthog.com`; EU: `https://eu.posthog.com`). Must be the private host, not `us.i.posthog.com` |
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
@@ -155,6 +158,54 @@ State files are atomic (tempfile + rename). Sessions resume naturally across res
 
 Grant agents run on a separate `AgentScheduler` (cap set by `GRANTS_MAX_CONCURRENT_AGENTS`, default 4) so they never starve regular Slack users sharing the main scheduler.
 
+## PostHog analytics (optional)
+
+When `POSTHOG_API_KEY` is set, the bot can answer product-analytics questions in a Slack thread ("how many users hit X this week?", "what's the drop-off between A and B?"). It's on-demand only — nothing is scheduled and nothing is posted unprompted.
+
+### How it works
+
+1. The `posthog` skill checks the config and refuses with a clear message if `POSTHOG_API_KEY` or `POSTHOG_PROJECTS` is missing, or the key isn't a `phx_` personal key.
+2. It discovers the event taxonomy (`/event_definitions/`, `/property_definitions/`) — event names are never hardcoded — and caches the **names only** in `shared/posthog-schema-{id}.md` (one file per project) in the memory repo for 7 days.
+3. It writes HogQL itself (never HogQL pasted from the thread) and runs at most 3 queries per request against `POST /api/projects/{id}/query/`, using `curl --data-binary @file` so the query never lands in `argv` or the logs.
+4. Responses are read only through `skills/posthog/render.mjs`, which truncates rows and neutralizes prompt delimiters before the model sees them — query results are treated as untrusted input, same as thread text.
+5. The reply is a Slack-mrkdwn report in the same thread: headline, date range, takeaway bullets, a table, and the exact HogQL that produced it.
+
+There is no `src/` code for this: `.env` is already loaded via `dotenv` and the agent's bash tool inherits the process environment, so the skill reads `$POSTHOG_API_KEY` directly.
+
+### Key scoping (this is the access control)
+
+Create a **personal** API key at `https://us.posthog.com/settings/user-api-keys` (EU host for EU projects), name it `slack-bot-readonly`, scope it to *specific projects* → every project the bot may see, and grant exactly three read scopes: `Query`, `Event Definition`, `Property Definition`. Do **not** grant "All access", `Person`, `Session Recording`, `Feature Flag`, `Export`/`Batch Export`, `Insight`, `Cohort`, or any write scope — those would turn a hijacked prompt into a data-exfiltration path via PostHog's REST endpoints (`/persons/`, `/session_recordings/`, `/exports/`).
+
+**What `Query` read grants — read this before assuming the scopes bound the blast radius.** `query:read` is the *data* scope: HogQL over the `events` table is how the bot reads your actual event rows, and PostHog has no separate "read event data" scope (`posthog/scopes.py`: `"query",  # Covers query and events endpoints`). More importantly, `HogQLQuery` is absent from `_QUERY_KIND_SCOPES` in `posthog/api/query.py`, so it requires *only* `query:read` — a query such as `SELECT person.properties.email FROM events` is **not** blocked by withholding `Person`, and `session_replay_events` is reachable the same way. Scope-based table hiding in `posthog/hogql/database/database.py` applies only to Postgres-backed system tables, which these are not.
+
+So the missing scopes stop the REST paths, not HogQL. Inside HogQL the PII and session-replay rules in `skills/posthog/SKILL.md` are prompt-level and are the only thing standing between a hijacked prompt and a person-properties query. If that is not an acceptable boundary for your data, the fix is a separate PostHog project that ingests only non-personal scene telemetry, and scoping the key to that — not a longer list of denied scopes.
+
+`Query` only needs **read**, even though the bot POSTs to `/query/` — PostHog classifies `create` on that endpoint as a read action (`scope_object_read_actions = ["retrieve", "create", "list", "destroy"]` in `posthog/api/query.py`). If the UI ever seems to demand `query:write`, that is the wrong key type, not a missing scope.
+
+A project id is the number in `https://us.posthog.com/project/12345/…`. (`/api/projects/@current/` also returns it as `.id`, but only for a key that additionally carries the `Project` read scope — deliberately not granted above, and not needed.)
+
+**Multiple projects share one key.** PostHog stores a personal key's project scoping as a list (`scoped_teams`), so tick every project the bot should reach on the *same* key — there is no key-per-project. Then name them in `POSTHOG_PROJECTS`:
+
+```bash
+POSTHOG_PROJECTS=scenes:12345,explorer:67890
+```
+
+The first pair is the default. A thread can say *"how many loads in explorer last week?"* and the bot resolves `explorer` to its id — names resolve only against this variable, so a project id written in a thread is always ignored and nobody can steer the bot at a project the key wasn't scoped to. Adding a project later means ticking it on the key and appending one pair; the bot keeps a separate schema cache per project.
+
+Restart the bot after editing `.env` (it is read at startup), then smoke-test from a thread: *"@bot what events are we sending to PostHog and how many in the last 7 days?"* Rotate the key on a schedule — treat it like `GITHUB_TOKEN`.
+
+### Limits and guardrails
+
+- Every query is time-bounded (7 days default, 90 days absolute max), aggregated, and `LIMIT 100` or less. Max 3 queries per request.
+- No PII: person identifiers, emails, IPs, geo, `$session_id`, device ids and wallet-ish properties are never selected or reported. Session replay is off-limits entirely. These are **prompt-level** rules, not scope-enforced — `query:read` alone can reach person properties and replay tables through HogQL (see above).
+- Only names go into memory — never rows, counts, or values from a person property.
+- PostHog rate limits are **per project** (240/min, 2400/hr, 3 concurrent queries), so heavy bot usage competes with other API traffic against the same project. `/query/` is not an export mechanism and export-shaped queries may be throttled.
+- **No per-channel gating in v1.** A skill can't enforce authorization (the prompt carries a renameable channel name, not an id). Anyone who can talk to the bot can ask analytics questions — the read-only key scope and the set of projects it covers are the real boundary. Per-channel restriction would need code (a `POSTHOG_CHANNEL_IDS` var plus conditional skill loading, mirroring `GRANTS_CHANNEL_ID`).
+
+### Why not the PostHog MCP server
+
+There is no MCP client in `src/` — sessions are built with `noExtensions: true` and no server registry — so `mcp.posthog.com` would mean new TypeScript plus config plumbing instead of a skill. Its default `cli` mode exposes a single tool, `?mode=tools` inflates the tool surface on every run (analytics or not), it has no list tool for event/property definitions (so `last_seen_at` and `property_type` are unreachable), and some of its tools invoke LLMs internally and bill as PostHog AI spend. With curl the request body is ours byte-for-byte, and the response passes through `render.mjs` before reaching the model. If an MCP client is ever added, `read-data-schema` + `execute-sql` replace discovery and execution, and the safety rules carry over unchanged.
+
 ## Docker
 
 ```bash
@@ -185,5 +236,5 @@ src/
 test/               Unit tests (node:test)
 prompts/
   system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, pr-review, push-memory, reflect, repos, security-review)
+skills/             Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, posthog, pr-review, push-memory, reflect, repos, security-review)
 ```
