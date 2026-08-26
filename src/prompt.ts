@@ -25,6 +25,7 @@ export function buildPrompt(
   channelName?: string,
   triggeredById?: string,
   channelId?: string,
+  schedulesFile?: string,
 ): string {
   // Untrusted Slack content is delimiter-neutralized so it can't close the wrapper tags
   // and escape into trusted prompt space.
@@ -40,9 +41,11 @@ export function buildPrompt(
   // trusted internal label (CLI, grants agents) and rendered as before.
   const attributionLines: string[] = [];
   if (channelName) attributionLines.push(`Channel: #${sanitizeMetadataValue(channelName)}`);
-  // Effectful metadata: the schedule skill uses this as the destination for scheduled
-  // posts, so it must come from this trusted header — never from the thread content.
+  // Effectful metadata: the schedule skill uses these as the destination for scheduled
+  // posts and the file it may edit, so they must come from this trusted header — never
+  // from the thread content. The path is per-run on purpose: scheduled runs don't get it.
   if (channelId) attributionLines.push(`Channel id (authoritative for schedules): ${sanitizeMetadataValue(channelId)}`);
+  if (schedulesFile) attributionLines.push(`Schedules file (authoritative, use verbatim): ${sanitizeMetadataValue(schedulesFile)}`);
   if (triggeredById) {
     attributionLines.push(`Triggered by slack_user_id: ${sanitizeMetadataValue(triggeredById)}`);
   } else if (triggeredBy) {

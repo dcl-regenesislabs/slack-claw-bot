@@ -67,3 +67,10 @@ export function extractEventText(event: {
   }
   return parts.join("\n").trim();
 }
+
+/** Convert the agent's markdown to Slack mrkdwn (bold + links). */
+export function markdownToMrkdwn(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "*$1*")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>");
+}

@@ -20,6 +20,7 @@ import {
   type Schedule,
   type ScheduleRunner,
 } from "../src/schedule.js";
+import { isProtectedPath } from "../src/agent.js";
 
 function makeSchedule(overrides: Partial<Schedule> = {}): Schedule {
   return {
@@ -314,6 +315,20 @@ describe("schedule", () => {
       assert.equal(stats["a1b2c3"].lastRunStatus, "error: boom");
     });
 
+    it("redacts secrets in persisted error statuses", async () => {
+      writeSchedules([makeSchedule()]);
+      const h = makeRunner("2026-03-10T12:00:30Z");
+      h.setRunTask(async () => {
+        throw new Error("curl failed: https://x.test/?token=xoxb-A1B2C3D4E5F6G7H8");
+      });
+      await h.runner.tickOnce();
+      await h.runner.drain(1_000);
+      const status = readStats(statsFilePath(memoryDir))["a1b2c3"].lastRunStatus!;
+      assert.ok(status.startsWith("error:"));
+      assert.ok(!status.includes("xoxb"));
+      assert.ok(status.includes("[REDACTED]"));
+    });
+
     it("stats writes never touch schedules.json", async () => {
       writeSchedules([makeSchedule()]);
       const before = readFileSync(schedulesFilePath(memoryDir), "utf-8");
@@ -404,7 +419,7 @@ describe("schedule", () => {
 
   describe("buildScheduleRunOptions", () => {
     it("builds an ephemeral, memory-skipping run scoped to the schedule", () => {
-      const opts = buildScheduleRunOptions(makeSchedule(), new Date("2026-03-10T12:00:00Z"));
+      const opts = buildScheduleRunOptions(makeSchedule(), memoryDir, new Date("2026-03-10T12:00:00Z"));
       assert.equal(opts.skipMemoryLoad, true);
       assert.equal(opts.skipMemorySave, true);
       assert.equal(opts.channelId, "C0123ABCD");
@@ -412,6 +427,17 @@ describe("schedule", () => {
       assert.ok(opts.sessionManager);
       // non-U/W userId keeps the trusted slack_user_id header off the prompt
       assert.ok(!/^[UW][A-Z0-9]+$/.test(opts.userId));
+    });
+
+    it("withholds the schedule-management capability from scheduled runs", () => {
+      const opts = buildScheduleRunOptions(makeSchedule(), memoryDir);
+      // no trusted path header, and tools that also guard the schedules dir
+      assert.equal(opts.schedulesFile, undefined);
+      assert.equal(opts.tools?.length, 4);
+      assert.equal(
+        isProtectedPath(schedulesFilePath(memoryDir), [join(memoryDir, "schedules")]),
+        true,
+      );
     });
   });
 });

@@ -2,10 +2,11 @@ import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { Config } from "./config.js";
-import { runAgent, detectReviewModel } from "./agent.js";
+import { runAgent, detectReviewModel, getMemoryDir } from "./agent.js";
 import type { ThreadFetch } from "./agent.js";
+import { schedulesFilePath } from "./schedule.js";
 import type { FileAttachment } from "./prompt.js";
-import { extractEventText } from "./slack-utils.js";
+import { extractEventText, markdownToMrkdwn } from "./slack-utils.js";
 import type { SlackBlock } from "./slack-utils.js";
 import { AgentScheduler } from "./concurrency.js";
 import { redactSecrets } from "./sanitize.js";
@@ -113,6 +114,8 @@ export function createSlackApp(
         files,
         channelName,
         channelId: event.channel,
+        // Per-run capability: only interactive Slack runs may manage schedules.
+        schedulesFile: getMemoryDir() ? schedulesFilePath(getMemoryDir()!) : undefined,
       });
 
       // Reply to Slack immediately — memory save continues in background
@@ -496,11 +499,7 @@ function extractAttachments(files?: SlackFile[]): FileAttachment[] | undefined {
 
 // --- Formatting ---
 
-export function markdownToMrkdwn(text: string): string {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, "*$1*")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>");
-}
+export { markdownToMrkdwn } from "./slack-utils.js";
 
 // --- Thread Fetching ---
 
