@@ -4,9 +4,9 @@ import { promisify } from "node:util";
 import { join, dirname } from "node:path";
 import { Cron } from "croner";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { RunOptions } from "./agent.js";
+import { createGuardedTools, type RunOptions } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
-import { markdownToMrkdwn } from "./slack.js";
+import { markdownToMrkdwn } from "./slack-utils.js";
 import { redactSecrets } from "./sanitize.js";
 
 const execFileAsync = promisify(execFile);
@@ -134,8 +134,11 @@ export function formatSchedulePost(text: string, schedule: Schedule): string {
 }
 
 /** RunOptions for a scheduled fire: ephemeral session, no memory load/save, and the
- * non-U/W userId keeps the trusted slack_user_id header off the prompt. */
-export function buildScheduleRunOptions(schedule: Schedule, now: Date = new Date()): RunOptions {
+ * non-U/W userId keeps the trusted slack_user_id header off the prompt. Scheduled runs
+ * get no `schedulesFile` header and tools that block writes to the schedules dir AND the
+ * runtime-skills dir (a planted SKILL.md loads into every later session), so an injection
+ * in polled content has no sanctioned way to persist itself. */
+export function buildScheduleRunOptions(schedule: Schedule, memoryDir: string, now: Date = new Date()): RunOptions {
   const ts = `schedule-${schedule.id}-${now.getTime()}`;
   return {
     threadTs: ts,
@@ -151,6 +154,10 @@ export function buildScheduleRunOptions(schedule: Schedule, now: Date = new Date
     skipMemoryLoad: true,
     skipMemorySave: true,
     channelId: schedule.channel,
+    tools: createGuardedTools(process.cwd(), [
+      join(memoryDir, SCHEDULES_SUBDIR),
+      join(memoryDir, "skills"),
+    ]),
   };
 }
 
@@ -251,7 +258,9 @@ export function startScheduleRunner(opts: ScheduleRunnerOptions): ScheduleRunner
         // the due window, and a long run ending near the next due time must not eat it.
         recordRunStats(statsPath, schedule.id, "ok", firedAt);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "unknown error";
+        // Redacted like every other sink: this string is pushed to the memory repo and
+        // rendered back into Slack by the skill's `list`.
+        const msg = redactSecrets(err instanceof Error ? err.message : "unknown error");
         console.error(`[schedule] Error running "${schedule.description}" (${schedule.id}): ${msg}`);
         recordRunStats(statsPath, schedule.id, `error: ${msg}`, firedAt);
       } finally {

@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, realpathSync } from "node:fs";
+import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
@@ -45,9 +45,27 @@ const projectDir = join(__dirname, "..");
 const PROTECTED_PREFIXES = ["src/", "test/", "node_modules/"];
 const PROTECTED_FILES = ["package.json", "package-lock.json", "tsconfig.json", ".auth.json"];
 
-function isProtectedPath(absolutePath: string): boolean {
-  const abs = resolve(absolutePath);
-  const rel = relative(projectDir, abs);
+// Follow symlinks so a link planted at an unprotected path can't tunnel through the
+// guard; for not-yet-existing files, resolve through the nearest existing ancestor.
+function toRealPath(absolutePath: string): string {
+  try {
+    return realpathSync(absolutePath);
+  } catch {
+    const parent = dirname(absolutePath);
+    if (parent === absolutePath) return absolutePath;
+    return join(toRealPath(parent), basename(absolutePath));
+  }
+}
+
+const realProjectDir = toRealPath(projectDir);
+
+export function isProtectedPath(absolutePath: string, extraProtectedDirs: string[] = []): boolean {
+  const abs = toRealPath(resolve(absolutePath));
+  for (const dir of extraProtectedDirs) {
+    const relToDir = relative(toRealPath(resolve(dir)), abs);
+    if (!relToDir.startsWith("..") && relToDir !== abs) return true;
+  }
+  const rel = relative(realProjectDir, abs);
   // Outside the project dir — not protected (rel starts with ".." or is absolute when no common root)
   if (rel.startsWith("..") || rel === abs) return false;
   for (const prefix of PROTECTED_PREFIXES) {
@@ -65,22 +83,22 @@ function isProtectedPath(absolutePath: string): boolean {
 // renderCall) aren't assignable to the default ToolDefinition<TSchema, unknown>.
 type AnyToolDefinition = ToolDefinition<any, any, any>;
 
-function createGuardedTools(cwd: string): AnyToolDefinition[] {
+export function createGuardedTools(cwd: string, extraProtectedDirs: string[] = []): AnyToolDefinition[] {
   // Read tool — unrestricted
   const read = createReadToolDefinition(cwd);
 
   // Write tool — blocks protected paths
   const guardedWriteOps: WriteOperations = {
     async writeFile(absolutePath: string, content: string) {
-      if (isProtectedPath(absolutePath)) {
-        throw new Error(`Blocked: cannot write to protected project file "${relative(projectDir, absolutePath)}". Project source files (src/, test/, package.json, etc.) are read-only.`);
+      if (isProtectedPath(absolutePath, extraProtectedDirs)) {
+        throw new Error(`Blocked: cannot write to protected file "${absolutePath}". Project source files and guarded directories are read-only.`);
       }
       await mkdir(dirname(absolutePath), { recursive: true });
       await writeFile(absolutePath, content, "utf-8");
     },
     async mkdir(dir: string) {
-      if (isProtectedPath(dir)) {
-        throw new Error(`Blocked: cannot create directory in protected path "${relative(projectDir, dir)}".`);
+      if (isProtectedPath(dir, extraProtectedDirs)) {
+        throw new Error(`Blocked: cannot create directory in protected path "${dir}".`);
       }
       await mkdir(dir, { recursive: true });
     },
@@ -93,8 +111,8 @@ function createGuardedTools(cwd: string): AnyToolDefinition[] {
       return readFile(absolutePath);
     },
     async writeFile(absolutePath: string, content: string) {
-      if (isProtectedPath(absolutePath)) {
-        throw new Error(`Blocked: cannot edit protected project file "${relative(projectDir, absolutePath)}". Project source files (src/, test/, package.json, etc.) are read-only.`);
+      if (isProtectedPath(absolutePath, extraProtectedDirs)) {
+        throw new Error(`Blocked: cannot edit protected file "${absolutePath}". Project source files and guarded directories are read-only.`);
       }
       await writeFile(absolutePath, content, "utf-8");
     },
@@ -109,6 +127,13 @@ function createGuardedTools(cwd: string): AnyToolDefinition[] {
   const bash = createBashToolDefinition(cwd, {
     spawnHook(ctx: BashSpawnContext) {
       const cmd = ctx.command;
+      // Extra protected dirs are few and specific, and any interpreter can write —
+      // reject every command referencing one, not only recognized write shapes.
+      for (const dir of extraProtectedDirs) {
+        if (cmd.includes(dir)) {
+          throw new Error(`Blocked: bash command references protected path "${dir}".`);
+        }
+      }
       for (const pattern of WRITE_PATTERNS) {
         if (!cmd.includes(pattern)) continue;
         // Check if the command references a protected path
@@ -173,6 +198,10 @@ export interface RunOptions {
   /** Slack channel id, rendered in the trusted header as the authoritative destination
    * for schedules created in this conversation. */
   channelId?: string;
+  /** Absolute schedules.json path, rendered in the trusted header so the schedule skill
+   * can manage schedules. Deliberately per-run (never process env): scheduled runs omit
+   * it, so an injected scheduled task has no path to rewrite the schedule set with. */
+  schedulesFile?: string;
   /** Override the default system prompt (skips reading prompts/system.md). */
   systemPrompt?: string;
   /** Skip the post-run memory save. Used by grant agents whose learnings live elsewhere. */
@@ -218,6 +247,10 @@ let memoryDir: string | null = null;
 let agentTimeoutMs = DEFAULT_AGENT_TIMEOUT_MS;
 
 // --- Public API ---
+
+export function getMemoryDir(): string | null {
+  return memoryDir;
+}
 
 export function detectReviewModel(text: string): string | undefined {
   if (PR_URL_PATTERN.test(text) || REVIEW_KEYWORD_PATTERN.test(text)) {
@@ -424,16 +457,12 @@ function slackUserId(userId: string): string | undefined {
 }
 
 function renderPrompt(options: RunOptions, content: string, isFollowUp?: boolean): string {
-  return buildPrompt(
-    content,
-    options.dryRun,
-    options.triggeredBy,
-    isFollowUp,
-    options.files,
-    options.channelName,
-    slackUserId(options.userId),
-    options.channelId,
-  );
+  return buildPrompt(content, options.dryRun, options.triggeredBy, isFollowUp, options.files, {
+    channelName: options.channelName,
+    triggeredById: slackUserId(options.userId),
+    channelId: options.channelId,
+    schedulesFile: options.schedulesFile,
+  });
 }
 
 async function buildNewPrompt(options: RunOptions): Promise<PromptBuild> {

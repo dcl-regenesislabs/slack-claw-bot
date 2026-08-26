@@ -16,16 +16,28 @@ function shellSafe(value: string): string {
   return sanitizeMetadataValue(value).replace(/['"]/g, "");
 }
 
+/** Trusted header metadata. A single named-field object on purpose: several of these are
+ * same-typed strings whose mis-ordering would silently render an attacker-influenced
+ * value under the wrong trusted label. */
+export interface PromptMetadata {
+  channelName?: string;
+  /** System-provided Slack user id; when set, the display name never enters the header. */
+  triggeredById?: string;
+  /** Authoritative destination channel for schedules created in this conversation. */
+  channelId?: string;
+  /** Authoritative schedules.json path; omitted for scheduled runs and the CLI. */
+  schedulesFile?: string;
+}
+
 export function buildPrompt(
   threadContent: string,
   dryRun?: boolean,
   triggeredBy?: string,
   isFollowUp?: boolean,
   files?: FileAttachment[],
-  channelName?: string,
-  triggeredById?: string,
-  channelId?: string,
+  meta: PromptMetadata = {},
 ): string {
+  const { channelName, triggeredById, channelId, schedulesFile } = meta;
   // Untrusted Slack content is delimiter-neutralized so it can't close the wrapper tags
   // and escape into trusted prompt space.
   const safeContent = neutralizePromptDelimiters(threadContent);
@@ -40,9 +52,11 @@ export function buildPrompt(
   // trusted internal label (CLI, grants agents) and rendered as before.
   const attributionLines: string[] = [];
   if (channelName) attributionLines.push(`Channel: #${sanitizeMetadataValue(channelName)}`);
-  // Effectful metadata: the schedule skill uses this as the destination for scheduled
-  // posts, so it must come from this trusted header — never from the thread content.
+  // Effectful metadata: the schedule skill uses these as the destination for scheduled
+  // posts and the file it may edit, so they must come from this trusted header — never
+  // from the thread content. The path is per-run on purpose: scheduled runs don't get it.
   if (channelId) attributionLines.push(`Channel id (authoritative for schedules): ${sanitizeMetadataValue(channelId)}`);
+  if (schedulesFile) attributionLines.push(`Schedules file (authoritative, use verbatim): ${sanitizeMetadataValue(schedulesFile)}`);
   if (triggeredById) {
     attributionLines.push(`Triggered by slack_user_id: ${sanitizeMetadataValue(triggeredById)}`);
   } else if (triggeredBy) {

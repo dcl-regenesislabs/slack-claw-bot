@@ -11,12 +11,7 @@ import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { initAgent, runAgent } from "./agent.js";
 import { createSlackApp, startSlackApp, createScheduler } from "./slack.js";
-import {
-  startScheduleRunner,
-  buildScheduleRunOptions,
-  schedulesFilePath,
-  type ScheduleRunner,
-} from "./schedule.js";
+import { startScheduleRunner, buildScheduleRunOptions, type ScheduleRunner } from "./schedule.js";
 import { startHealthServer } from "./health.js";
 import { resolveMemoryDir, resolveGrantsAgentsDir, clonePublicRepo } from "./memory.js";
 import { initGrants } from "./grants.js";
@@ -79,23 +74,18 @@ if (config.grantsChannelId && config.grantsAgentsRepo && memoryDir) {
   console.warn("[startup] GRANTS_CHANNEL_ID set but GRANTS_AGENTS_REPO or memory dir missing — feature disabled");
 }
 
-// The schedule skill resolves the file through this env var (same mechanism as the
-// PostHog skill) — published before the Slack app starts so no run misses it.
-if (memoryDir) {
-  process.env.SCHEDULES_FILE = schedulesFilePath(memoryDir);
-}
-
 await startSlackApp(app, { socketMaxSilenceMs: config.slackSocketMaxSilenceMs });
 
 let scheduleRunner: ScheduleRunner | null = null;
 if (memoryDir) {
-  if (!existsSync(join(memoryDir, ".git"))) {
+  const memDir = memoryDir;
+  if (!existsSync(join(memDir, ".git"))) {
     console.warn("[schedule] Memory dir is not git-backed — schedules will NOT survive a redeploy");
   }
   scheduleRunner = startScheduleRunner({
-    memoryDir,
+    memoryDir: memDir,
     runTask: async (schedule) => {
-      const result = await runAgent(buildScheduleRunOptions(schedule));
+      const result = await runAgent(buildScheduleRunOptions(schedule, memDir));
       await result.done;
       return result.text;
     },

@@ -114,6 +114,7 @@ Ask the bot to do something on a schedule ("@bot every weekday at 9am ARG post o
 - Cron expressions are 5-field UTC. Don't set `TZ` on the container — the runner and the skill both assume UTC.
 - The runner validates entries independently of the skill: channel ids must match `^[CGD][A-Z0-9]+$`, crons may not fire more often than every 5 minutes, and at most 25 enabled schedules run.
 - Runs are ephemeral (no session, no memory load/save) and execute on a dedicated single-slot lane so schedules never starve interactive users. A schedule still running when its next fire comes due is skipped, not queued.
+- Scheduled runs can't manage schedules through any sanctioned path: the schedules-file location is delivered per-run through a trusted prompt header that only interactive Slack runs receive, and scheduled runs' write/edit tools refuse the schedules and runtime-skills directories (following symlinks) while their bash guard rejects commands referencing them (best-effort) — so injected content in a polled source can't rewrite the schedule set or plant a skill.
 - On DigitalOcean App Platform keep the worker at `instance_count: 1`; during a rolling deploy two instances briefly overlap, so a fire in that window can double-post (partially deduped via persisted stats).
 
 ## Grants Agents (optional)
