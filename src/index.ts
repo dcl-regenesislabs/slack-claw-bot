@@ -6,9 +6,17 @@ process.on("uncaughtException", (err) => {
   process.exit(1);
 });
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { loadConfig } from "./config.js";
-import { initAgent } from "./agent.js";
+import { initAgent, runAgent } from "./agent.js";
 import { createSlackApp, startSlackApp, createScheduler } from "./slack.js";
+import {
+  startScheduleRunner,
+  buildScheduleRunOptions,
+  schedulesFilePath,
+  type ScheduleRunner,
+} from "./schedule.js";
 import { startHealthServer } from "./health.js";
 import { resolveMemoryDir, resolveGrantsAgentsDir, clonePublicRepo } from "./memory.js";
 import { initGrants } from "./grants.js";
@@ -71,10 +79,38 @@ if (config.grantsChannelId && config.grantsAgentsRepo && memoryDir) {
   console.warn("[startup] GRANTS_CHANNEL_ID set but GRANTS_AGENTS_REPO or memory dir missing — feature disabled");
 }
 
+// The schedule skill resolves the file through this env var (same mechanism as the
+// PostHog skill) — published before the Slack app starts so no run misses it.
+if (memoryDir) {
+  process.env.SCHEDULES_FILE = schedulesFilePath(memoryDir);
+}
+
 await startSlackApp(app, { socketMaxSilenceMs: config.slackSocketMaxSilenceMs });
+
+let scheduleRunner: ScheduleRunner | null = null;
+if (memoryDir) {
+  if (!existsSync(join(memoryDir, ".git"))) {
+    console.warn("[schedule] Memory dir is not git-backed — schedules will NOT survive a redeploy");
+  }
+  scheduleRunner = startScheduleRunner({
+    memoryDir,
+    runTask: async (schedule) => {
+      const result = await runAgent(buildScheduleRunOptions(schedule));
+      await result.done;
+      return result.text;
+    },
+    postMessage: async (channel, text) => {
+      await app.client.chat.postMessage({ channel, text });
+    },
+  });
+} else {
+  console.warn("[schedule] No memory dir — schedules disabled");
+}
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`[shutdown] ${signal} received — draining...`);
+
+  scheduleRunner?.stop();
 
   try {
     await app.stop();
@@ -82,7 +118,8 @@ async function shutdown(signal: string): Promise<void> {
     console.error("[shutdown] Failed to stop Slack app:", err);
   }
 
-  await scheduler.drain(20_000);
+  await Promise.all([scheduler.drain(20_000), scheduleRunner?.drain(15_000)]);
+  await scheduleRunner?.flush();
 
   console.log("[shutdown] Done");
   process.exit(0);

@@ -112,6 +112,7 @@ export function createSlackApp(
         model: detectReviewModel(text),
         files,
         channelName,
+        channelId: event.channel,
       });
 
       // Reply to Slack immediately — memory save continues in background

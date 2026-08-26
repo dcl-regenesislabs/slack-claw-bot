@@ -170,6 +170,9 @@ export interface RunOptions {
   files?: FileAttachment[];
   /** Slack channel name, surfaced to the agent so it can resolve the channel's default repo. */
   channelName?: string;
+  /** Slack channel id, rendered in the trusted header as the authoritative destination
+   * for schedules created in this conversation. */
+  channelId?: string;
   /** Override the default system prompt (skips reading prompts/system.md). */
   systemPrompt?: string;
   /** Skip the post-run memory save. Used by grant agents whose learnings live elsewhere. */
@@ -429,6 +432,7 @@ function renderPrompt(options: RunOptions, content: string, isFollowUp?: boolean
     options.files,
     options.channelName,
     slackUserId(options.userId),
+    options.channelId,
   );
 }
 
