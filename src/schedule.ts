@@ -135,8 +135,9 @@ export function formatSchedulePost(text: string, schedule: Schedule): string {
 
 /** RunOptions for a scheduled fire: ephemeral session, no memory load/save, and the
  * non-U/W userId keeps the trusted slack_user_id header off the prompt. Scheduled runs
- * get no `schedulesFile` header and tools that block writes to the schedules dir, so an
- * injection in polled content cannot rewrite the schedule set to keep itself alive. */
+ * get no `schedulesFile` header and tools that block writes to the schedules dir AND the
+ * runtime-skills dir (a planted SKILL.md loads into every later session), so an injection
+ * in polled content has no sanctioned way to persist itself. */
 export function buildScheduleRunOptions(schedule: Schedule, memoryDir: string, now: Date = new Date()): RunOptions {
   const ts = `schedule-${schedule.id}-${now.getTime()}`;
   return {
@@ -153,7 +154,10 @@ export function buildScheduleRunOptions(schedule: Schedule, memoryDir: string, n
     skipMemoryLoad: true,
     skipMemorySave: true,
     channelId: schedule.channel,
-    tools: createGuardedTools(process.cwd(), [join(memoryDir, SCHEDULES_SUBDIR)]),
+    tools: createGuardedTools(process.cwd(), [
+      join(memoryDir, SCHEDULES_SUBDIR),
+      join(memoryDir, "skills"),
+    ]),
   };
 }
 

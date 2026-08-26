@@ -431,13 +431,13 @@ describe("schedule", () => {
 
     it("withholds the schedule-management capability from scheduled runs", () => {
       const opts = buildScheduleRunOptions(makeSchedule(), memoryDir);
-      // no trusted path header, and tools that also guard the schedules dir
+      // no trusted path header, and tools that guard both persistence dirs
       assert.equal(opts.schedulesFile, undefined);
       assert.equal(opts.tools?.length, 4);
-      assert.equal(
-        isProtectedPath(schedulesFilePath(memoryDir), [join(memoryDir, "schedules")]),
-        true,
-      );
+      const guarded = [join(memoryDir, "schedules"), join(memoryDir, "skills")];
+      assert.equal(isProtectedPath(schedulesFilePath(memoryDir), guarded), true);
+      assert.equal(isProtectedPath(join(memoryDir, "skills", "evil", "SKILL.md"), guarded), true);
+      assert.equal(isProtectedPath(join(memoryDir, "shared", "MEMORY.md"), guarded), false);
     });
   });
 });

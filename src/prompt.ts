@@ -16,17 +16,28 @@ function shellSafe(value: string): string {
   return sanitizeMetadataValue(value).replace(/['"]/g, "");
 }
 
+/** Trusted header metadata. A single named-field object on purpose: several of these are
+ * same-typed strings whose mis-ordering would silently render an attacker-influenced
+ * value under the wrong trusted label. */
+export interface PromptMetadata {
+  channelName?: string;
+  /** System-provided Slack user id; when set, the display name never enters the header. */
+  triggeredById?: string;
+  /** Authoritative destination channel for schedules created in this conversation. */
+  channelId?: string;
+  /** Authoritative schedules.json path; omitted for scheduled runs and the CLI. */
+  schedulesFile?: string;
+}
+
 export function buildPrompt(
   threadContent: string,
   dryRun?: boolean,
   triggeredBy?: string,
   isFollowUp?: boolean,
   files?: FileAttachment[],
-  channelName?: string,
-  triggeredById?: string,
-  channelId?: string,
-  schedulesFile?: string,
+  meta: PromptMetadata = {},
 ): string {
+  const { channelName, triggeredById, channelId, schedulesFile } = meta;
   // Untrusted Slack content is delimiter-neutralized so it can't close the wrapper tags
   // and escape into trusted prompt space.
   const safeContent = neutralizePromptDelimiters(threadContent);
