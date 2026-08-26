@@ -1,5 +1,6 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, statSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { join, dirname } from "node:path";
 import { Cron } from "croner";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -7,6 +8,8 @@ import type { RunOptions } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
 import { markdownToMrkdwn } from "./slack.js";
 import { redactSecrets } from "./sanitize.js";
+
+const execFileAsync = promisify(execFile);
 
 // --- Data model (mirrors decentraland/agent-server) ---
 
@@ -41,6 +44,9 @@ const NO_OUTPUT_SENTINEL = "NO_OUTPUT";
 const TICK_INTERVAL_MS = 60_000;
 const STATS_PUSH_INTERVAL_MS = 5 * 60_000;
 const MAX_POST_LENGTH = 3000;
+const MAX_ENABLED_SCHEDULES = 25;
+const MIN_CRON_INTERVAL_MS = 5 * 60_000;
+const CHANNEL_ID_PATTERN = /^[CGD][A-Z0-9]+$/;
 
 export function schedulesFilePath(memoryDir: string): string {
   return join(memoryDir, SCHEDULES_SUBDIR, SCHEDULES_FILENAME);
@@ -73,17 +79,32 @@ export function readStats(path: string): StatsFile {
 
 // Stats live in a SEPARATE file so this read-modify-write can never race the skill
 // agent's writes to schedules.json (and e.g. resurrect a schedule it just deleted).
-export function recordRunStats(statsPath: string, id: string, status: string, now: Date): void {
+export function recordRunStats(statsPath: string, id: string, status: string, firedAt: Date): void {
   const stats = readStats(statsPath);
   stats[id] = {
     runCount: (stats[id]?.runCount ?? 0) + 1,
-    lastRunAt: now.toISOString(),
+    lastRunAt: firedAt.toISOString(),
     lastRunStatus: status,
   };
   mkdirSync(dirname(statsPath), { recursive: true });
   const tmp = `${statsPath}.tmp`;
   writeFileSync(tmp, JSON.stringify(stats, null, 2), "utf-8");
   renameSync(tmp, statsPath);
+}
+
+/**
+ * Defense-in-depth: the runner accepts whatever ends up in schedules.json, and the skill
+ * prompt is guidance, not enforcement — so the effectful fields are re-checked here.
+ * Returns a rejection reason, or null when the schedule is runnable.
+ */
+export function validateSchedule(schedule: Schedule): string | null {
+  if (typeof schedule.id !== "string" || !schedule.id) return "missing id";
+  if (typeof schedule.task !== "string" || !schedule.task.trim()) return "empty task";
+  if (typeof schedule.cron !== "string") return "cron is not a string";
+  if (typeof schedule.channel !== "string" || !CHANNEL_ID_PATTERN.test(schedule.channel)) {
+    return `channel "${schedule.channel}" is not a Slack channel id`;
+  }
+  return null;
 }
 
 /** Due iff the cron expression (UTC) has a fire time inside (now - windowMs, now]. */
@@ -93,10 +114,23 @@ export function isDue(cronExpr: string, now: Date, windowMs: number): boolean {
   return next !== null && next <= now;
 }
 
+/** Sampled guard against runaway crons: the gap from the next fire to the one after it
+ * must be at least MIN_CRON_INTERVAL_MS. */
+export function firesTooOften(cronExpr: string, from: Date): boolean {
+  const cron = new Cron(cronExpr, { timezone: "UTC" });
+  const first = cron.nextRun(from);
+  if (!first) return false;
+  const second = cron.nextRun(first);
+  return second !== null && second.getTime() - first.getTime() < MIN_CRON_INTERVAL_MS;
+}
+
 export function formatSchedulePost(text: string, schedule: Schedule): string {
-  const body = text.length > MAX_POST_LENGTH ? text.slice(0, MAX_POST_LENGTH) + "\n...(truncated)" : text;
+  // Redact before truncating: a token straddling the cut would otherwise survive as a
+  // prefix the redaction patterns no longer match.
+  const rendered = redactSecrets(markdownToMrkdwn(text));
+  const body = rendered.length > MAX_POST_LENGTH ? rendered.slice(0, MAX_POST_LENGTH) + "\n...(truncated)" : rendered;
   const footer = `\n\n_Schedule: ${schedule.description} · \`${schedule.cron}\` · ID: ${schedule.id}_`;
-  return redactSecrets(markdownToMrkdwn(body + footer));
+  return body + redactSecrets(footer);
 }
 
 /** RunOptions for a scheduled fire: ephemeral session, no memory load/save, and the
@@ -126,31 +160,43 @@ export function buildScheduleRunOptions(schedule: Schedule, now: Date = new Date
 // resolveMemoryDir(). This push covers the other direction. Definition changes go out
 // on the next tick (≤60s); stats-only changes are batched (they change on every run).
 
-function pushScheduleState(memoryDir: string, includeStats: boolean): void {
+/** Commit and push the schedule files. Throws on git failure so the caller can retry.
+ * Async so a slow git (30s timeouts, rebase fallback) never blocks the event loop. */
+export async function pushScheduleState(memoryDir: string, includeStats: boolean): Promise<void> {
   if (!existsSync(join(memoryDir, ".git"))) return;
-  const git = (...args: string[]) =>
-    execFileSync("git", args, { cwd: memoryDir, encoding: "utf-8", timeout: 30_000 });
-  const schedulesPath = schedulesFilePath(memoryDir);
-  const statsPath = statsFilePath(memoryDir);
+  const git = async (...args: string[]) => {
+    await execFileAsync("git", args, { cwd: memoryDir, timeout: 30_000 });
+  };
+  const paths = [schedulesFilePath(memoryDir)];
+  if (includeStats) paths.push(statsFilePath(memoryDir));
+  const existing = paths.filter((p) => existsSync(p));
+  if (!existing.length) return;
+
+  await git("add", "--", ...existing);
+  const staged = await git("diff", "--cached", "--quiet", "--", ...existing).then(() => false, () => true);
+  if (staged) {
+    // --only scopes the commit to our paths, so anything a concurrent agent run has
+    // staged (push-memory mid-flight) is neither swept up nor unstaged.
+    await git("commit", "--only", "-m", "schedules: update schedule state", "--", ...existing);
+  }
+  // Push even when nothing new was staged — a previous commit may have failed to push.
   try {
-    if (existsSync(schedulesPath)) git("add", "--", schedulesPath);
-    if (includeStats && existsSync(statsPath)) git("add", "--", statsPath);
-    try {
-      git("diff", "--cached", "--quiet");
-      return; // exit code 0 = nothing staged
-    } catch {
-      // exit code 1 = staged changes — proceed
-    }
-    git("commit", "-m", "schedules: update schedule state");
-    try {
-      git("push");
-    } catch {
-      git("pull", "--rebase", "--autostash");
-      git("push");
-    }
-    console.log("[schedule] Pushed schedule state to memory repo");
-  } catch (err) {
-    console.error(`[schedule] Git commit/push failed: ${(err as Error).message}`);
+    await git("push");
+  } catch {
+    // No --autostash: a dirty tree (a concurrent agent mid-write) should fail the push
+    // and retry on a later tick, not risk losing a stash on a rebase conflict.
+    await git("pull", "--rebase");
+    await git("push");
+  }
+  if (staged) console.log("[schedule] Pushed schedule state to memory repo");
+}
+
+function fileFingerprint(path: string): string | null {
+  try {
+    const stat = statSync(path);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return null;
   }
 }
 
@@ -164,15 +210,15 @@ export interface ScheduleRunnerOptions {
   postMessage: (channel: string, text: string) => Promise<void>;
   /** Injected in tests. */
   now?: () => Date;
-  /** Injected in tests. Default commits+pushes schedules/ to the memory repo. */
-  push?: (includeStats: boolean) => void;
+  /** Injected in tests. Default commits+pushes the schedule files to the memory repo. */
+  push?: (includeStats: boolean) => void | Promise<void>;
 }
 
 export interface ScheduleRunner {
   stop: () => void;
   drain: (timeoutMs: number) => Promise<void>;
   /** Final unconditional push — call after drain so the last run's stats survive. */
-  flush: () => void;
+  flush: () => Promise<void>;
   /** One tick, exposed for tests. */
   tickOnce: () => Promise<void>;
 }
@@ -187,10 +233,12 @@ export function startScheduleRunner(opts: ScheduleRunnerOptions): ScheduleRunner
   const inFlight = new Set<string>();
   let statsDirty = false;
   let lastStatsPushMs = now().getTime();
+  // Post-boot-pull state is already in sync with the remote; push only on change.
+  let lastPushedFingerprint = fileFingerprint(schedulesPath);
 
   mkdirSync(dirname(schedulesPath), { recursive: true });
 
-  function fire(schedule: Schedule): void {
+  function fire(schedule: Schedule, firedAt: Date): void {
     inFlight.add(schedule.id);
     console.log(`[schedule] Firing "${schedule.description}" (${schedule.id})`);
     const submission = lane.submit(`schedule-${schedule.id}`, async () => {
@@ -199,11 +247,13 @@ export function startScheduleRunner(opts: ScheduleRunnerOptions): ScheduleRunner
         if (text && !text.trim().startsWith(NO_OUTPUT_SENTINEL)) {
           await opts.postMessage(schedule.channel, formatSchedulePost(text, schedule));
         }
-        recordRunStats(statsPath, schedule.id, "ok", now());
+        // Stats key off the FIRE time, not completion: dedupe compares lastRunAt against
+        // the due window, and a long run ending near the next due time must not eat it.
+        recordRunStats(statsPath, schedule.id, "ok", firedAt);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "unknown error";
         console.error(`[schedule] Error running "${schedule.description}" (${schedule.id}): ${msg}`);
-        recordRunStats(statsPath, schedule.id, `error: ${msg}`, now());
+        recordRunStats(statsPath, schedule.id, `error: ${msg}`, firedAt);
       } finally {
         statsDirty = true;
         inFlight.delete(schedule.id);
@@ -217,32 +267,50 @@ export function startScheduleRunner(opts: ScheduleRunnerOptions): ScheduleRunner
   async function tickOnce(): Promise<void> {
     const tickNow = now();
 
-    // Persist skill edits from the last minute; batch stats-only churn.
-    const includeStats = statsDirty && tickNow.getTime() - lastStatsPushMs >= STATS_PUSH_INTERVAL_MS;
-    push(includeStats);
-    if (includeStats) {
-      statsDirty = false;
-      lastStatsPushMs = tickNow.getTime();
+    // Persist skill edits and batched stats. The fingerprint gate keeps quiet ticks free
+    // of git subprocesses; on failure nothing is marked clean, so the next tick retries.
+    const fingerprint = fileFingerprint(schedulesPath);
+    const statsDue = statsDirty && tickNow.getTime() - lastStatsPushMs >= STATS_PUSH_INTERVAL_MS;
+    if (fingerprint !== lastPushedFingerprint || statsDue) {
+      try {
+        await push(statsDue);
+        lastPushedFingerprint = fingerprint;
+        if (statsDue) {
+          statsDirty = false;
+          lastStatsPushMs = tickNow.getTime();
+        }
+      } catch (err) {
+        console.error(`[schedule] Git push failed (will retry): ${(err as Error).message}`);
+      }
     }
 
     const file = readSchedules(schedulesPath);
-    const enabled = file.schedules.filter((s) => s.enabled);
+    let enabled = file.schedules.filter((s) => s.enabled);
     if (!enabled.length) return;
+    if (enabled.length > MAX_ENABLED_SCHEDULES) {
+      console.warn(`[schedule] ${enabled.length} enabled schedules — only the first ${MAX_ENABLED_SCHEDULES} will run`);
+      enabled = enabled.slice(0, MAX_ENABLED_SCHEDULES);
+    }
     console.log(`[schedule] Tick — ${file.schedules.length} schedules, ${enabled.length} enabled`);
 
     const stats = readStats(statsPath);
     const windowStart = new Date(tickNow.getTime() - TICK_INTERVAL_MS);
 
     for (const schedule of enabled) {
-      try {
-        if (!isDue(schedule.cron, tickNow, TICK_INTERVAL_MS)) continue;
-      } catch (err) {
-        console.error(`[schedule] Bad cron for "${schedule.id}": ${(err as Error).message}`);
+      // Never infer or trust a destination the header didn't provide — reject instead.
+      const invalid = validateSchedule(schedule);
+      if (invalid) {
+        console.error(`[schedule] Skipping "${schedule.description}" (${schedule.id}) — ${invalid}`);
         continue;
       }
-      // Never infer a destination — a channel-less schedule must not guess where to post.
-      if (!schedule.channel) {
-        console.error(`[schedule] Skipping "${schedule.description}" (${schedule.id}) — no channel set`);
+      try {
+        if (!isDue(schedule.cron, tickNow, TICK_INTERVAL_MS)) continue;
+        if (firesTooOften(schedule.cron, tickNow)) {
+          console.error(`[schedule] Skipping "${schedule.description}" (${schedule.id}) — cron "${schedule.cron}" fires more often than every ${MIN_CRON_INTERVAL_MS / 60_000} minutes`);
+          continue;
+        }
+      } catch (err) {
+        console.error(`[schedule] Bad cron for "${schedule.id}": ${(err as Error).message}`);
         continue;
       }
       if (inFlight.has(schedule.id)) {
@@ -255,7 +323,7 @@ export function startScheduleRunner(opts: ScheduleRunnerOptions): ScheduleRunner
         console.log(`[schedule] "${schedule.description}" (${schedule.id}) already ran at ${lastRunAt} — skipping`);
         continue;
       }
-      fire(schedule);
+      fire(schedule, tickNow);
     }
   }
 
@@ -264,12 +332,18 @@ export function startScheduleRunner(opts: ScheduleRunnerOptions): ScheduleRunner
   }, TICK_INTERVAL_MS);
   timer.unref();
 
-  console.log(`[schedule] Runner started — checking ${schedulesPath} every ${TICK_INTERVAL_MS / 1000}s`);
+  console.log(`[schedule] Runner started — checking ${schedulesPath} every ${Math.round(TICK_INTERVAL_MS / 1000)}s`);
 
   return {
     stop: () => clearInterval(timer),
     drain: (timeoutMs: number) => lane.drain(timeoutMs),
-    flush: () => push(true),
+    flush: async () => {
+      try {
+        await push(true);
+      } catch (err) {
+        console.error(`[schedule] Final push failed: ${(err as Error).message}`);
+      }
+    },
     tickOnce,
   };
 }

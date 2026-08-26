@@ -119,7 +119,7 @@ async function shutdown(signal: string): Promise<void> {
   }
 
   await Promise.all([scheduler.drain(20_000), scheduleRunner?.drain(15_000)]);
-  scheduleRunner?.flush();
+  await scheduleRunner?.flush();
 
   console.log("[shutdown] Done");
   process.exit(0);

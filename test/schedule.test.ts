@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -11,6 +12,9 @@ import {
   readStats,
   recordRunStats,
   isDue,
+  firesTooOften,
+  validateSchedule,
+  pushScheduleState,
   schedulesFilePath,
   statsFilePath,
   type Schedule,
@@ -57,6 +61,7 @@ describe("schedule", () => {
     pushes: boolean[];
     setNow: (iso: string) => void;
     setRunTask: (fn: (s: Schedule) => Promise<string>) => void;
+    setFailPush: (fail: boolean) => void;
   }
 
   function makeRunner(startIso = "2026-03-10T12:00:30Z"): Harness {
@@ -64,6 +69,7 @@ describe("schedule", () => {
     const fired: Schedule[] = [];
     const posts: Array<{ channel: string; text: string }> = [];
     const pushes: boolean[] = [];
+    let failPush = false;
     let taskImpl: (s: Schedule) => Promise<string> = async () => "report body";
     runner = startScheduleRunner({
       memoryDir,
@@ -77,6 +83,7 @@ describe("schedule", () => {
       now: () => currentNow,
       push: (includeStats) => {
         pushes.push(includeStats);
+        if (failPush) throw new Error("push failed");
       },
     });
     return {
@@ -89,6 +96,9 @@ describe("schedule", () => {
       },
       setRunTask: (fn) => {
         taskImpl = fn;
+      },
+      setFailPush: (fail) => {
+        failPush = fail;
       },
     };
   }
@@ -108,6 +118,33 @@ describe("schedule", () => {
 
     it("throws on an invalid cron expression", () => {
       assert.throws(() => isDue("not a cron", new Date(), 60_000));
+    });
+  });
+
+  describe("firesTooOften", () => {
+    it("flags sub-5-minute crons and allows 5-minute-plus crons", () => {
+      const from = new Date("2026-03-10T12:00:30Z");
+      assert.equal(firesTooOften("* * * * *", from), true);
+      assert.equal(firesTooOften("*/5 * * * *", from), false);
+      assert.equal(firesTooOften("0 12 * * *", from), false);
+    });
+  });
+
+  describe("validateSchedule", () => {
+    it("accepts channel ids for channels, groups, and DMs", () => {
+      for (const channel of ["C0123ABCD", "G0123ABCD", "D0123ABCD"]) {
+        assert.equal(validateSchedule(makeSchedule({ channel })), null);
+      }
+    });
+
+    it("rejects malformed channels and non-string fields", () => {
+      assert.ok(validateSchedule(makeSchedule({ channel: "evil" })));
+      assert.ok(validateSchedule(makeSchedule({ channel: "" })));
+      assert.ok(validateSchedule(makeSchedule({ channel: "c0123abcd" })));
+      assert.ok(validateSchedule(makeSchedule({ task: "  " })));
+      assert.ok(validateSchedule(makeSchedule({ task: 42 as unknown as string })));
+      assert.ok(validateSchedule(makeSchedule({ cron: null as unknown as string })));
+      assert.ok(validateSchedule(makeSchedule({ id: "" })));
     });
   });
 
@@ -178,26 +215,46 @@ describe("schedule", () => {
       assert.deepEqual(h.fired.map((s) => s.id), ["good01"]);
     });
 
-    it("never fires a channel-less schedule", async () => {
-      writeSchedules([makeSchedule({ channel: "" })]);
+    it("never fires a schedule without a valid Slack channel id", async () => {
+      writeSchedules([
+        makeSchedule({ id: "nochan1", channel: "" }),
+        makeSchedule({ id: "nochan2", channel: "not-a-channel" }),
+      ]);
       const h = makeRunner("2026-03-10T12:00:30Z");
       await h.runner.tickOnce();
       assert.equal(h.fired.length, 0);
     });
 
-    it("skips (not queues) a fire while the previous run is in flight", async () => {
+    it("rejects crons that fire more often than every 5 minutes", async () => {
       writeSchedules([makeSchedule({ cron: "* * * * *" })]);
       const h = makeRunner("2026-03-10T12:00:30Z");
-      let release: () => void;
-      const gate = new Promise<string>((resolve) => {
-        release = () => resolve("late result");
-      });
-      h.setRunTask(() => gate);
       await h.runner.tickOnce();
-      h.setNow("2026-03-10T12:01:30Z");
+      assert.equal(h.fired.length, 0);
+    });
+
+    it("caps enabled schedules at 25 per tick", async () => {
+      const many = Array.from({ length: 26 }, (_, i) =>
+        makeSchedule({ id: `id${String(i).padStart(4, "0")}` }),
+      );
+      writeSchedules(many);
+      const h = makeRunner("2026-03-10T12:00:30Z");
+      await h.runner.tickOnce();
+      await h.runner.drain(5_000);
+      assert.equal(h.fired.length, 25);
+    });
+
+    it("skips (not queues) a fire while the previous run is in flight", async () => {
+      writeSchedules([makeSchedule({ cron: "*/5 * * * *" })]);
+      const h = makeRunner("2026-03-10T12:00:30Z");
+      let release!: () => void;
+      h.setRunTask(() => new Promise<string>((resolve) => {
+        release = () => resolve("late result");
+      }));
+      await h.runner.tickOnce();
+      h.setNow("2026-03-10T12:05:30Z");
       await h.runner.tickOnce();
       assert.equal(h.fired.length, 1);
-      release!();
+      release();
       await h.runner.drain(1_000);
     });
 
@@ -207,6 +264,27 @@ describe("schedule", () => {
       const h = makeRunner("2026-03-10T12:00:40Z");
       await h.runner.tickOnce();
       assert.equal(h.fired.length, 0);
+    });
+
+    it("keys stats off fire time so a long run does not eat the next fire", async () => {
+      writeSchedules([makeSchedule({ cron: "*/5 * * * *" })]);
+      const h = makeRunner("2026-03-10T12:00:30Z");
+      let release!: () => void;
+      h.setRunTask(() => new Promise<string>((resolve) => {
+        release = () => resolve("slow result");
+      }));
+      await h.runner.tickOnce();
+      // the run drags on and completes just inside the next fire's dedupe window
+      h.setNow("2026-03-10T12:04:50Z");
+      release();
+      await h.runner.drain(1_000);
+      assert.equal(readStats(statsFilePath(memoryDir))["a1b2c3"].lastRunAt, "2026-03-10T12:00:30.000Z");
+
+      h.setRunTask(async () => "quick");
+      h.setNow("2026-03-10T12:05:30Z");
+      await h.runner.tickOnce();
+      await h.runner.drain(1_000);
+      assert.equal(h.fired.length, 2);
     });
   });
 
@@ -248,30 +326,53 @@ describe("schedule", () => {
   });
 
   describe("push policy", () => {
-    it("pushes without stats every tick, and with stats only after the batch interval", async () => {
-      writeSchedules([makeSchedule({ cron: "* * * * *" })]);
-      const h = makeRunner("2026-03-10T12:00:30Z");
+    it("does not push when nothing changed", async () => {
+      writeSchedules([makeSchedule()]);
+      const h = makeRunner("2026-03-10T13:30:30Z");
       await h.runner.tickOnce();
-      await h.runner.drain(1_000);
-      assert.deepEqual(h.pushes, [false]);
-
-      // 1 minute later — stats dirty but batch interval (5 min) not reached
-      h.setNow("2026-03-10T12:01:30Z");
-      await h.runner.tickOnce();
-      await h.runner.drain(1_000);
-      assert.deepEqual(h.pushes, [false, false]);
-
-      // past the batch interval — stats included
-      h.setNow("2026-03-10T12:06:00Z");
-      await h.runner.tickOnce();
-      await h.runner.drain(1_000);
-      assert.deepEqual(h.pushes, [false, false, true]);
+      assert.deepEqual(h.pushes, []);
     });
 
-    it("flush pushes unconditionally with stats", () => {
-      const h = makeRunner();
-      h.runner.flush();
+    it("pushes definition changes on the next tick, once", async () => {
+      writeSchedules([makeSchedule()]);
+      const h = makeRunner("2026-03-10T13:30:30Z");
+      await h.runner.tickOnce();
+      assert.deepEqual(h.pushes, []);
+      writeSchedules([makeSchedule({ description: "edited" })]);
+      await h.runner.tickOnce();
+      assert.deepEqual(h.pushes, [false]);
+      await h.runner.tickOnce();
+      assert.deepEqual(h.pushes, [false]);
+    });
+
+    it("retries a failed push on the next tick", async () => {
+      writeSchedules([makeSchedule()]);
+      const h = makeRunner("2026-03-10T13:30:30Z");
+      writeSchedules([makeSchedule({ description: "edited" })]);
+      h.setFailPush(true);
+      await h.runner.tickOnce();
+      assert.deepEqual(h.pushes, [false]);
+      h.setFailPush(false);
+      await h.runner.tickOnce();
+      assert.deepEqual(h.pushes, [false, false]);
+      await h.runner.tickOnce();
+      assert.deepEqual(h.pushes, [false, false]);
+    });
+
+    it("batches stats-only pushes to the interval, and flush pushes unconditionally", async () => {
+      writeSchedules([makeSchedule()]);
+      const h = makeRunner("2026-03-10T12:00:30Z");
+      await h.runner.tickOnce(); // fires — stats become dirty
+      await h.runner.drain(1_000);
+      assert.deepEqual(h.pushes, []);
+      h.setNow("2026-03-10T12:01:30Z");
+      await h.runner.tickOnce();
+      assert.deepEqual(h.pushes, []);
+      h.setNow("2026-03-10T12:06:30Z");
+      await h.runner.tickOnce();
       assert.deepEqual(h.pushes, [true]);
+      await h.runner.flush();
+      assert.deepEqual(h.pushes, [true, true]);
     });
   });
 
@@ -293,6 +394,12 @@ describe("schedule", () => {
       assert.ok(text.includes("*bold*"));
       assert.ok(text.includes("<https://example.com|link>"));
     });
+
+    it("redacts a token that straddles the truncation boundary", () => {
+      const secret = "xoxb-A1B2C3D4E5F6G7H8";
+      const text = formatSchedulePost("x".repeat(2991) + " " + secret, makeSchedule());
+      assert.ok(!text.includes("xoxb"));
+    });
   });
 
   describe("buildScheduleRunOptions", () => {
@@ -306,5 +413,66 @@ describe("schedule", () => {
       // non-U/W userId keeps the trusted slack_user_id header off the prompt
       assert.ok(!/^[UW][A-Z0-9]+$/.test(opts.userId));
     });
+  });
+});
+
+describe("pushScheduleState", () => {
+  let base: string;
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), "sched-git-"));
+  });
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  function git(cwd: string, ...args: string[]): string {
+    return execFileSync("git", args, { cwd, encoding: "utf-8" });
+  }
+
+  function initFixture(): { origin: string; clone: string } {
+    const origin = join(base, "origin.git");
+    const clone = join(base, "mem");
+    execFileSync("git", ["init", "--bare", origin], { encoding: "utf-8" });
+    execFileSync("git", ["clone", origin, clone], { encoding: "utf-8" });
+    git(clone, "config", "user.email", "test@example.com");
+    git(clone, "config", "user.name", "test");
+    git(clone, "commit", "--allow-empty", "-m", "init");
+    git(clone, "push", "-u", "origin", "HEAD");
+    mkdirSync(join(clone, "schedules"), { recursive: true });
+    return { origin, clone };
+  }
+
+  it("commits and pushes schedule definitions", async () => {
+    const { origin, clone } = initFixture();
+    writeFileSync(schedulesFilePath(clone), JSON.stringify({ schedules: [] }), "utf-8");
+    await pushScheduleState(clone, false);
+    assert.ok(git(origin, "log", "--oneline").includes("schedules: update schedule state"));
+  });
+
+  it("keeps concurrently staged files out of the commit and still staged", async () => {
+    const { clone } = initFixture();
+    writeFileSync(join(clone, "unrelated.md"), "agent memory mid-write", "utf-8");
+    git(clone, "add", "unrelated.md");
+    writeFileSync(schedulesFilePath(clone), JSON.stringify({ schedules: [] }), "utf-8");
+    await pushScheduleState(clone, false);
+    const committed = git(clone, "show", "--name-only", "--format=", "HEAD").trim();
+    assert.equal(committed, "schedules/schedules.json");
+    assert.ok(git(clone, "status", "--porcelain").includes("A  unrelated.md"));
+  });
+
+  it("excludes stats until includeStats is set", async () => {
+    const { clone } = initFixture();
+    writeFileSync(schedulesFilePath(clone), JSON.stringify({ schedules: [] }), "utf-8");
+    writeFileSync(statsFilePath(clone), "{}", "utf-8");
+    await pushScheduleState(clone, false);
+    assert.ok(git(clone, "status", "--porcelain").includes("?? schedules/schedule-stats.json"));
+    await pushScheduleState(clone, true);
+    assert.equal(git(clone, "status", "--porcelain").trim(), "");
+  });
+
+  it("resolves without side effects for a non-git directory", async () => {
+    await pushScheduleState(base, true);
   });
 });

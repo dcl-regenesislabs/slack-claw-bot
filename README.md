@@ -112,6 +112,7 @@ Ask the bot to do something on a schedule ("@bot every weekday at 9am ARG post o
 - Schedules live at `{memoryDir}/schedules/schedules.json` (agent-managed via the skill); run stats live in a sibling `schedule-stats.json` (runner-managed) so the two writers never race.
 - Persistence rides on the memory repo: the runner commits and pushes schedule changes within a minute (stats batched every 5 minutes), and the startup clone/pull restores them after a redeploy. Without `MEMORY_REPO`, schedules work but don't survive restarts (a startup warning says so).
 - Cron expressions are 5-field UTC. Don't set `TZ` on the container — the runner and the skill both assume UTC.
+- The runner validates entries independently of the skill: channel ids must match `^[CGD][A-Z0-9]+$`, crons may not fire more often than every 5 minutes, and at most 25 enabled schedules run.
 - Runs are ephemeral (no session, no memory load/save) and execute on a dedicated single-slot lane so schedules never starve interactive users. A schedule still running when its next fire comes due is skipped, not queued.
 - On DigitalOcean App Platform keep the worker at `instance_count: 1`; during a rolling deploy two instances briefly overlap, so a fire in that window can double-post (partially deduped via persisted stats).
 

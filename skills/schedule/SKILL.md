@@ -75,7 +75,7 @@ Always check if the file exists first. If it doesn't, create it with `{"schedule
 - CET (Central Europe): UTC+1
 - If no timezone specified, ask or assume ARG.
 
-**Event-driven requests** — when users say "every time X happens", convert to a polling cron (e.g. `*/5 * * * *` for every 5 minutes). Include instructions in the task prompt to:
+**Event-driven requests** — when users say "every time X happens", convert to a polling cron (e.g. `*/5 * * * *` for every 5 minutes — the runner rejects crons that fire more often than every 5 minutes, so never go faster). Include instructions in the task prompt to:
 - Track what was already reported (e.g. by checking timestamps)
 - Only report genuinely new items
 - If there's nothing new to report, output exactly `NO_OUTPUT` and nothing else
@@ -111,3 +111,4 @@ Set `enabled: true` on a previously stopped schedule.
 - Keep descriptions concise but identifiable (users will reference them to stop/delete).
 - Validate cron expressions before saving (5 fields).
 - Never write to `schedule-stats.json` and never run git commands for schedule files.
+- The runner independently rejects entries that violate its limits — a `channel` not matching `^[CGD][A-Z0-9]+$`, crons firing more often than every 5 minutes, empty tasks — and runs at most 25 enabled schedules. Warn the user instead of writing an entry that would be rejected, and don't accumulate schedules past the cap.
