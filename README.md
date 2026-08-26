@@ -11,6 +11,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 - Knows common repository aliases via a built-in skill (e.g. `@bot create an issue in mobile`)
 - Remembers context within Slack threads (session persistence)
 - Learns from every run and adapts over time (memory system)
+- Runs recurring scheduled tasks — ask it to "check X every morning" and it posts the results on a cron schedule
 
 ## Prerequisites
 
@@ -103,6 +104,16 @@ When `MEMORY_REPO` is set, memory files are backed by a GitHub repository:
 - **Conflicts** — resolved by the agent during `git pull --rebase` (it understands both git and the content)
 
 Without `MEMORY_REPO`, the bot works normally but memory doesn't survive container restarts. Sessions are always ephemeral.
+
+## Scheduled tasks
+
+Ask the bot to do something on a schedule ("@bot every weekday at 9am ARG post open PRs here") and it creates a cron schedule via the `schedule` skill. A background runner checks every 60 seconds and fires due schedules as agent runs, posting each result to the schedule's channel. Manage them conversationally: list, pause, resume, or delete ("@bot list my schedules", "@bot stop the daily PR check").
+
+- Schedules live at `{memoryDir}/schedules/schedules.json` (agent-managed via the skill); run stats live in a sibling `schedule-stats.json` (runner-managed) so the two writers never race.
+- Persistence rides on the memory repo: the runner commits and pushes schedule changes within a minute (stats batched every 5 minutes), and the startup clone/pull restores them after a redeploy. Without `MEMORY_REPO`, schedules work but don't survive restarts (a startup warning says so).
+- Cron expressions are 5-field UTC. Don't set `TZ` on the container — the runner and the skill both assume UTC.
+- Runs are ephemeral (no session, no memory load/save) and execute on a dedicated single-slot lane so schedules never starve interactive users. A schedule still running when its next fire comes due is skipped, not queued.
+- On DigitalOcean App Platform keep the worker at `instance_count: 1`; during a rolling deploy two instances briefly overlap, so a fire in that window can double-post (partially deduped via persisted stats).
 
 ## Grants Agents (optional)
 
@@ -236,11 +247,12 @@ src/
   slack-utils.ts    Slack text extraction (attachments + blocks)
   config.ts         Environment variable loading
   concurrency.ts    Agent scheduler with queue management and drain
+  schedule.ts       Cron schedule runner (60s tick, croner, git-backed persistence)
   memory.ts         Memory loading, save prompt, qmd index, git clone/pull
   cli.ts            CLI interface for local testing (REPL + one-shot)
   health.ts         Health check endpoint
 test/               Unit tests (node:test)
 prompts/
   system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, posthog, pr-review, push-memory, reflect, repos, security-review)
+skills/             Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, posthog, pr-review, push-memory, reflect, repos, schedule, security-review)
 ```
