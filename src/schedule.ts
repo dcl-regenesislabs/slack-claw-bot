@@ -44,6 +44,7 @@ const NO_OUTPUT_SENTINEL = "NO_OUTPUT";
 const TICK_INTERVAL_MS = 60_000;
 const STATS_PUSH_INTERVAL_MS = 5 * 60_000;
 const MAX_POST_LENGTH = 3000;
+const MAX_STATUS_REASON_LENGTH = 200;
 const MAX_ENABLED_SCHEDULES = 25;
 const MIN_CRON_INTERVAL_MS = 5 * 60_000;
 const CHANNEL_ID_PATTERN = /^[CGD][A-Z0-9]+$/;
@@ -251,12 +252,25 @@ export function startScheduleRunner(opts: ScheduleRunnerOptions): ScheduleRunner
     const submission = lane.submit(`schedule-${schedule.id}`, async () => {
       try {
         const text = await opts.runTask(schedule);
-        if (text && !text.trim().startsWith(NO_OUTPUT_SENTINEL)) {
+        const trimmed = (text ?? "").trim();
+        let status: string;
+
+        if (trimmed && !trimmed.startsWith(NO_OUTPUT_SENTINEL)) {
           await opts.postMessage(schedule.channel, formatSchedulePost(text, schedule));
+          console.log(`[schedule] Posted output for "${schedule.description}" (${schedule.id}) to ${schedule.channel}`);
+          status = "ok";
+        } else {
+          // The reason is agent-authored and shaped by whatever the task polled, and it
+          // reaches the memory repo and Slack via the skill's `list` — redact before truncating.
+          const firstLine = trimmed.slice(NO_OUTPUT_SENTINEL.length).split("\n")[0];
+          const reason = redactSecrets(firstLine.replace(/^[:\s—–-]+/, "")).slice(0, MAX_STATUS_REASON_LENGTH);
+          console.log(`[schedule] No output from "${schedule.description}" (${schedule.id})${reason ? `: ${reason}` : ""}`);
+          status = reason ? `no output: ${reason}` : "no output";
         }
+
         // Stats key off the FIRE time, not completion: dedupe compares lastRunAt against
         // the due window, and a long run ending near the next due time must not eat it.
-        recordRunStats(statsPath, schedule.id, "ok", firedAt);
+        recordRunStats(statsPath, schedule.id, status, firedAt);
       } catch (err) {
         // Redacted like every other sink: this string is pushed to the memory repo and
         // rendered back into Slack by the skill's `list`.

@@ -290,7 +290,7 @@ describe("schedule", () => {
   });
 
   describe("run outcomes", () => {
-    it("suppresses the post on NO_OUTPUT but records an ok run", async () => {
+    it("suppresses the post on NO_OUTPUT and records a no-output run", async () => {
       writeSchedules([makeSchedule()]);
       const h = makeRunner("2026-03-10T12:00:30Z");
       h.setRunTask(async () => "NO_OUTPUT");
@@ -299,7 +299,32 @@ describe("schedule", () => {
       assert.equal(h.posts.length, 0);
       const stats = readStats(statsFilePath(memoryDir));
       assert.equal(stats["a1b2c3"].runCount, 1);
-      assert.equal(stats["a1b2c3"].lastRunStatus, "ok");
+      assert.equal(stats["a1b2c3"].lastRunStatus, "no output");
+    });
+
+    it("records the first-line NO_OUTPUT reason, redacted and truncated", async () => {
+      writeSchedules([makeSchedule()]);
+      const h = makeRunner("2026-03-10T12:00:30Z");
+      const reason = `sprint has not ended (token=xoxb-A1B2C3D4E5F6G7H8) ${"detail ".repeat(50)}`;
+      h.setRunTask(async () => `NO_OUTPUT: ${reason}\nsecond line ignored`);
+      await h.runner.tickOnce();
+      await h.runner.drain(1_000);
+      assert.equal(h.posts.length, 0);
+      const status = readStats(statsFilePath(memoryDir))["a1b2c3"].lastRunStatus!;
+      assert.ok(status.startsWith("no output: sprint has not ended"));
+      assert.ok(!status.includes("xoxb"));
+      assert.ok(!status.includes("second line"));
+      assert.equal(status.length, "no output: ".length + 200);
+    });
+
+    it("treats an empty response as no output", async () => {
+      writeSchedules([makeSchedule()]);
+      const h = makeRunner("2026-03-10T12:00:30Z");
+      h.setRunTask(async () => "   ");
+      await h.runner.tickOnce();
+      await h.runner.drain(1_000);
+      assert.equal(h.posts.length, 0);
+      assert.equal(readStats(statsFilePath(memoryDir))["a1b2c3"].lastRunStatus, "no output");
     });
 
     it("records an error status and posts nothing when the run fails", async () => {

@@ -59,6 +59,8 @@ Always check if the file exists first. If it doesn't, create it with `{"schedule
 }
 ```
 
+`lastRunStatus` values: `ok` = ran and posted to the channel; `no output` (optionally `no output: <reason>`) = ran but the agent returned `NO_OUTPUT`, so nothing was posted — this is normal for conditional tasks; `error: <message>` = the run or the post failed. When a user asks whether a schedule ran or why nothing was posted, report the status verbatim — don't summarise `no output` or `error` as a successful run.
+
 ## Operations
 
 ### Create a schedule
@@ -79,7 +81,7 @@ Always check if the file exists first. If it doesn't, create it with `{"schedule
 **Event-driven requests** — when users say "every time X happens", convert to a polling cron (e.g. `*/5 * * * *` for every 5 minutes — the runner rejects crons that fire more often than every 5 minutes, so never go faster). Include instructions in the task prompt to:
 - Track what was already reported (e.g. by checking timestamps)
 - Only report genuinely new items
-- If there's nothing new to report, output exactly `NO_OUTPUT` and nothing else
+- If there's nothing new to report, output `NO_OUTPUT: <one short line saying why>` (e.g. `NO_OUTPUT: sprint 8 has not ended yet`) and nothing else — the runner suppresses the Slack post and records the reason in the run stats, so "why didn't it post?" is answerable later
 
 **Multiple schedules** — requests like "twice a day at 9am and 5pm" should create **two separate** schedule entries.
 
