@@ -5,8 +5,13 @@
 const ENDPOINTS = { stats: "/api/stats", runs: "/api/runs?all=1", run: "/api/runs/", logs: "/api/logs", queue: "/api/queue" };
 const MAX_LINES = 60;
 const MAX_TEXT = 200;
-// server text reaches the model and Slack: control characters and prompt delimiters are neutralized
-const clean = (value) => String(value ?? "").replace(/[\x00-\x1f\x7f-\x9f]/g, " ").replace(/[`<>]/g, "'").slice(0, MAX_TEXT);
+// server text can carry attacker strings (a hostile Host header, a file name): control, bidi and zero-width
+// characters and prompt delimiters are neutralized, and every field is bounded, before the model sees it
+const clean = (value) =>
+  String(value ?? "")
+    .replace(/[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, " ")
+    .replace(/[`<>]/g, "'")
+    .slice(0, MAX_TEXT);
 
 const [what, ...args] = process.argv.slice(2);
 if (!ENDPOINTS[what]) {
