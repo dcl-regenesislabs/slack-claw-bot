@@ -64,6 +64,8 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `GRANTS_CHANNEL_ID` | No | Enables the Grants Agents feature — Slack channel ID for grant proposal submissions |
 | `GRANTS_AGENTS_REPO` | No | Public repo with agent personas & context (e.g. `dcl-regenesislabs/grants-evaluation-agents`) |
 | `GRANTS_MAX_CONCURRENT_AGENTS` | No | Concurrency cap for grant agents (default: 4, isolated from main pool) |
+| `WEARABLE_VALIDATOR_TOKEN` | No | The validator run server's `OPERATOR_TOKEN` (enables the `wearable-validator` skill: submissions, stats, logs) |
+| `WEARABLE_VALIDATOR_API` | No | The validator run server (default `https://api.wearable-validator.dclregenesislabs.xyz`) |
 | `DISCOURSE_URL` | No | Discourse forum URL — enables forum publishing when combined with API key + category + all 6 usernames |
 | `DISCOURSE_API_KEY` | No | Discourse admin API key with "All Users" scope (impersonates each configured user via `Api-Username`) |
 | `DISCOURSE_CATEGORY_ID` | No | Category ID where new proposal topics are created |
@@ -257,5 +259,5 @@ src/
 test/               Unit tests (node:test)
 prompts/
   system.md         System prompt for the Claude agent
-skills/             Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, posthog, pr-review, push-memory, reflect, repos, schedule, security-review)
+skills/             Agent skill definitions (create-issue, create-skill, github, memory-search, mobile-project, posthog, pr-review, push-memory, reflect, repos, schedule, security-review, wearable-validator)
 ```
