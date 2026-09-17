@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Asks the wearable validator's run server one question as the bot's Cloudflare Access service token.
+// Asks the wearable validator's run server one question with the bot's shared operator token.
 // Usage: node skills/wearable-validator/query.mjs <stats|runs|run <id>|logs [since=ISO] [limit=n]|queue>
 // Prints a compact text report; never the raw response, never the credentials.
 const ENDPOINTS = { stats: "/api/stats", runs: "/api/runs?all=1", run: "/api/runs/", logs: "/api/logs", queue: "/api/queue" };
@@ -13,11 +13,10 @@ if (!ENDPOINTS[what]) {
   console.error("usage: query.mjs <stats|runs|run <id>|logs [since=ISO] [limit=n]|queue>");
   process.exit(2);
 }
-const base = process.env.WEARABLE_VALIDATOR_URL || "https://wearable-validator.dclregenesislabs.xyz";
-const id = process.env.WEARABLE_VALIDATOR_ACCESS_CLIENT_ID;
-const secret = process.env.WEARABLE_VALIDATOR_ACCESS_CLIENT_SECRET;
-if (!id || !secret) {
-  console.log("wearable-validator: not configured (WEARABLE_VALIDATOR_ACCESS_CLIENT_ID / WEARABLE_VALIDATOR_ACCESS_CLIENT_SECRET missing)");
+const base = process.env.WEARABLE_VALIDATOR_API || "https://api.wearable-validator.dclregenesislabs.xyz";
+const token = process.env.WEARABLE_VALIDATOR_TOKEN;
+if (!token) {
+  console.log("wearable-validator: not configured (WEARABLE_VALIDATOR_TOKEN missing)");
   process.exit(1);
 }
 let path = ENDPOINTS[what];
@@ -40,11 +39,11 @@ if (what === "logs") {
 }
 
 const response = await fetch(base + path, {
-  headers: { "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret, accept: "application/json" },
+  headers: { authorization: `Bearer ${token}`, accept: "application/json" },
   signal: AbortSignal.timeout(30_000)
 });
 if (!response.ok) {
-  console.log(`wearable-validator: ${response.status} from ${what}` + (response.status === 403 ? " (the service token is not an operator: check the Access policy)" : ""));
+  console.log(`wearable-validator: ${response.status} from ${what}` + (response.status === 401 ? " (the token was refused: OPERATOR_TOKEN on the server and WEARABLE_VALIDATOR_TOKEN here must match)" : ""));
   process.exit(1);
 }
 const body = await response.json();
