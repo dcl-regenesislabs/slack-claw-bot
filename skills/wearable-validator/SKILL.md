@@ -23,7 +23,7 @@ Not configured → reply *"The validator isn't connected to this bot yet. An adm
 
 | Question | Command |
 | --- | --- |
-| How many submissions, pass rate, per day, per curator, how busy | `node skills/wearable-validator/query.mjs stats` |
+| How many submissions, pass rate, per day, per curator, how busy, which version or commit is deployed and since when | `node skills/wearable-validator/query.mjs stats` |
 | List submissions (newest first, with owner and state) | `node skills/wearable-validator/query.mjs runs` |
 | What happened in one run (id from the list, 8+ hex chars) | `node skills/wearable-validator/query.mjs run <id>` |
 | Is it working, what is rendering or waiting | `node skills/wearable-validator/query.mjs queue` |

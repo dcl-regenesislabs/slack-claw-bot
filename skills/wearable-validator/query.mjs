@@ -58,7 +58,9 @@ if (what === "stats") {
   const r = body.runs;
   console.log(`runs: ${r.total} total · ${r.passed} passed · ${r.failed} needs attention · ${r.noVerdict} no verdict · ${r.running} rendering · ${r.waiting} waiting`);
   console.log(`average render: ${body.averageRunMs ? Math.round(body.averageRunMs / 1000) + " s" : "no render yet"} · slots: ${body.maxConcurrentRuns} · rules v${body.rulesVersion}`);
-  console.log(`since: ${when(body.firstRunAt)} (server up since ${when(body.serverStartedAt)}; counts cover the run folders on disk)`);
+  const build = body.build ?? {};
+  console.log(`running: v${clean(build.version)} commit ${clean(String(build.commit ?? "?")).slice(0, 12)} · built ${build.builtAt ? when(Date.parse(build.builtAt)) : "from a checkout"} · up since ${when(build.startedAt ?? body.serverStartedAt)}`);
+  console.log(`since: ${when(body.firstRunAt)} (counts cover the run folders on disk since the last deploy)`);
   if (body.byDay.length) console.log("by day: " + body.byDay.slice(-14).map((d) => `${d.date} ${d.runs}`).join(" · "));
   if (body.byOwner.length) console.log("by curator: " + body.byOwner.slice(0, 20).map((o) => `${clean(o.owner)} ${o.runs}`).join(" · "));
 } else if (what === "runs") {
