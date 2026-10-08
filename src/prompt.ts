@@ -16,6 +16,19 @@ function shellSafe(value: string): string {
   return sanitizeMetadataValue(value).replace(/['"]/g, "");
 }
 
+/** Mention-message files first, then files seen elsewhere in the thread. The mention message
+ * is itself a thread reply, so the same URL arrives through both paths. */
+export function mergeAttachments(...lists: Array<FileAttachment[] | undefined>): FileAttachment[] | undefined {
+  const seen = new Set<string>();
+  const merged: FileAttachment[] = [];
+  for (const file of lists.flatMap((list) => list ?? [])) {
+    if (seen.has(file.url)) continue;
+    seen.add(file.url);
+    merged.push(file);
+  }
+  return merged.length ? merged : undefined;
+}
+
 /** Trusted header metadata. A single named-field object on purpose: several of these are
  * same-typed strings whose mis-ordering would silently render an attacker-influenced
  * value under the wrong trusted label. */

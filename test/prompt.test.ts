@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildPrompt } from "../src/prompt.js";
+import { buildPrompt, mergeAttachments } from "../src/prompt.js";
 
 describe("buildPrompt", () => {
   it("wraps content in slack-thread tags", () => {
@@ -168,5 +168,23 @@ describe("buildPrompt", () => {
     const wrapperOpen = result.indexOf("<slack-thread>");
     assert.ok(trusted !== -1 && trusted < wrapperOpen);
     assert.ok(result.indexOf("/tmp/evil.json") > wrapperOpen);
+  });
+});
+
+describe("mergeAttachments", () => {
+  const mention = { name: "shot.png", mimetype: "image/png", url: "https://files.slack.com/shot.png" };
+  const earlier = { name: "log.txt", mimetype: "text/plain", url: "https://files.slack.com/log.txt" };
+
+  it("keeps mention files first and appends thread files", () => {
+    assert.deepEqual(mergeAttachments([mention], [earlier]), [mention, earlier]);
+  });
+
+  it("drops a thread file already present as a mention file", () => {
+    // The mention message is itself one of the thread replies.
+    assert.deepEqual(mergeAttachments([mention], [earlier, { ...mention }]), [mention, earlier]);
+  });
+
+  it("returns undefined when every list is empty or undefined", () => {
+    assert.equal(mergeAttachments(undefined, []), undefined);
   });
 });

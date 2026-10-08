@@ -28,7 +28,7 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import { writeFile, mkdir, readFile, access } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 import { constants } from "node:fs";
-import { buildPrompt, type FileAttachment } from "./prompt.js";
+import { buildPrompt, mergeAttachments, type FileAttachment } from "./prompt.js";
 import {
   loadMemoryContext,
   buildMemorySavePrompt,
@@ -174,10 +174,13 @@ interface AgentConfig {
   timeoutMs?: number;
 }
 
-/** Thread fetchers may return plain text, or text plus vision inputs discovered in the thread. */
+/** Thread fetchers may return plain text, or text plus vision inputs and downloadable files
+ * discovered in the thread. Files are surfaced on every fetch so a screenshot posted earlier is
+ * already in the session when a follow-up asks to attach it to an issue. */
 export interface ThreadFetch {
   content: string;
   images?: ImageContent[];
+  files?: FileAttachment[];
 }
 
 export interface RunOptions {
@@ -456,8 +459,14 @@ function slackUserId(userId: string): string | undefined {
   return /^[UW][A-Z0-9]+$/.test(userId) ? userId : undefined;
 }
 
-function renderPrompt(options: RunOptions, content: string, isFollowUp?: boolean): string {
-  return buildPrompt(content, options.dryRun, options.triggeredBy, isFollowUp, options.files, {
+function renderPrompt(
+  options: RunOptions,
+  content: string,
+  isFollowUp?: boolean,
+  threadFiles?: FileAttachment[],
+): string {
+  const files = mergeAttachments(options.files, threadFiles);
+  return buildPrompt(content, options.dryRun, options.triggeredBy, isFollowUp, files, {
     channelName: options.channelName,
     triggeredById: slackUserId(options.userId),
     channelId: options.channelId,
@@ -466,16 +475,18 @@ function renderPrompt(options: RunOptions, content: string, isFollowUp?: boolean
 }
 
 async function buildNewPrompt(options: RunOptions): Promise<PromptBuild> {
-  const { content, images } = asThreadFetch(await options.fetchThread());
-  return { prompt: renderPrompt(options, content), images };
+  const { content, images, files } = asThreadFetch(await options.fetchThread());
+  return { prompt: renderPrompt(options, content, false, files), images };
 }
 
 async function buildResumePrompt(options: RunOptions, sessionManager: SessionManager): Promise<PromptBuild> {
   const lastSeenTs = findLastSeenTs(sessionManager);
   let images: ImageContent[] | undefined;
+  let files: FileAttachment[] | undefined;
   if (lastSeenTs) {
     const gap = asThreadFetch(await options.fetchThreadSince(lastSeenTs));
     images = gap.images;
+    files = gap.files;
     if (gap.content) {
       sessionManager.appendCustomMessageEntry(
         "slack_gap",
@@ -484,7 +495,7 @@ async function buildResumePrompt(options: RunOptions, sessionManager: SessionMan
       );
     }
   }
-  return { prompt: renderPrompt(options, options.newMessage, true), images };
+  return { prompt: renderPrompt(options, options.newMessage, true, files), images };
 }
 
 function findLastSeenTs(sessionManager: SessionManager): string | null {
