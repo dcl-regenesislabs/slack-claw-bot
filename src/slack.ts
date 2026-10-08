@@ -21,7 +21,18 @@ function isSlackError(err: unknown): err is { data?: { error?: string } } {
   return typeof err === "object" && err !== null && "data" in err;
 }
 
-interface SlackFile { name?: string; mimetype?: string; url_private_download?: string; url_private?: string }
+export interface SlackFile {
+  name?: string;
+  mimetype?: string;
+  url_private_download?: string;
+  url_private?: string;
+  size?: number;
+  // Slack's typings say string; the wire value is sometimes a number.
+  original_w?: number | string;
+  original_h?: number | string;
+  /** Slack-rendered thumbnail, longest edge 1024px. */
+  thumb_1024?: string;
+}
 interface SlackMessage {
   text?: string;
   ts?: string;
@@ -504,8 +515,27 @@ export { markdownToMrkdwn } from "./slack-utils.js";
 // --- Thread Fetching ---
 
 const IMAGE_MIMETYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
-// Vision inputs are large; cap per run so a screenshot-heavy thread can't blow up the prompt.
-const MAX_IMAGES_PER_RUN = 10;
+// Anthropic vision limits: the API rejects the whole request for a single oversized image.
+const MAX_IMAGE_DIMENSION = 8000;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/** The original when it fits the vision limits, otherwise Slack's 1024px thumbnail. */
+export function pickImageUrl(f: SlackFile): string | undefined {
+  const tooLarge =
+    Number(f.original_w ?? 0) > MAX_IMAGE_DIMENSION ||
+    Number(f.original_h ?? 0) > MAX_IMAGE_DIMENSION ||
+    (f.size ?? 0) > MAX_IMAGE_BYTES;
+  return tooLarge ? f.thumb_1024 : f.url_private_download ?? f.url_private;
+}
+
+/** Slack thumbnails don't necessarily keep the original format, so sniff the bytes. */
+export function sniffImageMime(buf: Buffer): string | undefined {
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (/^GIF8[79]a$/.test(buf.subarray(0, 6).toString("latin1"))) return "image/gif";
+  if (buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  return undefined;
+}
 
 async function fetchThread(client: WebClient, channel: string, threadTs: string): Promise<ThreadFetch> {
   const reply = await client.conversations.replies({ channel, ts: threadTs, limit: 200 });
@@ -537,17 +567,19 @@ async function formatMessages(client: WebClient, messages: SlackMessage[]): Prom
   );
 
   const images: ImageContent[] = [];
+  const files: FileAttachment[] = [];
   const lines = await Promise.all(
     messages.map(async (m) => {
+      files.push(...(extractAttachments(m.files) ?? []));
       const name = userNames.get(m.user || "") || m.bot_profile?.name || m.username || "unknown";
       const ts = m.ts ? new Date(parseFloat(m.ts) * 1000).toISOString() : "";
       let line = `[${name}] (${ts}): ${extractEventText(m)}`;
       for (const f of m.files ?? []) {
         if (!f.name) continue;
-        if (f.mimetype && IMAGE_MIMETYPES.has(f.mimetype) && images.length < MAX_IMAGES_PER_RUN) {
-          const data = await downloadImage(f.url_private_download ?? f.url_private);
-          if (data) {
-            images.push({ type: "image", data, mimeType: f.mimetype });
+        if (f.mimetype && IMAGE_MIMETYPES.has(f.mimetype)) {
+          const image = await downloadImage(pickImageUrl(f));
+          if (image) {
+            images.push({ type: "image", data: image.data, mimeType: image.mimeType ?? f.mimetype });
             line += ` [attached image: ${f.name}]`;
             continue;
           }
@@ -558,15 +590,17 @@ async function formatMessages(client: WebClient, messages: SlackMessage[]): Prom
     }),
   );
 
-  return { content: lines.join("\n"), images };
+  return { content: lines.join("\n"), images, files: files.length ? files : undefined };
 }
 
-async function downloadImage(url?: string): Promise<string | null> {
+async function downloadImage(url?: string): Promise<{ data: string; mimeType?: string } | null> {
   if (!url || !botToken) return null;
   try {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${botToken}` } });
     if (!res.ok) return null;
-    return Buffer.from(await res.arrayBuffer()).toString("base64");
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_IMAGE_BYTES) return null;
+    return { data: buf.toString("base64"), mimeType: sniffImageMime(buf) };
   } catch {
     return null;
   }

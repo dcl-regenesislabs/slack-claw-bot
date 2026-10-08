@@ -4,7 +4,7 @@ AI-powered Slack bot that uses Claude to help teams manage GitHub issues through
 
 ## What it does
 
-- Creates GitHub issues from Slack thread discussions
+- Creates GitHub issues from Slack thread discussions, attaching screenshots and videos posted in the thread
 - Searches for related issues and PRs
 - Triages and labels issues
 - Summarizes threads and answers questions about repositories
@@ -51,7 +51,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 |---|---|---|
 | `SLACK_BOT_TOKEN` | Yes | Bot token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | Yes | App-level token for Socket Mode (`xapp-...`) |
-| `GITHUB_TOKEN` | Yes | GitHub PAT for `gh` CLI |
+| `GITHUB_TOKEN` | Yes | GitHub PAT for `gh` CLI. Needs write access on a repo for `gh issue create --attach` to upload screenshots; with less, issues are created without attachments |
 | `ANTHROPIC_OAUTH_SETUP_TOKEN` | No* | Anthropic OAuth setup token from `claude setup-token` (see Auth section) |
 | `MODEL` | No | Model override (default: `claude-sonnet-5`). PR reviews always use `claude-opus-4-6` regardless of this setting. |
 | `MAX_CONCURRENT_AGENTS` | No | Max parallel agent runs (default: 3) |
