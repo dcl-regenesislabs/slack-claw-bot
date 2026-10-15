@@ -108,7 +108,7 @@ describe("createGuardedTools", () => {
     }
   });
 
-  it("refuses credential files through read, edit, and bash, following symlinks", async () => {
+  it("refuses credential files through read, edit, write, and bash, following symlinks", async () => {
     const base = mkdtempSync(join(tmpdir(), "secret-test-"));
     try {
       writeFileSync(join(base, ".auth.json"), "{}", "utf-8");
@@ -121,8 +121,14 @@ describe("createGuardedTools", () => {
         tools.edit.execute("3", { path: join(base, ".auth.json"), edits: [{ oldText: "{}", newText: "" }] }, undefined, undefined, ctx),
         /Blocked/,
       );
+      await assert.rejects(
+        tools.write.execute("4", { path: join(base, ".auth.json"), content: "{}" }, undefined, undefined, ctx),
+        /Blocked/,
+      );
       await assert.rejects(bash(`cat ${join(base, ".auth.json")}`), /Blocked/);
       await assert.rejects(bash("cat .env"), /Blocked/);
+      await assert.rejects(bash("cat .env-local"), /Blocked/);
+      await assert.rejects(read(join(base, ".envrc")), /Blocked/);
       await assert.rejects(bash(`base64 "${join(base, ".env.production")}"`), /Blocked/);
     } finally {
       rmSync(base, { recursive: true, force: true });

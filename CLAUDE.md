@@ -52,8 +52,10 @@ src/
 
 ## Memory directory
 
+All mutable state sits under `DATA_DIR` when set (`/data` in the image, a volume on the droplet) and under the OS temp dir otherwise: `claw-memory/`, `claw-sessions/`, `claw-attachments/`, the public-repo clones, and `.auth.json` (project root when `DATA_DIR` is unset, for the CLI). `src/paths.ts` is the one place that decides.
+
 ```
-/tmp/claw-memory/              (cloned from MEMORY_REPO, or temp dir)
+{DATA_DIR|/tmp}/claw-memory/   (cloned from MEMORY_REPO, or local dir)
   shared/                      qmd indexes ONLY this subtree
     MEMORY.md                  Shared permanent knowledge (≤4KB)
     posthog-schema-{id}.md     PostHog event/property NAMES cache, one per project (≤7 days old)
@@ -64,7 +66,7 @@ src/
     schedule-stats.json        Run stats (runner-only; skill reads for `list`)
 ```
 
-Sessions are ephemeral, stored in `/tmp/claw-sessions/`.
+Sessions live in `{DATA_DIR|/tmp}/claw-sessions/` — they survive restarts on the droplet but losing them is acceptable.
 
 ## Auth — OAuth only, never API keys
 

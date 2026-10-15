@@ -38,10 +38,10 @@ gh issue create --repo {repo} --title "..." --body-file /tmp/issue-body.md --lab
 
 ### Attach images or videos
 
-`gh issue create`, `gh issue comment`, `gh issue edit`, `gh pr create`, and `gh pr comment` accept a repeatable `--attach '<file>#<alt text>'` flag that uploads the file and appends it to the body (or rewrites a `![alt](<same absolute path>)` reference already in the body). Only attach files downloaded from the prompt's `## Attached Files` section into a temp dir under a generated name — never arbitrary paths on disk. Needs write access to the repo. Full rules are in the `create-issue` skill.
+`gh issue create`, `gh issue comment`, `gh issue edit`, `gh pr create`, and `gh pr comment` accept a repeatable `--attach '<file>#<alt text>'` flag that uploads the file and appends it to the body (or rewrites a `![alt](<same absolute path>)` reference already in the body). Only attach the `Path` values listed in the prompt's `## Attached Files` section, verbatim — never download anything yourself and never arbitrary paths on disk. Needs write access to the repo. Full rules are in the `create-issue` skill.
 
 ```bash
-gh issue comment {number} --repo {repo} --body-file /tmp/comment.md --attach "$DIR/1.png#Screenshot after the fix"
+gh issue comment {number} --repo {repo} --body-file /tmp/comment.md --attach "/tmp/claw-attachments/F0ABC123.png#Screenshot after the fix"
 ```
 
 ### Edit Issue (labels, assignees)

@@ -1,6 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync, realpathSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
 import {
@@ -31,6 +30,7 @@ import { resolve, relative } from "node:path";
 import { constants } from "node:fs";
 import { buildPrompt, mergeAttachments, type FileAttachment } from "./prompt.js";
 import { sniffImageMime } from "./slack-utils.js";
+import { dataDir, stateDir } from "./paths.js";
 import {
   loadMemoryContext,
   buildMemorySavePrompt,
@@ -81,13 +81,10 @@ export function isProtectedPath(absolutePath: string, extraProtectedDirs: string
   return false;
 }
 
-// Credential files are unreadable by every tool, wherever they sit: the shell runs as the
-// same user as the server, so a path check is the only thing between a prompt injection
-// and the OAuth token or the deploy's env file.
-const SECRET_FILENAME = /^(\.auth\.json|\.env(\..*)?)$/;
-// Word-ish boundary before the name (start, whitespace, quote, `=`, `/`) keeps `process.env`
-// and `foo.env` from matching while `cat .env`, `$HOME/.env` and `x=.auth.json` do.
-const SECRET_FILE_IN_COMMAND = /(^|[\s'"=/])(\.\/)?(\.auth\.json|\.env)\b/;
+// Same uid as the server, so a path check is all that stands between an injection and the tokens.
+const SECRET_FILENAME = /^(\.auth\.json|\.env.*)$/;
+// Leading boundary (start, space, quote, `=`, `/`) so `process.env` and `foo.env` don't match.
+const SECRET_FILE_IN_COMMAND = /(^|[\s'"=/])(\.\/)?(\.auth\.json|\.env)/;
 
 function isSecretFile(absolutePath: string): boolean {
   return SECRET_FILENAME.test(basename(toRealPath(resolve(absolutePath))));
@@ -107,7 +104,7 @@ const SHELL_ENV_BASE = [
 const SHELL_ENV_SKILL_SECRETS = [
   "GH_TOKEN", "GITHUB_TOKEN", // github, create-issue, push-memory (via gh's git credential helper)
   "POSTHOG_API_KEY", "POSTHOG_HOST", "POSTHOG_PROJECTS", // posthog
-  "WEARABLE_VALIDATOR_TOKEN", // wearable-validator
+  "WEARABLE_VALIDATOR_TOKEN", "WEARABLE_VALIDATOR_API", // wearable-validator
 ];
 
 function agentShellEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -115,8 +112,7 @@ function agentShellEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   for (const name of [...SHELL_ENV_BASE, ...SHELL_ENV_SKILL_SECRETS]) {
     if (base[name] !== undefined) env[name] = base[name];
   }
-  // pi's per-session markers (set just before the hook runs) and qmd's own tuning knobs, so
-  // the agent's `qmd search` resolves the same index the server built.
+  // pi's per-session markers, and qmd's knobs so `qmd search` finds the index the server built.
   for (const name of Object.keys(base)) {
     if (name.startsWith("PI_") || name.startsWith("QMD_")) env[name] = base[name];
   }
@@ -148,6 +144,9 @@ export function createGuardedTools(cwd: string, extraProtectedDirs: string[] = [
       return readFile(absolutePath);
     },
     async access(absolutePath: string) {
+      if (isSecretFile(absolutePath)) {
+        throw new Error(`Blocked: cannot read credential file "${absolutePath}".`);
+      }
       await access(absolutePath, constants.R_OK);
     },
     detectImageMimeType: sniffImageFile,
@@ -157,7 +156,7 @@ export function createGuardedTools(cwd: string, extraProtectedDirs: string[] = [
   // Write tool — blocks protected paths
   const guardedWriteOps: WriteOperations = {
     async writeFile(absolutePath: string, content: string) {
-      if (isProtectedPath(absolutePath, extraProtectedDirs)) {
+      if (isProtectedPath(absolutePath, extraProtectedDirs) || isSecretFile(absolutePath)) {
         throw new Error(`Blocked: cannot write to protected file "${absolutePath}". Project source files and guarded directories are read-only.`);
       }
       await mkdir(dirname(absolutePath), { recursive: true });
@@ -181,7 +180,7 @@ export function createGuardedTools(cwd: string, extraProtectedDirs: string[] = [
       return readFile(absolutePath);
     },
     async writeFile(absolutePath: string, content: string) {
-      if (isProtectedPath(absolutePath, extraProtectedDirs)) {
+      if (isProtectedPath(absolutePath, extraProtectedDirs) || isSecretFile(absolutePath)) {
         throw new Error(`Blocked: cannot edit protected file "${absolutePath}". Project source files and guarded directories are read-only.`);
       }
       await writeFile(absolutePath, content, "utf-8");
@@ -313,7 +312,9 @@ const DEFAULT_AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 
 let modelRuntime: ModelRuntime | null = null;
 let defaultModelId: string;
-const authPath = join(projectDir, ".auth.json");
+// Under DATA_DIR when deployed (outside the agent's cwd, on the persistent volume); the
+// project root otherwise, where the CLI expects it.
+let authPath = "";
 let sessionDir: string | null = null;
 let memoryDir: string | null = null;
 let agentTimeoutMs = DEFAULT_AGENT_TIMEOUT_MS;
@@ -338,9 +339,9 @@ export async function initAgent(config: AgentConfig): Promise<void> {
     ensureQmd(memoryDir);
   }
   if (config.timeoutMs) agentTimeoutMs = config.timeoutMs;
-  sessionDir = join(tmpdir(), "claw-sessions");
-  mkdirSync(sessionDir, { recursive: true });
+  sessionDir = stateDir("claw-sessions");
 
+  authPath = join(dataDir() ?? projectDir, ".auth.json");
   loadAuth(config.anthropicOAuthSetupToken);
   modelRuntime = await ModelRuntime.create({ authPath });
 

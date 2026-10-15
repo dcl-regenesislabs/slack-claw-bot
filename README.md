@@ -58,6 +58,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `AGENT_TIMEOUT_MS` | No | Watchdog timeout per agent run in ms (default: 900000 = 15 min). Runs exceeding it are aborted and the error is posted to the thread |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `SLACK_SOCKET_MAX_SILENCE_MS` | No | Max ms the Socket Mode connection may stay down before the bot self-restarts via SIGTERM (default: 150000). Needs a supervisor that restarts the process |
+| `DATA_DIR` | No | Persistent state directory for `.auth.json`, the memory clone, sessions and attachments (the image sets `/data`). Unset: OS temp dir, `.auth.json` in the project root |
 | `ALLOWED_TEAM_IDS` | No | Comma-separated Slack team IDs whose full members may use the bot, in addition to the bot's own workspace (e.g. the Decentraland team via Slack Connect). Guests are always denied |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 | `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |
@@ -81,7 +82,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
-**What the agent can see.** The agent's shell does not inherit the server's environment: only `GITHUB_TOKEN`/`GH_TOKEN`, `POSTHOG_*` and `WEARABLE_VALIDATOR_TOKEN` (the credentials skills use) are forwarded, plus `PATH`/`HOME`/locale basics. Slack tokens, the Anthropic OAuth token and the Discourse key stay in the server process, and `.auth.json` / `.env*` are refused by every tool. Thread attachments are downloaded by the server and handed to the agent as local files, so no skill needs the Slack token.
+**What the agent can see.** The agent's shell does not inherit the server's environment: only `GITHUB_TOKEN`/`GH_TOKEN`, `POSTHOG_*` and `WEARABLE_VALIDATOR_TOKEN` (the credentials skills use) are forwarded, plus `PATH`/`HOME`/locale basics. Slack tokens, the Anthropic OAuth token and the Discourse key stay in the server process. The file tools refuse `.auth.json` / `.env*` by path and bash rejects commands naming them — a best-effort check, since the shell runs as the same user; on a deployed host `.auth.json` also lives outside the working tree (`DATA_DIR`). Thread attachments are downloaded by the server and handed to the agent as local files, so no skill needs the Slack token.
 
 ### Authentication (OAuth)
 
@@ -234,10 +235,14 @@ There is no MCP client in `src/` — sessions are built with `noExtensions: true
 
 ```bash
 docker build -t slack-issue-bot .
-docker run --env-file .env slack-issue-bot
+docker run --env-file .env -v slack-bot-data:/data slack-issue-bot
 ```
 
-Set `HEALTH_PORT=5000` (and expose the port) to enable the health check endpoint.
+The image runs as the unprivileged `node` user with `DATA_DIR=/data`: `.auth.json`, the memory clone, sessions and attachments live there, so mount a volume to keep them across restarts. `/app` is root-owned — a run's write tools can't change the code the next run executes. Set `HEALTH_PORT=5000` (and publish the port) for the health endpoint.
+
+## Deployment
+
+Production is one DigitalOcean droplet running the image under Docker Compose; a GitHub release builds the image and redeploys over SSH. Setup, the secrets file, the CI deploy key and day-2 operations are in [`deploy/README.md`](deploy/README.md).
 
 ## Project structure
 
