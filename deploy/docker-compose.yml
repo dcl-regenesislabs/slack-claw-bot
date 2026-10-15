@@ -1,0 +1,40 @@
+services:
+  bot:
+    image: ghcr.io/dcl-regenesislabs/slack-claw-bot:${IMAGE_TAG:-latest}
+    container_name: slack-claw-bot
+    restart: unless-stopped
+    # Secrets live in /etc/slack-bot/env (root:root 0600) and never in this file or the image.
+    env_file:
+      - /etc/slack-bot/env
+    environment:
+      DATA_DIR: /data
+      HEALTH_PORT: "5000"
+    # Both on the block-storage volume: /data is state, /tmp is where skills clone repos.
+    volumes:
+      - /var/lib/slack-bot/data:/data
+      - /var/lib/slack-bot/tmp:/tmp
+    # Socket Mode is outbound-only; the health endpoint is loopback for the host only.
+    ports:
+      - "127.0.0.1:5000:5000"
+    read_only: true
+    tmpfs:
+      - /home/node:size=1g,uid=1000,gid=1000
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 7g
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5000/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
