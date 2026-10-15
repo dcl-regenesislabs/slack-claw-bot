@@ -10,7 +10,7 @@ import { runAgent, detectReviewModel, getMemoryDir } from "./agent.js";
 import type { ThreadFetch } from "./agent.js";
 import { schedulesFilePath } from "./schedule.js";
 import type { FileAttachment } from "./prompt.js";
-import { extractEventText, markdownToMrkdwn } from "./slack-utils.js";
+import { extractEventText, markdownToMrkdwn, sniffImageMime } from "./slack-utils.js";
 import type { SlackBlock } from "./slack-utils.js";
 import { AgentScheduler } from "./concurrency.js";
 import { redactSecrets } from "./sanitize.js";
@@ -586,7 +586,7 @@ async function downloadSlackFile(url: string | undefined, maxBytes: number): Pro
 
 // --- Formatting ---
 
-export { markdownToMrkdwn } from "./slack-utils.js";
+export { markdownToMrkdwn, sniffImageMime } from "./slack-utils.js";
 
 // --- Thread Fetching ---
 
@@ -602,15 +602,6 @@ export function pickImageUrl(f: SlackFile): string | undefined {
     Number(f.original_h ?? 0) > MAX_IMAGE_DIMENSION ||
     (f.size ?? 0) > MAX_IMAGE_BYTES;
   return tooLarge ? f.thumb_1024 : f.url_private_download ?? f.url_private;
-}
-
-/** Slack thumbnails don't necessarily keep the original format, so sniff the bytes. */
-export function sniffImageMime(buf: Buffer): string | undefined {
-  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
-  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
-  if (/^GIF8[79]a$/.test(buf.subarray(0, 6).toString("latin1"))) return "image/gif";
-  if (buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
-  return undefined;
 }
 
 async function fetchThread(client: WebClient, channel: string, threadTs: string): Promise<ThreadFetch> {

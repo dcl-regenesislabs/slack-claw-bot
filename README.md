@@ -81,6 +81,8 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
+**What the agent can see.** The agent's shell does not inherit the server's environment: only `GITHUB_TOKEN`/`GH_TOKEN`, `POSTHOG_*` and `WEARABLE_VALIDATOR_TOKEN` (the credentials skills use) are forwarded, plus `PATH`/`HOME`/locale basics. Slack tokens, the Anthropic OAuth token and the Discourse key stay in the server process, and `.auth.json` / `.env*` are refused by every tool. Thread attachments are downloaded by the server and handed to the agent as local files, so no skill needs the Slack token.
+
 ### Authentication (OAuth)
 
 All Anthropic auth uses OAuth — there is no API key path. The OAuth flow works like this:

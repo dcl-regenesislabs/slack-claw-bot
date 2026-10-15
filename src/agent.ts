@@ -17,6 +17,7 @@ import {
   type ToolDefinition,
   type WriteOperations,
   type EditOperations,
+  type ReadOperations,
   type BashSpawnContext,
   type ExtensionFactory,
   type AgentSession,
@@ -25,10 +26,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent } from "@earendil-works/pi-ai";
-import { writeFile, mkdir, readFile, access } from "node:fs/promises";
+import { writeFile, mkdir, readFile, access, open } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 import { constants } from "node:fs";
 import { buildPrompt, mergeAttachments, type FileAttachment } from "./prompt.js";
+import { sniffImageMime } from "./slack-utils.js";
 import {
   loadMemoryContext,
   buildMemorySavePrompt,
@@ -79,13 +81,78 @@ export function isProtectedPath(absolutePath: string, extraProtectedDirs: string
   return false;
 }
 
+// Credential files are unreadable by every tool, wherever they sit: the shell runs as the
+// same user as the server, so a path check is the only thing between a prompt injection
+// and the OAuth token or the deploy's env file.
+const SECRET_FILENAME = /^(\.auth\.json|\.env(\..*)?)$/;
+// Word-ish boundary before the name (start, whitespace, quote, `=`, `/`) keeps `process.env`
+// and `foo.env` from matching while `cat .env`, `$HOME/.env` and `x=.auth.json` do.
+const SECRET_FILE_IN_COMMAND = /(^|[\s'"=/])(\.\/)?(\.auth\.json|\.env)\b/;
+
+function isSecretFile(absolutePath: string): boolean {
+  return SECRET_FILENAME.test(basename(toRealPath(resolve(absolutePath))));
+}
+
+function referencesSecretFile(command: string): boolean {
+  return SECRET_FILE_IN_COMMAND.test(command);
+}
+
+// The shell is the one surface a prompt injection can read from, so it gets an allowlist,
+// never process.env. A skill that needs a new secret adds it to SHELL_ENV_SKILL_SECRETS.
+const SHELL_ENV_BASE = [
+  "PATH", "HOME", "USER", "SHELL", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "TERM",
+  "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS",
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+];
+const SHELL_ENV_SKILL_SECRETS = [
+  "GH_TOKEN", "GITHUB_TOKEN", // github, create-issue, push-memory (via gh's git credential helper)
+  "POSTHOG_API_KEY", "POSTHOG_HOST", "POSTHOG_PROJECTS", // posthog
+  "WEARABLE_VALIDATOR_TOKEN", // wearable-validator
+];
+
+function agentShellEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const name of [...SHELL_ENV_BASE, ...SHELL_ENV_SKILL_SECRETS]) {
+    if (base[name] !== undefined) env[name] = base[name];
+  }
+  // pi's per-session markers (set just before the hook runs) and qmd's own tuning knobs, so
+  // the agent's `qmd search` resolves the same index the server built.
+  for (const name of Object.keys(base)) {
+    if (name.startsWith("PI_") || name.startsWith("QMD_")) env[name] = base[name];
+  }
+  return env;
+}
+
+async function sniffImageFile(absolutePath: string): Promise<string | undefined> {
+  const fh = await open(absolutePath);
+  try {
+    const head = Buffer.alloc(12);
+    const { bytesRead } = await fh.read(head, 0, head.length, 0);
+    return sniffImageMime(head.subarray(0, bytesRead));
+  } finally {
+    await fh.close();
+  }
+}
+
 // `any` type args needed for variance: concrete defs (e.g. the bash tool's typed
 // renderCall) aren't assignable to the default ToolDefinition<TSchema, unknown>.
 type AnyToolDefinition = ToolDefinition<any, any, any>;
 
 export function createGuardedTools(cwd: string, extraProtectedDirs: string[] = []): AnyToolDefinition[] {
-  // Read tool — unrestricted
-  const read = createReadToolDefinition(cwd);
+  // Read tool — anything but credential files
+  const guardedReadOps: ReadOperations = {
+    async readFile(absolutePath: string) {
+      if (isSecretFile(absolutePath)) {
+        throw new Error(`Blocked: cannot read credential file "${absolutePath}".`);
+      }
+      return readFile(absolutePath);
+    },
+    async access(absolutePath: string) {
+      await access(absolutePath, constants.R_OK);
+    },
+    detectImageMimeType: sniffImageFile,
+  };
+  const read = createReadToolDefinition(cwd, { operations: guardedReadOps });
 
   // Write tool — blocks protected paths
   const guardedWriteOps: WriteOperations = {
@@ -108,6 +175,9 @@ export function createGuardedTools(cwd: string, extraProtectedDirs: string[] = [
   // Edit tool — blocks protected paths
   const guardedEditOps: EditOperations = {
     async readFile(absolutePath: string) {
+      if (isSecretFile(absolutePath)) {
+        throw new Error(`Blocked: cannot read credential file "${absolutePath}".`);
+      }
       return readFile(absolutePath);
     },
     async writeFile(absolutePath: string, content: string) {
@@ -127,6 +197,9 @@ export function createGuardedTools(cwd: string, extraProtectedDirs: string[] = [
   const bash = createBashToolDefinition(cwd, {
     spawnHook(ctx: BashSpawnContext) {
       const cmd = ctx.command;
+      if (referencesSecretFile(cmd)) {
+        throw new Error("Blocked: bash command references a credential file (.env*, .auth.json).");
+      }
       // Extra protected dirs are few and specific, and any interpreter can write —
       // reject every command referencing one, not only recognized write shapes.
       for (const dir of extraProtectedDirs) {
@@ -151,12 +224,8 @@ export function createGuardedTools(cwd: string, extraProtectedDirs: string[] = [
             throw new Error(`Blocked: bash command appears to write to protected file "${file}". Project config files are read-only.`);
           }
         }
-        // .env files
-        if (/(^|\s|\/)(\.\/)?\.env/.test(cmd) || cmd.includes(join(projectDir, ".env"))) {
-          throw new Error("Blocked: bash command appears to write to a .env file.");
-        }
       }
-      return ctx;
+      return { ...ctx, env: agentShellEnv(ctx.env) };
     },
   });
 
