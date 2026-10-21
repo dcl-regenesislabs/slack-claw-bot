@@ -1,5 +1,5 @@
 # pi-coding-agent 0.80+ (via undici 8) requires Node >= 22.19
-FROM node:24-slim
+FROM node:24.22.1-slim
 
 # python3: node-gyp needs it to compile better-sqlite3, which ships no
 # prebuilt binary for Node 24 yet
