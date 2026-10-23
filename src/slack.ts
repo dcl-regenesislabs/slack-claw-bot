@@ -1,3 +1,7 @@
+import { existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { writeFile, rename, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { stateDir } from "./paths.js";
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -6,7 +10,7 @@ import { runAgent, detectReviewModel, getMemoryDir } from "./agent.js";
 import type { ThreadFetch } from "./agent.js";
 import { schedulesFilePath } from "./schedule.js";
 import type { FileAttachment } from "./prompt.js";
-import { extractEventText, markdownToMrkdwn } from "./slack-utils.js";
+import { extractEventText, markdownToMrkdwn, sniffImageMime } from "./slack-utils.js";
 import type { SlackBlock } from "./slack-utils.js";
 import { AgentScheduler } from "./concurrency.js";
 import { redactSecrets } from "./sanitize.js";
@@ -22,6 +26,7 @@ function isSlackError(err: unknown): err is { data?: { error?: string } } {
 }
 
 export interface SlackFile {
+  id?: string;
   name?: string;
   mimetype?: string;
   url_private_download?: string;
@@ -63,6 +68,7 @@ export function createSlackApp(
 ): App {
   allowedTeamIds = new Set(config.allowedTeamIds);
   botToken = config.slackBotToken;
+  pruneAttachments();
 
   const app = new App({
     token: config.slackBotToken,
@@ -103,7 +109,7 @@ export function createSlackApp(
       return;
     }
 
-    const files = extractAttachments((event as any).files);
+    const files = await downloadAttachments((event as any).files);
 
     const userName = event.user ? await resolveUserName(client, event.user) : "unknown";
     const channelName = await resolveChannelName(client, event.channel);
@@ -499,18 +505,114 @@ async function postAuditLog(
 
 // --- File Attachments ---
 
+type NamedSlackFile = SlackFile & { name: string; mimetype: string; url_private_download: string };
+
+function namedFiles(files?: SlackFile[]): NamedSlackFile[] {
+  return (files ?? []).filter((f): f is NamedSlackFile => Boolean(f.name && f.mimetype && f.url_private_download));
+}
+
+/** URL-only attachment list, for callers that fetch the bytes themselves (grants CSVs). */
 function extractAttachments(files?: SlackFile[]): FileAttachment[] | undefined {
-  if (!files?.length) return undefined;
-  const attachments = files
-    .filter((f): f is SlackFile & { name: string; mimetype: string; url_private_download: string } =>
-      Boolean(f.name && f.mimetype && f.url_private_download))
-    .map((f) => ({ name: f.name, mimetype: f.mimetype, url: f.url_private_download }));
+  const attachments = namedFiles(files).map((f) => ({ name: f.name, mimetype: f.mimetype, url: f.url_private_download }));
   return attachments.length ? attachments : undefined;
+}
+
+// Deterministic per-file-id paths: a follow-up run reuses what an earlier run fetched.
+const attachmentsDir = () => stateDir("claw-attachments");
+const ATTACHMENT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** Drop attachments no run has touched in two weeks; on a persistent volume nothing else would. */
+export function pruneAttachments(now = Date.now()): void {
+  const dir = attachmentsDir();
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    try {
+      if (now - statSync(path).mtimeMs > ATTACHMENT_MAX_AGE_MS) unlinkSync(path);
+    } catch {
+      // raced with a download or a concurrent prune — nothing to do
+    }
+  }
+}
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+const SLACK_FILE_ID = /^F[A-Z0-9]+$/;
+// Slack private file URLs live on *.slack.com — the token is never sent anywhere else.
+const SLACK_FILE_URL = /^https:\/\/[a-z0-9-]+\.slack\.com\//i;
+const EXTENSION_BY_MIMETYPE: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
+  "text/csv": "csv",
+  "text/plain": "txt",
+  "text/markdown": "md",
+  "application/json": "json",
+  "application/pdf": "pdf",
+};
+
+/** Server-chosen file name: the Slack file id plus an extension from the mimetype — never the
+ * user-controlled name. Mimetypes outside the table are not fetched at all. */
+export function attachmentFilename(id: string | undefined, mimetype: string): string | undefined {
+  const ext = EXTENSION_BY_MIMETYPE[mimetype];
+  if (!id || !ext || !SLACK_FILE_ID.test(id)) return undefined;
+  return `${id}.${ext}`;
+}
+
+// Sequential on purpose: a thread is fetched once per session and every later fetch hits the
+// on-disk cache, so a burst of parallel 50MB downloads buys nothing but heap.
+async function downloadAttachments(files?: SlackFile[]): Promise<FileAttachment[]> {
+  const attachments: FileAttachment[] = [];
+  for (const f of namedFiles(files)) {
+    const attachment = { name: f.name, mimetype: f.mimetype, url: f.url_private_download };
+    attachments.push(attachment);
+    const filename = attachmentFilename(f.id, f.mimetype);
+    if (!filename || (f.size ?? 0) > MAX_ATTACHMENT_BYTES) continue;
+    const path = join(attachmentsDir(), filename);
+    if (existsSync(path)) {
+      attachments[attachments.length - 1] = { ...attachment, path };
+      continue;
+    }
+    const bytes = await downloadSlackFile(f.url_private_download, MAX_ATTACHMENT_BYTES);
+    if (!bytes) continue;
+    try {
+      // Temp + rename: a crash mid-write must not leave a truncated file existsSync will trust.
+      const partial = `${path}.${process.pid}.${Date.now()}.part`;
+      await writeFile(partial, bytes);
+      await rename(partial, path);
+      attachments[attachments.length - 1] = { ...attachment, path };
+    } catch (err) {
+      console.warn(`[slack] Could not store attachment ${filename}:`, (err as Error).message);
+    }
+  }
+  return attachments;
+}
+
+/** Fetch a Slack-hosted file, giving up before `maxBytes` is exceeded (header first, then the stream). */
+async function downloadSlackFile(url: string | undefined, maxBytes: number): Promise<Buffer | null> {
+  if (!url || !botToken || !SLACK_FILE_URL.test(url)) return null;
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${botToken}` } });
+    if (!res.ok || !res.body) return null;
+    if (Number(res.headers.get("content-length") ?? 0) > maxBytes) return null;
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of res.body) {
+      total += chunk.length;
+      if (total > maxBytes) return null;
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  } catch {
+    return null;
+  }
 }
 
 // --- Formatting ---
 
-export { markdownToMrkdwn } from "./slack-utils.js";
+export { markdownToMrkdwn, sniffImageMime } from "./slack-utils.js";
 
 // --- Thread Fetching ---
 
@@ -526,15 +628,6 @@ export function pickImageUrl(f: SlackFile): string | undefined {
     Number(f.original_h ?? 0) > MAX_IMAGE_DIMENSION ||
     (f.size ?? 0) > MAX_IMAGE_BYTES;
   return tooLarge ? f.thumb_1024 : f.url_private_download ?? f.url_private;
-}
-
-/** Slack thumbnails don't necessarily keep the original format, so sniff the bytes. */
-export function sniffImageMime(buf: Buffer): string | undefined {
-  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
-  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
-  if (/^GIF8[79]a$/.test(buf.subarray(0, 6).toString("latin1"))) return "image/gif";
-  if (buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
-  return undefined;
 }
 
 async function fetchThread(client: WebClient, channel: string, threadTs: string): Promise<ThreadFetch> {
@@ -568,40 +661,38 @@ async function formatMessages(client: WebClient, messages: SlackMessage[]): Prom
 
   const images: ImageContent[] = [];
   const files: FileAttachment[] = [];
-  const lines = await Promise.all(
-    messages.map(async (m) => {
-      files.push(...(extractAttachments(m.files) ?? []));
-      const name = userNames.get(m.user || "") || m.bot_profile?.name || m.username || "unknown";
-      const ts = m.ts ? new Date(parseFloat(m.ts) * 1000).toISOString() : "";
-      let line = `[${name}] (${ts}): ${extractEventText(m)}`;
-      for (const f of m.files ?? []) {
-        if (!f.name) continue;
-        if (f.mimetype && IMAGE_MIMETYPES.has(f.mimetype)) {
-          const image = await downloadImage(pickImageUrl(f));
-          if (image) {
-            images.push({ type: "image", data: image.data, mimeType: image.mimeType ?? f.mimetype });
-            line += ` [attached image: ${f.name}]`;
-            continue;
-          }
+  const lines: string[] = [];
+  for (const m of messages) {
+    const attachments = await downloadAttachments(m.files);
+    files.push(...attachments);
+    const name = userNames.get(m.user || "") || m.bot_profile?.name || m.username || "unknown";
+    const ts = m.ts ? new Date(parseFloat(m.ts) * 1000).toISOString() : "";
+    let line = `[${name}] (${ts}): ${extractEventText(m)}`;
+    for (const f of m.files ?? []) {
+      if (!f.name) continue;
+      const local = attachments.find((a) => a.url === f.url_private_download)?.path;
+      if (f.mimetype && IMAGE_MIMETYPES.has(f.mimetype)) {
+        const image = await loadImage(f, local);
+        if (image) {
+          images.push({ type: "image", data: image.data, mimeType: image.mimeType ?? f.mimetype });
+          line += ` [attached image: ${f.name}]`;
+          continue;
         }
-        line += ` [attached: ${f.name}${f.mimetype ? ` (${f.mimetype})` : ""}]`;
       }
-      return line;
-    }),
-  );
+      line += ` [attached: ${f.name}${f.mimetype ? ` (${f.mimetype})` : ""}${local ? "" : ", not available locally"}]`;
+    }
+    lines.push(line);
+  }
 
   return { content: lines.join("\n"), images, files: files.length ? files : undefined };
 }
 
-async function downloadImage(url?: string): Promise<{ data: string; mimeType?: string } | null> {
-  if (!url || !botToken) return null;
-  try {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${botToken}` } });
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_IMAGE_BYTES) return null;
-    return { data: buf.toString("base64"), mimeType: sniffImageMime(buf) };
-  } catch {
-    return null;
-  }
+/** Vision bytes: the local copy when it is the original we would fetch anyway, else Slack's thumbnail. */
+async function loadImage(f: SlackFile, localPath?: string): Promise<{ data: string; mimeType?: string } | null> {
+  const url = pickImageUrl(f);
+  const buf = localPath && url === f.url_private_download
+    ? await readFile(localPath).catch(() => null)
+    : await downloadSlackFile(url, MAX_IMAGE_BYTES);
+  if (!buf || buf.length > MAX_IMAGE_BYTES) return null;
+  return { data: buf.toString("base64"), mimeType: sniffImageMime(buf) };
 }

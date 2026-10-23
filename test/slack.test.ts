@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { markdownToMrkdwn, isDeniedUser, pickImageUrl, sniffImageMime } from "../src/slack.js";
+import { markdownToMrkdwn, isDeniedUser, pickImageUrl, sniffImageMime, attachmentFilename } from "../src/slack.js";
 
 describe("markdownToMrkdwn", () => {
   it("converts bold markdown to mrkdwn", () => {
@@ -106,5 +106,23 @@ describe("sniffImageMime", () => {
 
   it("returns undefined for anything else", () => {
     assert.equal(sniffImageMime(Buffer.from("<html>")), undefined);
+  });
+});
+
+describe("attachmentFilename", () => {
+  it("names the local copy after the Slack file id, with an extension from the mimetype", () => {
+    assert.equal(attachmentFilename("F0ABC123", "image/png"), "F0ABC123.png");
+    assert.equal(attachmentFilename("F0ABC123", "video/quicktime"), "F0ABC123.mov");
+  });
+
+  it("does not name (so never fetches) mimetypes outside the table", () => {
+    assert.equal(attachmentFilename("F0ABC123", "application/octet-stream"), undefined);
+    assert.equal(attachmentFilename("F0ABC123", "application/x-sh"), undefined);
+  });
+
+  it("refuses ids that are not Slack file ids, so the name can never carry a path", () => {
+    assert.equal(attachmentFilename(undefined, "image/png"), undefined);
+    assert.equal(attachmentFilename("../etc/passwd", "image/png"), undefined);
+    assert.equal(attachmentFilename("f0abc123", "image/png"), undefined);
   });
 });

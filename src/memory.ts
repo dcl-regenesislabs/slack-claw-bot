@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { neutralizePromptDelimiters, sanitizeMetadataValue, sanitizeMemoryForInjection } from "./sanitize.js";
+import { dataDir, stateDir } from "./paths.js";
 
 // --- qmd search index ---
 
@@ -69,9 +70,7 @@ export function reindexMemory(): void {
 
 export function resolveMemoryDir(repo?: string): string {
   if (repo) {
-    // realpathSync resolves macOS /var → /private/var symlink so qmd sees a stable path
-    const rawDir = join(tmpdir(), "claw-memory");
-    const memoryDir = existsSync(rawDir) ? realpathSync(rawDir) : realpathSync(tmpdir()) + "/claw-memory";
+    const memoryDir = stateDir("claw-memory");
     if (existsSync(join(memoryDir, ".git"))) {
       execFileSync("git", ["pull", "--rebase", "--autostash"], {
         cwd: memoryDir,
@@ -96,9 +95,10 @@ export function resolveMemoryDir(repo?: string): string {
     return memoryDir;
   }
 
-  const memoryDir = realpathSync(mkdtempSync(join(tmpdir(), "claw-memory-")));
+  // No repo: persistent under DATA_DIR when deployed, throwaway otherwise.
+  const memoryDir = dataDir() ? stateDir("claw-memory") : realpathSync(mkdtempSync(join(tmpdir(), "claw-memory-")));
   ensureMemoryDirs(memoryDir);
-  console.log(`[memory] Using temporary directory: ${memoryDir}`);
+  console.log(`[memory] Using local directory (no MEMORY_REPO): ${memoryDir}`);
   return memoryDir;
 }
 
@@ -135,9 +135,7 @@ function ensureMemoryDirs(memoryDir: string): void {
  */
 export function clonePublicRepo(repo: string, localName: string, label: string): string | null {
   try {
-    const rawDir = join(tmpdir(), localName);
-    const dir = existsSync(rawDir) ? realpathSync(rawDir) : realpathSync(tmpdir()) + "/" + localName;
-
+    const dir = stateDir(localName);
     if (existsSync(join(dir, ".git"))) {
       execFileSync("git", ["pull", "--rebase", "--autostash"], {
         cwd: dir,

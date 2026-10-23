@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { getTurnError, isProtectedPath } from "../src/agent.js";
+import { getTurnError, isProtectedPath, createGuardedTools } from "../src/agent.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -79,6 +79,69 @@ describe("isProtectedPath extra protected dirs", () => {
       assert.equal(isProtectedPath(join(base, "innocent.json"), [join(base, "schedules")]), true);
       assert.equal(isProtectedPath(join(base, "alias", "schedules.json"), [join(base, "schedules")]), true);
       assert.equal(isProtectedPath(join(base, "elsewhere.json"), [join(base, "schedules")]), false);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// Drives the tools pi actually runs (not the predicates behind them), so a guard that is
+// defined but never wired into createGuardedTools fails here.
+describe("createGuardedTools", () => {
+  const ctx = { sessionManager: { getSessionId: () => "t", getSessionFile: () => undefined } } as never;
+  const tools = Object.fromEntries(createGuardedTools(process.cwd()).map((t) => [t.name, t]));
+  const text = (r: { content: Array<{ text?: string }> }) => r.content.map((c) => c.text ?? "").join("");
+  const bash = async (command: string) => text(await tools.bash.execute("1", { command }, undefined, undefined, ctx));
+  const read = async (path: string) => text(await tools.read.execute("2", { path }, undefined, undefined, ctx));
+
+  it("hands the shell only the allowlisted environment", async () => {
+    const saved = { SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+    process.env.SLACK_BOT_TOKEN = "xoxb-test";
+    process.env.GITHUB_TOKEN = "ghp_test";
+    try {
+      const names = (await bash("env | cut -d= -f1")).split("\n");
+      assert.ok(names.includes("PATH"));
+      assert.ok(names.includes("GITHUB_TOKEN"));
+      assert.ok(!names.includes("SLACK_BOT_TOKEN"));
+    } finally {
+      for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+    }
+  });
+
+  it("refuses credential files through read, edit, write, and bash, following symlinks", async () => {
+    const base = mkdtempSync(join(tmpdir(), "secret-test-"));
+    try {
+      writeFileSync(join(base, ".auth.json"), "{}", "utf-8");
+      writeFileSync(join(base, ".env.production"), "X=1", "utf-8");
+      symlinkSync(join(base, ".auth.json"), join(base, "innocent.json"));
+      await assert.rejects(read(join(base, ".auth.json")), /Blocked/);
+      await assert.rejects(read(join(base, ".env.production")), /Blocked/);
+      await assert.rejects(read(join(base, "innocent.json")), /Blocked/);
+      await assert.rejects(
+        tools.edit.execute("3", { path: join(base, ".auth.json"), edits: [{ oldText: "{}", newText: "" }] }, undefined, undefined, ctx),
+        /Blocked/,
+      );
+      await assert.rejects(
+        tools.write.execute("4", { path: join(base, ".auth.json"), content: "{}" }, undefined, undefined, ctx),
+        /Blocked/,
+      );
+      await assert.rejects(bash(`cat ${join(base, ".auth.json")}`), /Blocked/);
+      await assert.rejects(bash("cat .env"), /Blocked/);
+      await assert.rejects(bash("cat .env-local"), /Blocked/);
+      await assert.rejects(read(join(base, ".envrc")), /Blocked/);
+      await assert.rejects(bash(`base64 "${join(base, ".env.production")}"`), /Blocked/);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it("still allows ordinary files and commands that merely mention env", async () => {
+    const base = mkdtempSync(join(tmpdir(), "secret-test-"));
+    try {
+      writeFileSync(join(base, "environment.md"), "process.env.X\n", "utf-8");
+      assert.match(await read(join(base, "environment.md")), /process\.env\.X/);
+      assert.equal((await bash(`grep -c process.env ${join(base, "environment.md")}`)).trim(), "1");
+      assert.equal((await bash("printf ok")).trim(), "ok");
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
