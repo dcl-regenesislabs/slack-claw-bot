@@ -480,8 +480,8 @@ export interface ResourceLoaderOptions {
 }
 
 /** Loads only the paths given here. pi's own discovery under `~/.pi/agent/` and `~/.agents/`
- * (AGENTS.md, skills) is off: `$HOME` is agent-writable, so a file planted there by one run
- * would become trusted system-prompt content for every later session. */
+ * (AGENTS.md, skills, settings.json) is off: `$HOME` is agent-writable, so a file planted there
+ * by one run would become trusted system-prompt content for every later session. */
 export function createResourceLoader(options: ResourceLoaderOptions): DefaultResourceLoader {
   return new DefaultResourceLoader({
     cwd: options.cwd,
@@ -489,6 +489,7 @@ export function createResourceLoader(options: ResourceLoaderOptions): DefaultRes
     additionalSkillPaths: options.skillPaths,
     systemPrompt: options.systemPrompt,
     extensionFactories: options.extensionFactories ?? [],
+    settingsManager: SettingsManager.inMemory(),
     noExtensions: true,
     noPromptTemplates: true,
     noThemes: true,
