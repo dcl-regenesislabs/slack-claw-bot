@@ -17,7 +17,9 @@ import { resolveMemoryDir, resolveGrantsAgentsDir, clonePublicRepo } from "./mem
 import { initGrants } from "./grants.js";
 import type { GrantsRouter } from "./grants.js";
 import { DiscourseClient } from "./discourse.js";
+import { loadSecretsAndDropPrivileges } from "./secrets.js";
 
+loadSecretsAndDropPrivileges();
 const config = loadConfig();
 if (process.env.DEBUG) console.log("[debug] Debug mode enabled");
 

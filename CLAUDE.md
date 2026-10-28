@@ -40,7 +40,7 @@ src/
 - **Agent SDK**: uses `@earendil-works/pi-coding-agent` (pi-agent, formerly `@mariozechner/pi-coding-agent`) to run Claude with tool use
   - The `pi-*` packages are pinned to an **exact** version (no caret): upstream ships breaking API changes in 0.x patch releases (0.80.8 removed `AuthStorage`/`ModelRegistry` in favor of `ModelRuntime`). Bump `pi-agent-core` and `pi-coding-agent` together, deliberately, and re-run the CLI smoke test.
   - Agent tools: `createGuardedTools(cwd)` provides bash, read, edit, and write tools with write-protection on project source files (`src/`, `test/`, `package.json`, etc.)
-  - **Secrets never reach the agent's shell.** The bash tool's `spawnHook` replaces `process.env` with `agentShellEnv()`: a fixed base set (`PATH`, `HOME`, locale, proxies, …) plus only the credentials a skill reads (`GITHUB_TOKEN`/`GH_TOKEN`, `POSTHOG_*`, `WEARABLE_VALIDATOR_TOKEN`). Slack tokens, `ANTHROPIC_OAUTH_SETUP_TOKEN`, `DISCOURSE_API_KEY` stay in the server process. Adding a skill that needs a new secret means adding it to `SHELL_ENV_SKILL_SECRETS` deliberately. Credential files (`.auth.json`, `.env*`) are refused by read/edit (symlinks followed) and any bash command that references one is rejected outright — same uid, so this is a path check, not a privilege boundary.
+  - **Secrets and the agent's shell.** The bash tool's `spawnHook` replaces `process.env` with `agentShellEnv()`: a fixed base set (`PATH`, `HOME`, locale, proxies, …) plus only the credentials a skill reads (`GITHUB_TOKEN`/`GH_TOKEN`, `POSTHOG_*`, `WEARABLE_VALIDATOR_TOKEN`). Adding a skill that needs a new secret means adding it to `SHELL_ENV_SKILL_SECRETS` deliberately. The shell shares the server's uid, so the allowlist alone proves nothing: `/proc/<pid>/environ` of the server is readable by any same-uid process, and the file guards (`.auth.json`, `.env*`, `/proc/<pid>/` refused by read/edit/write following symlinks; bash commands naming them rejected) are string checks a deliberate injection steps around. What actually keeps the Slack tokens, `ANTHROPIC_OAUTH_SETUP_TOKEN` and `DISCOURSE_API_KEY` out of reach is `src/secrets.ts` under the Compose deployment: the container starts as root with only CAP_SETUID/SETGID, reads the root-only mounted `SECRETS_FILE`, and drops to `RUN_AS` — nothing of it is in the exec-time environment, no uid-1000-readable file holds it (the Anthropic credential is an in-memory store, no `.auth.json`), and the credential change makes the process non-dumpable, so its `/proc` environ/mem are closed to the shell. Server-side children (`git`, `gh`, `qmd`) run with `serverChildEnv()` (`src/child-env.ts`): same scrubbed shape, git hooks/fsmonitor/user config disabled via `GIT_CONFIG_*`, gh pinned as the only credential helper — a hook planted in the agent-writable memory clone or `~/.gitconfig` gains nothing. Known residuals of the shared uid: every thread's attachments and sessions are readable by every run, and a planted attachment of the exact size Slack reports passes the cache check. The next step that closes those is running the agent's tools under their own uid.
   - Extensions: `before_agent_start` injects memory context into system prompt
   - **Runtime skills**: the agent can create new skills at runtime by writing to `{memoryDir}/skills/` and pushing via `push-memory`. These are loaded alongside `skills/` on session creation.
 - **Sessions**: each Slack thread maps to a session file (`SessionManager.open()`). Follow-ups resume the session instead of re-processing the full thread.
@@ -52,7 +52,7 @@ src/
 
 ## Memory directory
 
-All mutable state sits under `DATA_DIR` when set (`/data` in the image, a volume on the droplet) and under the OS temp dir otherwise: `claw-memory/`, `claw-sessions/`, `claw-attachments/`, the public-repo clones, and `.auth.json` (project root when `DATA_DIR` is unset, for the CLI). `src/paths.ts` is the one place that decides.
+All mutable state sits under `DATA_DIR` when set (`/data` in the image, a volume on the droplet) and under the OS temp dir otherwise: `claw-memory/`, `claw-sessions/`, `claw-attachments/` and the public-repo clones. `src/paths.ts` is the one place that decides. `.auth.json` exists only without `ANTHROPIC_OAUTH_SETUP_TOKEN` (the CLI), in the project root.
 
 ```
 {DATA_DIR|/tmp}/claw-memory/   (cloned from MEMORY_REPO, or local dir)
@@ -72,10 +72,9 @@ Sessions live in `{DATA_DIR|/tmp}/claw-sessions/` — they survive restarts on t
 
 NEVER use `ANTHROPIC_API_KEY`. All Anthropic auth uses OAuth sessions.
 
-- `.auth.json` stores `{ refresh, access, expires }` for the OAuth flow
 - `ANTHROPIC_OAUTH_SETUP_TOKEN` is a long-lived `claude setup-token` (~1 year). It is itself the OAuth **access** token (`sk-ant-oat…`), used directly as the Bearer — NOT a refresh token. Seed it into `access` with a far-future expiry; seeding it as `refresh` triggers a `grant_type=refresh_token` exchange that fails with `No API key for provider: anthropic`
-- The app seeds `.auth.json` from the env var on first run. No external token store — if the file is lost on restart, the long-lived env token re-seeds it
-- The CLI reuses `.auth.json` directly
+- With the token set, the credential lives in an `InMemoryCredentialStore` handed to `ModelRuntime.create` — nothing on disk, so the agent's shell (same uid) has no file to read. Restarts just re-seed from the token
+- Without it, pi's `.auth.json` (`{ refresh, access, expires }`) in the project root is used — the CLI / existing-session path
 
 ## Testing
 

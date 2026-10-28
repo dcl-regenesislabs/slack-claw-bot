@@ -3,16 +3,19 @@ services:
     image: ghcr.io/dcl-regenesislabs/slack-claw-bot:${IMAGE_TAG:-latest}
     container_name: slack-claw-bot
     restart: unless-stopped
-    # Secrets live in /etc/slack-bot/env (root:root 0600) and never in this file or the image.
-    env_file:
-      - /etc/slack-bot/env
-    environment:
-      DATA_DIR: /data
-      HEALTH_PORT: "5000"
-    # Both on the block-storage volume: /data is state, /tmp is where skills clone repos.
+    # Secrets never enter the container environment (/proc/<pid>/environ is readable by every
+    # same-uid process). The root-only file is mounted, the process starts as root with just
+    # the two capabilities needed to read it and drop to RUN_AS before anything else happens.
+    user: "0:0"
     volumes:
+      - /etc/slack-bot/env:/run/secrets/slack-bot.env:ro
       - /var/lib/slack-bot/data:/data
       - /var/lib/slack-bot/tmp:/tmp
+    environment:
+      SECRETS_FILE: /run/secrets/slack-bot.env
+      RUN_AS: "1000:1000"
+      DATA_DIR: /data
+      HEALTH_PORT: "5000"
     # Socket Mode is outbound-only; the health endpoint is loopback for the host only.
     ports:
       - "127.0.0.1:5000:5000"
@@ -23,9 +26,15 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - SETUID
+      - SETGID
     deploy:
       resources:
         limits:
+          # Leave a core for sshd/dockerd; a fork bomb in an agent shell must not take the host.
+          cpus: "3.5"
+          pids: 4096
           memory: 7g
     logging:
       driver: json-file

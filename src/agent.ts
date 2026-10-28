@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, unlinkSync, realpathSync } from "node:fs";
+import { readFileSync, existsSync, unlinkSync, realpathSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
@@ -24,13 +24,14 @@ import {
   type CustomEntry,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import { InMemoryCredentialStore, type CredentialStore, type ImageContent } from "@earendil-works/pi-ai";
 import { writeFile, mkdir, readFile, access, open } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 import { constants } from "node:fs";
 import { buildPrompt, mergeAttachments, type FileAttachment } from "./prompt.js";
 import { sniffImageMime } from "./slack-utils.js";
 import { dataDir, stateDir } from "./paths.js";
+import { CHILD_ENV_BASE } from "./child-env.js";
 import {
   loadMemoryContext,
   buildMemorySavePrompt,
@@ -81,26 +82,29 @@ export function isProtectedPath(absolutePath: string, extraProtectedDirs: string
   return false;
 }
 
-// Same uid as the server, so a path check is all that stands between an injection and the tokens.
+// Same uid as the server, so these path checks are a speed bump, not the boundary: on the
+// droplet the boundary is that no secret is in any readable file or environ (src/secrets.ts).
 const SECRET_FILENAME = /^(\.auth\.json|\.env.*)$/;
+// Per-process views (environ, cmdline, mem, fd/) of this or any other process.
+const PROC_PROCESS_DIR = /^\/proc\/(\d+|self|thread-self)(\/|$)/;
 // Leading boundary (start, space, quote, `=`, `/`) so `process.env` and `foo.env` don't match.
 const SECRET_FILE_IN_COMMAND = /(^|[\s'"=/])(\.\/)?(\.auth\.json|\.env)/;
+// Any spelling that can reach a per-process dir: a pid, self, a glob or class, a variable,
+// `.` or doubled slashes. /proc/cpuinfo-style reads stay allowed.
+const PROC_IN_COMMAND = /\/proc\/+(\d|self\b|thread-self\b|[*?[$.{]|\/)/;
 
 function isSecretFile(absolutePath: string): boolean {
-  return SECRET_FILENAME.test(basename(toRealPath(resolve(absolutePath))));
+  const real = toRealPath(resolve(absolutePath));
+  return SECRET_FILENAME.test(basename(real)) || PROC_PROCESS_DIR.test(real);
 }
 
 function referencesSecretFile(command: string): boolean {
-  return SECRET_FILE_IN_COMMAND.test(command);
+  return SECRET_FILE_IN_COMMAND.test(command) || PROC_IN_COMMAND.test(command);
 }
 
 // The shell is the one surface a prompt injection can read from, so it gets an allowlist,
 // never process.env. A skill that needs a new secret adds it to SHELL_ENV_SKILL_SECRETS.
-const SHELL_ENV_BASE = [
-  "PATH", "HOME", "USER", "SHELL", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "TERM",
-  "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS",
-  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
-];
+const SHELL_ENV_BASE = CHILD_ENV_BASE;
 const SHELL_ENV_SKILL_SECRETS = [
   "GH_TOKEN", "GITHUB_TOKEN", // github, create-issue, push-memory (via gh's git credential helper)
   "POSTHOG_API_KEY", "POSTHOG_HOST", "POSTHOG_PROJECTS", // posthog
@@ -197,7 +201,7 @@ export function createGuardedTools(cwd: string, extraProtectedDirs: string[] = [
     spawnHook(ctx: BashSpawnContext) {
       const cmd = ctx.command;
       if (referencesSecretFile(cmd)) {
-        throw new Error("Blocked: bash command references a credential file (.env*, .auth.json).");
+        throw new Error("Blocked: bash command references a credential file (.env*, .auth.json) or a process's /proc entry.");
       }
       // Extra protected dirs are few and specific, and any interpreter can write —
       // reject every command referencing one, not only recognized write shapes.
@@ -314,7 +318,6 @@ let modelRuntime: ModelRuntime | null = null;
 let defaultModelId: string;
 // Under DATA_DIR when deployed (outside the agent's cwd, on the persistent volume); the
 // project root otherwise, where the CLI expects it.
-let authPath = "";
 let sessionDir: string | null = null;
 let memoryDir: string | null = null;
 let agentTimeoutMs = DEFAULT_AGENT_TIMEOUT_MS;
@@ -341,9 +344,7 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   if (config.timeoutMs) agentTimeoutMs = config.timeoutMs;
   sessionDir = stateDir("claw-sessions");
 
-  authPath = join(dataDir() ?? projectDir, ".auth.json");
-  loadAuth(config.anthropicOAuthSetupToken);
-  modelRuntime = await ModelRuntime.create({ authPath });
+  modelRuntime = await ModelRuntime.create(await credentialOptions(config.anthropicOAuthSetupToken));
 
   defaultModelId = config.model || resolveDefaultModel();
   console.log(`[agent] default model: ${defaultModelId}`);
@@ -617,29 +618,36 @@ async function saveMemory(session: AgentSession, userId: string, username: strin
 // access token with this far-future expiry so the SDK never attempts a refresh.
 const SETUP_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
-// Auth lives entirely in .auth.json. ANTHROPIC_OAUTH_SETUP_TOKEN holds a long-lived
-// `claude setup-token` (sk-ant-oat…, ~1 year) — which is itself the OAuth *access* token,
-// used directly as the Bearer. It is NOT a refresh token, so we seed it into `access` with
-// a far-future expiry; seeding it as `refresh` (expires: 0) makes the SDK attempt a
-// grant_type=refresh_token exchange that fails with "No API key for provider: anthropic".
-// Because the token stays valid for a year, a fresh container that re-seeds from the env
-// var still authenticates — no external store needed.
-function loadAuth(oauthToken?: string): void {
-  if (existsSync(authPath)) {
-    console.log("[agent] Using existing .auth.json");
-  } else if (oauthToken) {
-    console.log("[agent] Seeding auth from ANTHROPIC_OAUTH_SETUP_TOKEN");
-    writeFileSync(authPath, JSON.stringify({
-      anthropic: {
-        type: "oauth",
-        access: oauthToken,
-        refresh: oauthToken,
-        expires: Date.now() + SETUP_TOKEN_TTL_MS,
-      },
-    }), "utf-8");
-  } else {
+// ANTHROPIC_OAUTH_SETUP_TOKEN holds a long-lived `claude setup-token` (sk-ant-oat…, ~1 year)
+// — which is itself the OAuth *access* token, used directly as the Bearer. It is NOT a refresh
+// token, so it goes into `access` with a far-future expiry; seeding it as `refresh` (expires: 0)
+// makes the SDK attempt a grant_type=refresh_token exchange that fails with "No API key for
+// provider: anthropic". With the token set the credential lives only in this process — never
+// in a file the agent's shell (same uid) could read. Without it (the CLI), pi's .auth.json
+// refresh flow in the project root is used as before.
+async function credentialOptions(oauthToken?: string): Promise<{ credentials?: CredentialStore; authPath?: string }> {
+  const authPath = join(dataDir() ?? projectDir, ".auth.json");
+  if (oauthToken) {
+    console.log("[agent] Using in-memory auth from ANTHROPIC_OAUTH_SETUP_TOKEN");
+    if (dataDir() && existsSync(authPath)) {
+      // Seeded by an older image from this same token: a uid-readable copy with no reader left.
+      unlinkSync(authPath);
+      console.log(`[agent] Removed stale ${authPath}`);
+    }
+    const credentials = new InMemoryCredentialStore();
+    await credentials.modify("anthropic", async () => ({
+      type: "oauth",
+      access: oauthToken,
+      refresh: oauthToken,
+      expires: Date.now() + SETUP_TOKEN_TTL_MS,
+    }));
+    return { credentials };
+  }
+  if (!existsSync(authPath)) {
     throw new Error("No auth available. Set ANTHROPIC_OAUTH_SETUP_TOKEN or place a valid .auth.json");
   }
+  console.log("[agent] Using existing .auth.json");
+  return { authPath };
 }
 
 // --- Utilities ---

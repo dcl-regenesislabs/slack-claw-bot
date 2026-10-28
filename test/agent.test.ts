@@ -135,6 +135,19 @@ describe("createGuardedTools", () => {
     }
   });
 
+  it("refuses a process's /proc entries, where the environment is readable regardless of the allowlist", async () => {
+    await assert.rejects(read("/proc/self/environ"), /Blocked/);
+    await assert.rejects(read("/proc/1/cmdline"), /Blocked/);
+    await assert.rejects(bash("cat /proc/1/environ | tr '\\0' '\\n'"), /Blocked/);
+    await assert.rejects(bash("cat /proc/$PPID/environ"), /Blocked/);
+    await assert.rejects(bash("cat /proc/self/mem"), /Blocked/);
+    await assert.rejects(bash("grep -a TOKEN /proc/*/environ"), /Blocked/);
+    await assert.rejects(bash("cat /proc/[0-9]*/environ"), /Blocked/);
+    await assert.rejects(bash("cat /proc//1/environ"), /Blocked/);
+    await assert.rejects(bash("cat /proc/./self/environ"), /Blocked/);
+    assert.equal((await bash("test -e /proc/cpuinfo; printf ok")).trim(), "ok");
+  });
+
   it("still allows ordinary files and commands that merely mention env", async () => {
     const base = mkdtempSync(join(tmpdir(), "secret-test-"));
     try {

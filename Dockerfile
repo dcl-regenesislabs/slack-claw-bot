@@ -37,4 +37,5 @@ ENV DATA_DIR=/data HOME=/home/node PATH=/app/node_modules/.bin:$PATH
 USER node
 
 ENTRYPOINT ["tini", "--"]
-CMD ["node", "dist/index.js"]
+# --import runs the secrets load + privilege drop before any module of the app is evaluated.
+CMD ["node", "--import", "./dist/preload.js", "dist/index.js"]
