@@ -37,6 +37,33 @@ root-only file on the box; the image, this repo and CI never carry them.
    mkdir -p /opt/slack-bot /etc/slack-bot /var/lib/slack-bot/data /var/lib/slack-bot/tmp
    chown 1000:1000 /var/lib/slack-bot/data /var/lib/slack-bot/tmp   # the bot runs as uid 1000 after the drop
    ```
+   Then two host-side guards. sshd: password auth is already off on a DO image; make root
+   key-only explicit and drop forwarding (the CI key forbids it per-key, this covers every key):
+   ```bash
+   printf 'PermitRootLogin prohibit-password\nX11Forwarding no\nAllowTcpForwarding no\n' > /etc/ssh/sshd_config.d/10-hardening.conf
+   sshd -t && systemctl reload ssh
+   ```
+   And keep containers away from the droplet metadata service (`169.254.169.254` serves
+   `user-data` and the root public keys to anything on the box, including the agent's shell).
+   Docker creates the `DOCKER-USER` chain at start, so the rule is a unit ordered after it, not a
+   ufw rule:
+   ```bash
+   cat > /etc/systemd/system/docker-block-metadata.service <<'EOF'
+   [Unit]
+   Description=Block container access to the droplet metadata service
+   After=docker.service
+   Requires=docker.service
+
+   [Service]
+   Type=oneshot
+   RemainAfterExit=yes
+   ExecStart=/bin/sh -c "iptables -C DOCKER-USER -d 169.254.169.254 -j DROP 2>/dev/null || iptables -I DOCKER-USER -d 169.254.169.254 -j DROP"
+
+   [Install]
+   WantedBy=multi-user.target
+   EOF
+   systemctl daemon-reload && systemctl enable --now docker-block-metadata.service
+   ```
 5. **Secrets file**: copy `deploy/env.example` locally, fill it in (plain `KEY=value`, no quotes,
    no `export`; it already carries the sizing defaults), and upload it. Rotate every token when
    you migrate: they have lived in the App Platform UI until now.
@@ -49,9 +76,12 @@ root-only file on the box; the image, this repo and CI never carry them.
 6. **Compose file**: copy `deploy/docker-compose.yml` and `deploy/deploy.sh` to
    `/opt/slack-bot/` (root-owned, `chmod +x /opt/slack-bot/deploy.sh`), then
    `docker compose -f /opt/slack-bot/docker-compose.yml config --quiet` to check the file parses.
-7. **Deploy user** (what CI logs in as — see [CI deploy key](#ci-deploy-key)):
+7. **Deploy user** (what CI logs in as — see [CI deploy key](#ci-deploy-key)). The uid must not
+   be 1000: the container's `node` user is host uid 1000, so a `deploy` user created with the
+   default uid would own the memory clone, sessions and attachment cache, and a mis-edited
+   `authorized_keys` line would hand the CI key all of it:
    ```bash
-   adduser --disabled-password --gecos '' deploy
+   adduser --disabled-password --gecos '' --uid 1001 deploy   # not 1000: that uid owns the bot's data on disk
    install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
    printf 'deploy ALL=(root) NOPASSWD: /opt/slack-bot/deploy.sh\n' > /etc/sudoers.d/slack-bot-deploy
    chmod 440 /etc/sudoers.d/slack-bot-deploy && visudo -cf /etc/sudoers.d/slack-bot-deploy
