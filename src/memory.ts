@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { neutralizePromptDelimiters, sanitizeMetadataValue, sanitizeMemoryForInjection } from "./sanitize.js";
 import { dataDir, stateDir } from "./paths.js";
+import { serverChildEnv, userGitSetupEnv } from "./child-env.js";
 
 // --- qmd search index ---
 
@@ -13,6 +14,7 @@ const QMD_COLLECTION = "memory";
 function qmd(...args: string[]): string {
   return execFileSync("qmd", ["--index", QMD_INDEX, ...args], {
     encoding: "utf-8",
+    env: serverChildEnv(),
     stdio: ["pipe", "pipe", "pipe"],
     timeout: 10_000,
   }).trim();
@@ -75,18 +77,21 @@ export function resolveMemoryDir(repo?: string): string {
       execFileSync("git", ["pull", "--rebase", "--autostash"], {
         cwd: memoryDir,
         encoding: "utf-8",
+        env: serverChildEnv(),
         timeout: 30_000,
       });
       console.log("[memory] Pulled latest from git");
     } else {
       execFileSync("gh", ["repo", "clone", repo, memoryDir], {
         encoding: "utf-8",
+        env: serverChildEnv(),
         timeout: 30_000,
       });
       console.log(`[memory] Cloned ${repo} → ${memoryDir}`);
     }
     execFileSync("gh", ["auth", "setup-git"], {
       encoding: "utf-8",
+      env: userGitSetupEnv(),
       timeout: 10_000,
     });
     console.log("[memory] Registered gh credential helper for git");
@@ -106,16 +111,17 @@ function configureGitIdentity(memoryDir: string): void {
   try {
     const raw = execFileSync("gh", ["api", "user", "--jq", "{id,login,name}"], {
       encoding: "utf-8",
+      env: serverChildEnv(),
       timeout: 10_000,
     }).trim();
     const { id, login, name } = JSON.parse(raw);
     const gitName = name || login;
     const gitEmail = `${id}+${login}@users.noreply.github.com`;
     execFileSync("git", ["config", "user.name", gitName], {
-      cwd: memoryDir, encoding: "utf-8", timeout: 5_000,
+      cwd: memoryDir, encoding: "utf-8", env: serverChildEnv(), timeout: 5_000,
     });
     execFileSync("git", ["config", "user.email", gitEmail], {
-      cwd: memoryDir, encoding: "utf-8", timeout: 5_000,
+      cwd: memoryDir, encoding: "utf-8", env: serverChildEnv(), timeout: 5_000,
     });
     console.log(`[memory] Git identity: ${gitName} <${gitEmail}>`);
   } catch (err) {
@@ -140,12 +146,14 @@ export function clonePublicRepo(repo: string, localName: string, label: string):
       execFileSync("git", ["pull", "--rebase", "--autostash"], {
         cwd: dir,
         encoding: "utf-8",
+        env: serverChildEnv(),
         timeout: 30_000,
       });
       console.log(`[${label}] Pulled latest from ${repo}`);
     } else {
       execFileSync("gh", ["repo", "clone", repo, dir], {
         encoding: "utf-8",
+        env: serverChildEnv(),
         timeout: 30_000,
       });
       console.log(`[${label}] Cloned ${repo} → ${dir}`);

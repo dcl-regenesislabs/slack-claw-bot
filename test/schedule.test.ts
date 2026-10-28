@@ -526,4 +526,17 @@ describe("pushScheduleState", () => {
   it("resolves without side effects for a non-git directory", async () => {
     await pushScheduleState(base, true);
   });
+
+  it("commits without running hooks or config the agent could have planted in the clone", async () => {
+    const { clone } = initFixture();
+    const marker = join(base, "hook-ran");
+    const hooks = join(clone, ".git", "hooks");
+    mkdirSync(hooks, { recursive: true });
+    writeFileSync(join(hooks, "pre-commit"), `#!/bin/sh\ntouch "${marker}"\n`, { mode: 0o755 });
+    git(clone, "config", "core.hooksPath", hooks);
+    writeFileSync(schedulesFilePath(clone), JSON.stringify({ schedules: [] }), "utf-8");
+    await pushScheduleState(clone, false);
+    assert.ok(git(clone, "log", "--oneline").includes("schedules: update schedule state"));
+    assert.equal(existsSync(marker), false, "planted pre-commit hook ran under the server");
+  });
 });

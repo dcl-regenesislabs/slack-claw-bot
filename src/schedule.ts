@@ -8,6 +8,7 @@ import { createGuardedTools, type RunOptions } from "./agent.js";
 import { AgentScheduler } from "./concurrency.js";
 import { markdownToMrkdwn } from "./slack-utils.js";
 import { redactSecrets } from "./sanitize.js";
+import { serverChildEnv } from "./child-env.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -173,7 +174,7 @@ export function buildScheduleRunOptions(schedule: Schedule, memoryDir: string, n
 export async function pushScheduleState(memoryDir: string, includeStats: boolean): Promise<void> {
   if (!existsSync(join(memoryDir, ".git"))) return;
   const git = async (...args: string[]) => {
-    await execFileAsync("git", args, { cwd: memoryDir, timeout: 30_000 });
+    await execFileAsync("git", args, { cwd: memoryDir, timeout: 30_000, env: serverChildEnv() });
   };
   const paths = [schedulesFilePath(memoryDir)];
   if (includeStats) paths.push(statsFilePath(memoryDir));
