@@ -57,21 +57,36 @@ describe("buildPrompt", () => {
     assert.ok(result.includes("<slack-message>"));
   });
 
-  it("appends attached files section when files are provided", () => {
+  it("lists downloaded files by local path, never by URL or token", () => {
     const files = [
-      { name: "data.csv", mimetype: "text/csv", url: "https://files.slack.com/data.csv" },
-      { name: "image.png", mimetype: "image/png", url: "https://files.slack.com/image.png" },
+      { name: "data.csv", mimetype: "text/csv", url: "https://files.slack.com/data.csv", path: "/tmp/claw-attachments/F1.csv" },
+      { name: "image.png", mimetype: "image/png", url: "https://files.slack.com/image.png", path: "/tmp/claw-attachments/F2.png" },
     ];
     const result = buildPrompt("hello", false, undefined, false, files);
     assert.ok(result.includes("## Attached Files"));
-    assert.ok(result.includes("**data.csv** (text/csv)"));
-    assert.ok(result.includes("**image.png** (image/png)"));
-    assert.ok(result.includes("$SLACK_BOT_TOKEN"));
-    assert.ok(result.includes("https://files.slack.com/data.csv"));
+    assert.ok(result.includes("**data.csv** (text/csv)\n  Path: `/tmp/claw-attachments/F1.csv`"));
+    assert.ok(result.includes("**image.png** (image/png)\n  Path: `/tmp/claw-attachments/F2.png`"));
+    assert.ok(!result.includes("SLACK_BOT_TOKEN"));
+    assert.ok(!result.includes("files.slack.com"));
+  });
+
+  it("names files that have no local copy as not fetched, without a path or URL", () => {
+    const files = [{ name: "huge.mov", mimetype: "video/quicktime", url: "https://files.slack.com/huge.mov" }];
+    const result = buildPrompt("hello", false, undefined, false, files);
+    assert.ok(result.includes("Not fetched (unsupported type or over 50MB), unavailable to tools: **huge.mov** (video/quicktime)"));
+    assert.ok(!result.includes("Path:"));
+    assert.ok(!result.includes("files.slack.com"));
+  });
+
+  it("strips quotes, backticks and $ from uploader-chosen names, which sit outside the untrusted block", () => {
+    const files = [{ name: `a'$(rm -rf ~)'.csv`, mimetype: "text/csv", url: "https://files.slack.com/a.csv", path: "/tmp/claw-attachments/F9.csv" }];
+    const result = buildPrompt("hello", false, undefined, false, files);
+    assert.ok(result.includes("**a(rm -rf ~).csv**"));
+    assert.ok(!result.includes("'$("));
   });
 
   it("includes files in follow-up prompts", () => {
-    const files = [{ name: "report.pdf", mimetype: "application/pdf", url: "https://files.slack.com/report.pdf" }];
+    const files = [{ name: "report.pdf", mimetype: "application/pdf", url: "https://files.slack.com/report.pdf", path: "/tmp/claw-attachments/F3.pdf" }];
     const result = buildPrompt("check this", false, undefined, true, files);
     assert.ok(result.includes("<slack-message>"));
     assert.ok(result.includes("## Attached Files"));
@@ -118,12 +133,6 @@ describe("buildPrompt", () => {
     const files = [{ name: "x.csv", mimetype: "text/csv", url: "https://evil.example.com/x.csv" }];
     const result = buildPrompt("hello", false, undefined, false, files);
     assert.ok(!result.includes("evil.example.com"));
-  });
-
-  it("strips quotes from file names used in shell suggestions", () => {
-    const files = [{ name: `a'$(rm -rf ~)'.csv`, mimetype: "text/csv", url: "https://files.slack.com/a.csv" }];
-    const result = buildPrompt("hello", false, undefined, false, files);
-    assert.ok(!result.includes("'$("));
   });
 
   it("renders the channel id in the trusted header when provided", () => {

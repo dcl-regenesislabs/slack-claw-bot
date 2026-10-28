@@ -28,5 +28,14 @@ COPY skills/ skills/
 # small App Platform instances.
 RUN npm run build:dist
 
+# Run as the image's unprivileged `node` user. /app stays root-owned so a run (which has
+# write tools) can't edit dist/ or node_modules/ for the next run; everything the bot
+# writes goes to DATA_DIR (mount a volume there) or $HOME.
+RUN mkdir -p /data && chown node:node /data
+# node_modules/.bin on PATH: ensureQmd() spawns `qmd` directly, which only npm scripts resolve.
+ENV DATA_DIR=/data HOME=/home/node PATH=/app/node_modules/.bin:$PATH
+USER node
+
 ENTRYPOINT ["tini", "--"]
-CMD ["node", "dist/index.js"]
+# --import runs the secrets load + privilege drop before any module of the app is evaluated.
+CMD ["node", "--import", "./dist/preload.js", "dist/index.js"]

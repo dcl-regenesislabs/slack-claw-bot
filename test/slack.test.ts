@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { markdownToMrkdwn, isDeniedUser, pickImageUrl, sniffImageMime } from "../src/slack.js";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { markdownToMrkdwn, isDeniedUser, pickImageUrl, sniffImageMime, attachmentFilename, pruneAttachments } from "../src/slack.js";
 
 describe("markdownToMrkdwn", () => {
   it("converts bold markdown to mrkdwn", () => {
@@ -106,5 +109,50 @@ describe("sniffImageMime", () => {
 
   it("returns undefined for anything else", () => {
     assert.equal(sniffImageMime(Buffer.from("<html>")), undefined);
+  });
+});
+
+describe("attachmentFilename", () => {
+  it("names the local copy after the Slack file id, with an extension from the mimetype", () => {
+    assert.equal(attachmentFilename("F0ABC123", "image/png"), "F0ABC123.png");
+    assert.equal(attachmentFilename("F0ABC123", "video/quicktime"), "F0ABC123.mov");
+  });
+
+  it("does not name (so never fetches) mimetypes outside the table", () => {
+    assert.equal(attachmentFilename("F0ABC123", "application/octet-stream"), undefined);
+    assert.equal(attachmentFilename("F0ABC123", "application/x-sh"), undefined);
+  });
+
+  it("refuses ids that are not Slack file ids, so the name can never carry a path", () => {
+    assert.equal(attachmentFilename(undefined, "image/png"), undefined);
+    assert.equal(attachmentFilename("../etc/passwd", "image/png"), undefined);
+    assert.equal(attachmentFilename("f0abc123", "image/png"), undefined);
+  });
+});
+
+describe("pruneAttachments", () => {
+  it("evicts least recently used files until the cache fits its byte budget", () => {
+    const savedDataDir = process.env.DATA_DIR;
+    const base = mkdtempSync(join(tmpdir(), "attach-prune-"));
+    process.env.DATA_DIR = base;
+    try {
+      const dir = join(base, "claw-attachments");
+      mkdirSync(dir);
+      const now = Date.now();
+      const write = (name: string, bytes: number, ageMs: number) => {
+        const path = join(dir, name);
+        writeFileSync(path, Buffer.alloc(bytes));
+        utimesSync(path, new Date(now - ageMs), new Date(now - ageMs));
+      };
+      write("F1.png", 100, 3 * 24 * 3600 * 1000);
+      write("F2.png", 100, 2 * 24 * 3600 * 1000);
+      write("F3.png", 100, 1 * 24 * 3600 * 1000);
+      write("F4.png", 100, 20 * 24 * 3600 * 1000);
+      pruneAttachments(now, 250);
+      assert.deepEqual(readdirSync(dir).sort(), ["F2.png", "F3.png"]);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+      savedDataDir === undefined ? delete process.env.DATA_DIR : (process.env.DATA_DIR = savedDataDir);
+    }
   });
 });

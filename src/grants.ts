@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { serverChildEnv } from "./child-env.js";
 import { join } from "node:path";
 import type { WebClient } from "@slack/web-api";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -1171,7 +1172,7 @@ ${sections.learnings || "_(none yet)_"}
       return;
     }
     const git = (...args: string[]) =>
-      execFileSync("git", args, { cwd: this.memoryDir, encoding: "utf-8", timeout: 30_000 });
+      execFileSync("git", args, { cwd: this.memoryDir, encoding: "utf-8", timeout: 30_000, env: serverChildEnv() });
     try {
       // Stage all grants files (including new untracked files)
       git("add", "--all", "grants/");

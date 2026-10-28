@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { neutralizePromptDelimiters, sanitizeMetadataValue, sanitizeMemoryForInjection } from "./sanitize.js";
+import { dataDir, stateDir } from "./paths.js";
+import { serverChildEnv, userGitSetupEnv } from "./child-env.js";
 
 // --- qmd search index ---
 
@@ -12,6 +14,7 @@ const QMD_COLLECTION = "memory";
 function qmd(...args: string[]): string {
   return execFileSync("qmd", ["--index", QMD_INDEX, ...args], {
     encoding: "utf-8",
+    env: serverChildEnv(),
     stdio: ["pipe", "pipe", "pipe"],
     timeout: 10_000,
   }).trim();
@@ -69,25 +72,26 @@ export function reindexMemory(): void {
 
 export function resolveMemoryDir(repo?: string): string {
   if (repo) {
-    // realpathSync resolves macOS /var → /private/var symlink so qmd sees a stable path
-    const rawDir = join(tmpdir(), "claw-memory");
-    const memoryDir = existsSync(rawDir) ? realpathSync(rawDir) : realpathSync(tmpdir()) + "/claw-memory";
+    const memoryDir = stateDir("claw-memory");
     if (existsSync(join(memoryDir, ".git"))) {
       execFileSync("git", ["pull", "--rebase", "--autostash"], {
         cwd: memoryDir,
         encoding: "utf-8",
+        env: serverChildEnv(),
         timeout: 30_000,
       });
       console.log("[memory] Pulled latest from git");
     } else {
       execFileSync("gh", ["repo", "clone", repo, memoryDir], {
         encoding: "utf-8",
+        env: serverChildEnv(),
         timeout: 30_000,
       });
       console.log(`[memory] Cloned ${repo} → ${memoryDir}`);
     }
     execFileSync("gh", ["auth", "setup-git"], {
       encoding: "utf-8",
+      env: userGitSetupEnv(),
       timeout: 10_000,
     });
     console.log("[memory] Registered gh credential helper for git");
@@ -96,9 +100,10 @@ export function resolveMemoryDir(repo?: string): string {
     return memoryDir;
   }
 
-  const memoryDir = realpathSync(mkdtempSync(join(tmpdir(), "claw-memory-")));
+  // No repo: persistent under DATA_DIR when deployed, throwaway otherwise.
+  const memoryDir = dataDir() ? stateDir("claw-memory") : realpathSync(mkdtempSync(join(tmpdir(), "claw-memory-")));
   ensureMemoryDirs(memoryDir);
-  console.log(`[memory] Using temporary directory: ${memoryDir}`);
+  console.log(`[memory] Using local directory (no MEMORY_REPO): ${memoryDir}`);
   return memoryDir;
 }
 
@@ -106,16 +111,17 @@ function configureGitIdentity(memoryDir: string): void {
   try {
     const raw = execFileSync("gh", ["api", "user", "--jq", "{id,login,name}"], {
       encoding: "utf-8",
+      env: serverChildEnv(),
       timeout: 10_000,
     }).trim();
     const { id, login, name } = JSON.parse(raw);
     const gitName = name || login;
     const gitEmail = `${id}+${login}@users.noreply.github.com`;
     execFileSync("git", ["config", "user.name", gitName], {
-      cwd: memoryDir, encoding: "utf-8", timeout: 5_000,
+      cwd: memoryDir, encoding: "utf-8", env: serverChildEnv(), timeout: 5_000,
     });
     execFileSync("git", ["config", "user.email", gitEmail], {
-      cwd: memoryDir, encoding: "utf-8", timeout: 5_000,
+      cwd: memoryDir, encoding: "utf-8", env: serverChildEnv(), timeout: 5_000,
     });
     console.log(`[memory] Git identity: ${gitName} <${gitEmail}>`);
   } catch (err) {
@@ -135,19 +141,19 @@ function ensureMemoryDirs(memoryDir: string): void {
  */
 export function clonePublicRepo(repo: string, localName: string, label: string): string | null {
   try {
-    const rawDir = join(tmpdir(), localName);
-    const dir = existsSync(rawDir) ? realpathSync(rawDir) : realpathSync(tmpdir()) + "/" + localName;
-
+    const dir = stateDir(localName);
     if (existsSync(join(dir, ".git"))) {
       execFileSync("git", ["pull", "--rebase", "--autostash"], {
         cwd: dir,
         encoding: "utf-8",
+        env: serverChildEnv(),
         timeout: 30_000,
       });
       console.log(`[${label}] Pulled latest from ${repo}`);
     } else {
       execFileSync("gh", ["repo", "clone", repo, dir], {
         encoding: "utf-8",
+        env: serverChildEnv(),
         timeout: 30_000,
       });
       console.log(`[${label}] Cloned ${repo} → ${dir}`);

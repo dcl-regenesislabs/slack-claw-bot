@@ -58,6 +58,7 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 | `AGENT_TIMEOUT_MS` | No | Watchdog timeout per agent run in ms (default: 900000 = 15 min). Runs exceeding it are aborted and the error is posted to the thread |
 | `LOG_CHANNEL_ID` | No | Slack channel ID for audit logging |
 | `SLACK_SOCKET_MAX_SILENCE_MS` | No | Max ms the Socket Mode connection may stay down before the bot self-restarts via SIGTERM (default: 150000). Needs a supervisor that restarts the process |
+| `DATA_DIR` | No | Persistent state directory for the memory clone, sessions and attachments (the image sets `/data`). Unset: OS temp dir. Only without `ANTHROPIC_OAUTH_SETUP_TOKEN` does a `.auth.json` live here (project root when unset) |
 | `ALLOWED_TEAM_IDS` | No | Comma-separated Slack team IDs whose full members may use the bot, in addition to the bot's own workspace (e.g. the Decentraland team via Slack Connect). Guests are always denied |
 | `HEALTH_PORT` | No | Port for health check endpoint (`GET /health/live`) |
 | `MEMORY_REPO` | No | GitHub repo for persistent memory (e.g. `owner/claw-memory`) |
@@ -81,21 +82,23 @@ See [`.env.example`](.env.example) for all available options. Key variables:
 
 *\*Required for first-time setup if no `.auth.json` exists yet.*
 
+**What the agent can see.** The agent's shell does not inherit the server's environment: only `GITHUB_TOKEN`/`GH_TOKEN`, `POSTHOG_*` and `WEARABLE_VALIDATOR_TOKEN` (the credentials skills use) are forwarded, plus `PATH`/`HOME`/locale basics. The children the server spawns itself (`git`, `gh`, `qmd`) get the same scrubbed environment, with git hooks, `core.fsmonitor` and user/system config disabled, so a hook planted in the agent-writable memory clone runs with nothing the agent did not already have. The shell shares the server's uid, so it is the deployment, not a path check, that keeps the remaining secrets away from it: under `deploy/docker-compose.yml` the Slack tokens, the Anthropic setup token and the Discourse key are read from a root-only file before the process drops to `node`, never sit in any environment or file that uid can read, and the dropped process is non-dumpable, so its `/proc/<pid>/environ` and `/proc/<pid>/mem` are closed to the shell too. With the setup token set, the Anthropic credential lives only in memory — no `.auth.json` is written. A plain `docker run --env-file` or a local `.env` does **not** have that property: there the file tools' refusal of `.auth.json`/`.env*`/`/proc/<pid>` and bash's rejection of commands naming them is a speed bump a deliberate injection can step around. Thread attachments are downloaded by the server and handed to the agent as local files, so no skill needs the Slack token.
+
 ### Authentication (OAuth)
 
 All Anthropic auth uses OAuth — there is no API key path. The OAuth flow works like this:
 
 1. `ANTHROPIC_OAUTH_SETUP_TOKEN` is a **long-lived setup token** (from `claude setup-token`, valid ~1 year). It is itself the OAuth **access token** (`sk-ant-oat…`) — sent directly as the Bearer, not exchanged for anything.
-2. On first run the bot seeds `.auth.json` with that token in the `access` field and a far-future expiry, so the SDK uses it as-is and never attempts a refresh (a setup token is not a valid refresh-grant token — trying to exchange it fails with `No API key for provider: anthropic`).
-3. The auth state is persisted in `.auth.json`.
+2. When it is set, the bot holds it in an in-memory credential store with a far-future expiry, so the SDK uses it as-is and never attempts a refresh (a setup token is not a valid refresh-grant token — trying to exchange it fails with `No API key for provider: anthropic`). Nothing is written to disk.
+3. Without it, pi's `.auth.json` in the project root is used, with its normal refresh flow.
 
 **Getting started:**
 
-- **First run** — set `ANTHROPIC_OAUTH_SETUP_TOKEN` in `.env`. The bot writes `.auth.json` on startup and uses that going forward.
-- **Existing session** — copy `.auth.json` from another pi-agent or OpenDCL session into the project root. No env var needed.
-- **CLI** — works if `.auth.json` exists (`npm run cli`). No env var needed.
+- **Bot** — set `ANTHROPIC_OAUTH_SETUP_TOKEN` (`.env` locally, the secrets file on the droplet).
+- **Existing session** — copy `.auth.json` from another pi-agent or OpenDCL session into the project root and leave the env var unset.
+- **CLI** — either of the above (`npm run cli`).
 
-**Restarts:** `.auth.json` holds the working auth state. If it's lost on a container restart, the bot simply re-seeds from `ANTHROPIC_OAUTH_SETUP_TOKEN` — and because the setup token stays valid for ~1 year, that re-seed authenticates fine. No external token store is needed. Rotate the env token (and delete any stale `.auth.json`) once a year, or whenever auth starts failing with `No API key for provider: anthropic`.
+**Restarts:** nothing to persist. Rotate the setup token once a year, or whenever auth starts failing with `No API key for provider: anthropic`.
 
 ### Memory persistence (git)
 
@@ -118,7 +121,7 @@ Ask the bot to do something on a schedule ("@bot every weekday at 9am ARG post o
 - The runner validates entries independently of the skill: channel ids must match `^[CGD][A-Z0-9]+$`, crons may not fire more often than every 5 minutes, and at most 25 enabled schedules run.
 - Runs are ephemeral (no session, no memory load/save) and execute on a dedicated single-slot lane so schedules never starve interactive users. A schedule still running when its next fire comes due is skipped, not queued.
 - Scheduled runs can't manage schedules through any sanctioned path: the schedules-file location is delivered per-run through a trusted prompt header that only interactive Slack runs receive, and scheduled runs' write/edit tools refuse the schedules and runtime-skills directories (following symlinks) while their bash guard rejects commands referencing them (best-effort) — so injected content in a polled source can't rewrite the schedule set or plant a skill.
-- On DigitalOcean App Platform keep the worker at `instance_count: 1`; during a rolling deploy two instances briefly overlap, so a fire in that window can double-post (partially deduped via persisted stats).
+- Run exactly one instance. Compose stops the old container before starting the new one, so a deploy can't double-fire; two bots connected at once (e.g. during a host migration) would.
 
 ## Grants Agents (optional)
 
@@ -232,10 +235,14 @@ There is no MCP client in `src/` — sessions are built with `noExtensions: true
 
 ```bash
 docker build -t slack-issue-bot .
-docker run --env-file .env slack-issue-bot
+docker run --env-file .env -v slack-bot-data:/data slack-issue-bot
 ```
 
-Set `HEALTH_PORT=5000` (and expose the port) to enable the health check endpoint.
+The image runs as the unprivileged `node` user with `DATA_DIR=/data`: the memory clone, sessions and attachments live there, so mount a volume to keep them across restarts. `/app` is root-owned — a run's write tools can't change the code the next run executes. Set `HEALTH_PORT=5000` (and publish the port) for the health endpoint. Run this way, the secrets are in the container environment and readable by the agent's shell through `/proc` — fine for a trusted local test, not for production; see [Deployment](#deployment) for the Compose setup (`SECRETS_FILE` + `RUN_AS`) that avoids it.
+
+## Deployment
+
+Production is one DigitalOcean droplet running the image under Docker Compose; a GitHub release builds the image and redeploys over SSH. Setup, the secrets file, the CI deploy key and day-2 operations are in [`deploy/README.md`](deploy/README.md).
 
 ## Project structure
 

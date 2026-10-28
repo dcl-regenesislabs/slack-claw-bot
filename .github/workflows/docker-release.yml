@@ -38,10 +38,16 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
-        with:
-          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Trigger deployment
-        run: doctl apps create-deployment c47987bd-9935-4725-89f3-45b713b189bb --wait
+      # The key's authorized_keys entry carries a forced command (deploy/README.md), so this
+      # session can only run deploy.sh as the unprivileged deploy user (sudo is limited to that
+      # one script) — it cannot read the secrets file or open a root shell.
+      - name: Redeploy on the droplet
+        env:
+          SSH_KEY: ${{ secrets.DROPLET_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DROPLET_KNOWN_HOSTS }}
+          HOST: ${{ secrets.DROPLET_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes "deploy@$HOST"
