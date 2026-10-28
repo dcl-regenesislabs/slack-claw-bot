@@ -70,11 +70,19 @@ describe("buildPrompt", () => {
     assert.ok(!result.includes("files.slack.com"));
   });
 
-  it("omits files that have no local copy", () => {
+  it("names files that have no local copy as not fetched, without a path or URL", () => {
     const files = [{ name: "huge.mov", mimetype: "video/quicktime", url: "https://files.slack.com/huge.mov" }];
     const result = buildPrompt("hello", false, undefined, false, files);
-    assert.ok(!result.includes("## Attached Files"));
-    assert.ok(!result.includes("huge.mov"));
+    assert.ok(result.includes("Not fetched (unsupported type or over 50MB), unavailable to tools: **huge.mov** (video/quicktime)"));
+    assert.ok(!result.includes("Path:"));
+    assert.ok(!result.includes("files.slack.com"));
+  });
+
+  it("strips quotes, backticks and $ from uploader-chosen names, which sit outside the untrusted block", () => {
+    const files = [{ name: `a'$(rm -rf ~)'.csv`, mimetype: "text/csv", url: "https://files.slack.com/a.csv", path: "/tmp/claw-attachments/F9.csv" }];
+    const result = buildPrompt("hello", false, undefined, false, files);
+    assert.ok(result.includes("**a(rm -rf ~).csv**"));
+    assert.ok(!result.includes("'$("));
   });
 
   it("includes files in follow-up prompts", () => {
@@ -125,12 +133,6 @@ describe("buildPrompt", () => {
     const files = [{ name: "x.csv", mimetype: "text/csv", url: "https://evil.example.com/x.csv" }];
     const result = buildPrompt("hello", false, undefined, false, files);
     assert.ok(!result.includes("evil.example.com"));
-  });
-
-  it("strips quotes from file names used in shell suggestions", () => {
-    const files = [{ name: `a'$(rm -rf ~)'.csv`, mimetype: "text/csv", url: "https://files.slack.com/a.csv" }];
-    const result = buildPrompt("hello", false, undefined, false, files);
-    assert.ok(!result.includes("'$("));
   });
 
   it("renders the channel id in the trusted header when provided", () => {

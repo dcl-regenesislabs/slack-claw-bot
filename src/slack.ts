@@ -1,6 +1,9 @@
-import { existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
-import { writeFile, rename, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createWriteStream, readdirSync, statSync, unlinkSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { rename, readFile, stat, unlink, utimes } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { stateDir } from "./paths.js";
 import { App, LogLevel } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
@@ -520,17 +523,51 @@ function extractAttachments(files?: SlackFile[]): FileAttachment[] | undefined {
 // Deterministic per-file-id paths: a follow-up run reuses what an earlier run fetched.
 const attachmentsDir = () => stateDir("claw-attachments");
 const ATTACHMENT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const ATTACHMENT_CACHE_BUDGET_BYTES = 2 * 1024 * 1024 * 1024;
+const ATTACHMENT_IN_USE_MS = 60 * 60 * 1000;
+const PRUNE_INTERVAL_MS = 10 * 60 * 1000;
+let lastPruneAt = 0;
 
-/** Drop attachments no run has touched in two weeks; on a persistent volume nothing else would. */
-export function pruneAttachments(now = Date.now()): void {
+/** Drop attachments no run has used in two weeks, then the least recently used until the cache
+ * fits its byte budget — the volume also holds memory, sessions and the git clone. */
+export function pruneAttachments(now = Date.now(), budgetBytes = ATTACHMENT_CACHE_BUDGET_BYTES): void {
   const dir = attachmentsDir();
+  const kept: { path: string; size: number; mtimeMs: number }[] = [];
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     try {
-      if (now - statSync(path).mtimeMs > ATTACHMENT_MAX_AGE_MS) unlinkSync(path);
+      const st = statSync(path);
+      const maxAge = name.endsWith(".part") ? 60 * 60 * 1000 : ATTACHMENT_MAX_AGE_MS;
+      if (now - st.mtimeMs > maxAge) unlinkSync(path);
+      else kept.push({ path, size: st.size, mtimeMs: st.mtimeMs });
     } catch {
       // raced with a download or a concurrent prune — nothing to do
     }
+  }
+  let total = kept.reduce((sum, f) => sum + f.size, 0);
+  for (const f of kept.sort((a, b) => a.mtimeMs - b.mtimeMs)) {
+    if (total <= budgetBytes) break;
+    // A path handed to a run in the last hour may still be in use; a burst that cannot fit
+    // without those simply overshoots the budget until next time.
+    if (now - f.mtimeMs < ATTACHMENT_IN_USE_MS || f.path.endsWith(".part")) continue;
+    try {
+      unlinkSync(f.path);
+      total -= f.size;
+    } catch {
+      // same race as above
+    }
+  }
+}
+
+// readdir + stat per fetch is cheap, but a busy thread does not need it every message.
+function pruneAttachmentsThrottled(): void {
+  const now = Date.now();
+  if (now - lastPruneAt < PRUNE_INTERVAL_MS) return;
+  lastPruneAt = now;
+  try {
+    pruneAttachments(now);
+  } catch (err) {
+    console.warn("[slack] Attachment prune failed:", (err as Error).message);
   }
 }
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
@@ -561,8 +598,7 @@ export function attachmentFilename(id: string | undefined, mimetype: string): st
   return `${id}.${ext}`;
 }
 
-// Sequential on purpose: a thread is fetched once per session and every later fetch hits the
-// on-disk cache, so a burst of parallel 50MB downloads buys nothing but heap.
+// Sequential within a message; formatMessages bounds the parallelism across messages.
 async function downloadAttachments(files?: SlackFile[]): Promise<FileAttachment[]> {
   const attachments: FileAttachment[] = [];
   for (const f of namedFiles(files)) {
@@ -571,35 +607,77 @@ async function downloadAttachments(files?: SlackFile[]): Promise<FileAttachment[
     const filename = attachmentFilename(f.id, f.mimetype);
     if (!filename || (f.size ?? 0) > MAX_ATTACHMENT_BYTES) continue;
     const path = join(attachmentsDir(), filename);
-    if (existsSync(path)) {
+    const cached = await cachedAttachmentMatches(path, f.size);
+    if (cached || (await downloadSlackFileTo(f.url_private_download, path, MAX_ATTACHMENT_BYTES)) !== null) {
       attachments[attachments.length - 1] = { ...attachment, path };
-      continue;
-    }
-    const bytes = await downloadSlackFile(f.url_private_download, MAX_ATTACHMENT_BYTES);
-    if (!bytes) continue;
-    try {
-      // Temp + rename: a crash mid-write must not leave a truncated file existsSync will trust.
-      const partial = `${path}.${process.pid}.${Date.now()}.part`;
-      await writeFile(partial, bytes);
-      await rename(partial, path);
-      attachments[attachments.length - 1] = { ...attachment, path };
-    } catch (err) {
-      console.warn(`[slack] Could not store attachment ${filename}:`, (err as Error).message);
     }
   }
   return attachments;
 }
 
-/** Fetch a Slack-hosted file, giving up before `maxBytes` is exceeded (header first, then the stream). */
-async function downloadSlackFile(url: string | undefined, maxBytes: number): Promise<Buffer | null> {
+/** A cached copy counts only when its size matches what Slack reports: the directory is
+ * writable by the agent's shell (same uid), so a planted file of another size is re-fetched.
+ * A planted file of the right size is not caught — that needs the agent on its own uid. */
+async function cachedAttachmentMatches(path: string, size?: number): Promise<boolean> {
+  try {
+    const st = await stat(path);
+    if (size !== undefined && st.size !== size) return false;
+    const now = new Date();
+    await utimes(path, now, now);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Open a Slack-hosted file for streaming, or null when it is not one we may or can fetch. */
+async function openSlackFile(url: string | undefined, maxBytes: number): Promise<AsyncIterable<Uint8Array> | null> {
   if (!url || !botToken || !SLACK_FILE_URL.test(url)) return null;
   try {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${botToken}` } });
     if (!res.ok || !res.body) return null;
     if (Number(res.headers.get("content-length") ?? 0) > maxBytes) return null;
+    return res.body;
+  } catch {
+    return null;
+  }
+}
+
+/** Stream a Slack file to `dest`, never holding it in memory; aborts past `maxBytes`.
+ * Returns the byte count, or null when `dest` was left untouched. */
+async function downloadSlackFileTo(url: string | undefined, dest: string, maxBytes: number): Promise<number | null> {
+  const body = await openSlackFile(url, maxBytes);
+  if (!body) return null;
+  // Temp + rename: a crash mid-write must not leave a truncated file the cache would trust.
+  const partial = `${dest}.${process.pid}.${randomUUID()}.part`;
+  let total = 0;
+  const limit = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      total += chunk.length;
+      callback(total > maxBytes ? new Error(`exceeds ${maxBytes} bytes`) : null, chunk);
+    },
+  });
+  try {
+    // pipeline owns every stream's error event — an ENOSPC on the file must not surface as an
+    // uncaught exception, which index.ts turns into process.exit(1).
+    await pipeline(body, limit, createWriteStream(partial, { flags: "wx", mode: 0o644 }));
+    await rename(partial, dest);
+    return total;
+  } catch (err) {
+    await unlink(partial).catch(() => {});
+    console.warn(`[slack] Could not store attachment ${basename(dest)}:`, (err as Error).message);
+    return null;
+  }
+}
+
+/** Small files only (vision input, ≤5MB): buffered, bounded by the running total. */
+async function downloadSlackFile(url: string | undefined, maxBytes: number): Promise<Buffer | null> {
+  const body = await openSlackFile(url, maxBytes);
+  if (!body) return null;
+  try {
     const chunks: Buffer[] = [];
     let total = 0;
-    for await (const chunk of res.body) {
+    for await (const chunk of body) {
       total += chunk.length;
       if (total > maxBytes) return null;
       chunks.push(Buffer.from(chunk));
@@ -659,12 +737,12 @@ async function formatMessages(client: WebClient, messages: SlackMessage[]): Prom
     }),
   );
 
-  const images: ImageContent[] = [];
-  const files: FileAttachment[] = [];
-  const lines: string[] = [];
-  for (const m of messages) {
+  pruneAttachmentsThrottled();
+  // A few messages at a time: a 200-message thread of screenshots should not fetch serially,
+  // but every message's files in flight at once would be N × 50MB on the way to disk.
+  const formatted = await mapWithConcurrency(messages, 4, async (m) => {
     const attachments = await downloadAttachments(m.files);
-    files.push(...attachments);
+    const images: ImageContent[] = [];
     const name = userNames.get(m.user || "") || m.bot_profile?.name || m.username || "unknown";
     const ts = m.ts ? new Date(parseFloat(m.ts) * 1000).toISOString() : "";
     let line = `[${name}] (${ts}): ${extractEventText(m)}`;
@@ -681,10 +759,29 @@ async function formatMessages(client: WebClient, messages: SlackMessage[]): Prom
       }
       line += ` [attached: ${f.name}${f.mimetype ? ` (${f.mimetype})` : ""}${local ? "" : ", not available locally"}]`;
     }
-    lines.push(line);
-  }
+    return { line, attachments, images };
+  });
 
-  return { content: lines.join("\n"), images, files: files.length ? files : undefined };
+  const files = formatted.flatMap((m) => m.attachments);
+  return {
+    content: formatted.map((m) => m.line).join("\n"),
+    images: formatted.flatMap((m) => m.images),
+    files: files.length ? files : undefined,
+  };
+}
+
+/** `Promise.all` with at most `limit` tasks in flight; results keep input order. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 /** Vision bytes: the local copy when it is the original we would fetch anyway, else Slack's thumbnail. */
