@@ -344,7 +344,12 @@ export async function initAgent(config: AgentConfig): Promise<void> {
   if (config.timeoutMs) agentTimeoutMs = config.timeoutMs;
   sessionDir = stateDir("claw-sessions");
 
-  modelRuntime = await ModelRuntime.create(await credentialOptions(config.anthropicOAuthSetupToken));
+  // modelsPath null: ~/.pi/agent/models.json is agent-writable, and a provider entry there can
+  // point the OAuth bearer at another host or run a shell command for a header value.
+  modelRuntime = await ModelRuntime.create({
+    ...(await credentialOptions(config.anthropicOAuthSetupToken)),
+    modelsPath: null,
+  });
 
   defaultModelId = config.model || resolveDefaultModel();
   console.log(`[agent] default model: ${defaultModelId}`);
@@ -467,6 +472,31 @@ async function resolveSession(threadTs: string): Promise<{ sessionManager: Sessi
   }
 }
 
+export interface ResourceLoaderOptions {
+  cwd: string;
+  systemPrompt: string;
+  skillPaths: string[];
+  extensionFactories?: ExtensionFactory[];
+}
+
+/** Loads only the paths given here. pi's own discovery under `~/.pi/agent/` and `~/.agents/`
+ * (AGENTS.md, skills) is off: `$HOME` is agent-writable, so a file planted there by one run
+ * would become trusted system-prompt content for every later session. */
+export function createResourceLoader(options: ResourceLoaderOptions): DefaultResourceLoader {
+  return new DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir: getAgentDir(),
+    additionalSkillPaths: options.skillPaths,
+    systemPrompt: options.systemPrompt,
+    extensionFactories: options.extensionFactories ?? [],
+    noExtensions: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noSkills: true,
+    noContextFiles: true,
+  });
+}
+
 async function createSession(
   modelId: string,
   memoryContent: string,
@@ -481,19 +511,15 @@ async function createSession(
   if (!model) throw new Error(`Model "anthropic/${modelId}" not found`);
 
   const cwd = process.cwd();
-  const resourceLoader = new DefaultResourceLoader({
+  const resourceLoader = createResourceLoader({
     cwd,
-    agentDir: getAgentDir(),
-    additionalSkillPaths: [
+    systemPrompt,
+    skillPaths: [
       ...(extraSkillPaths ?? []),
       join(projectDir, "skills"),
       ...(memoryDir ? [join(memoryDir, "skills")] : []),
     ],
-    systemPrompt,
     extensionFactories: memoryContent ? [createMemoryExtension(memoryContent)] : [],
-    noExtensions: true,
-    noPromptTemplates: true,
-    noThemes: true,
   });
   await resourceLoader.reload();
 
